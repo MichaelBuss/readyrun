@@ -1,0 +1,3 @@
+# Worker Adapters with Custom, not a bin string as the product
+
+A Worker is spawned through a Worker Adapter, the same defineConfig shape as `tracker: github()`. v0 implements `cursor` and `claude` (two real coding CLIs) and `custom({ bin, args })` so unknown CLIs are not stuck behind a package change. Codex is later. A closed Cursor-only set was rejected because the other consumer may not be Cursor. The Worker Adapter owns invocation (prompt, model, cwd) and is where usage stats will live later; it does not own CLI auth, and it is not a vendor SDK. Tracker Adapter remains a different job: mapping issues to Tickets.

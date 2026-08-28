@@ -1,0 +1,3 @@
+# Success takes the Ticket off the Frontier; Adapter default, optional override
+
+A successful Worker must make its Ticket ineligible for the Frontier, or the next iteration will start the same Ticket until the cap. v0 does that with an Adapter default, not a required hook: Linear moves to In Review and never Done (Done means merged); GitHub drops the frontier label, comments, and does not close. A Consumer may override. Closing GitHub issues (or Linear Done) as the default was rejected because “implemented” is not “shipped,” and a required onFinished plugin was rejected because the invariant is already served by the Adapter.

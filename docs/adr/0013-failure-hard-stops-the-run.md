@@ -1,0 +1,3 @@
+# Failure hard-stops the Run; no skip, no retry-forever
+
+Tracker API or auth failure, Branch/Worktree failure, Worker missing or not logged in at spawn, and Worker non-zero exit all end the Run. Skipping a failed Ticket was rejected: it needs a new Frontier state or the next iteration retries the same Ticket, and it hides the failure behind later work. Retry-with-backoff was rejected: without another cap it is retry-forever. Empty Frontier and the Ticket cap remain clean stops. The harness authenticates to the Tracker (`gh`, Linear); the Worker Adapter does not log the user into Cursor or Claude — Doctor checks what it can before spawn.
