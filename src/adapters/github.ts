@@ -22,5 +22,17 @@ export type GitHubTrackerOptions = {
 
 export function github(options: GitHubTrackerOptions): TrackerAdapter {
   assertKnownKeys(options, knownGitHubKeys);
-  return Object.assign(createTrackerAdapter(), { options });
+  return Object.assign(
+    createTrackerAdapter({
+      inspect() {
+        return Promise.resolve({
+          existingLabels: options.labels,
+          selectorLabels: options.labels,
+          repository: options.repo,
+          canExpressBlocking: true,
+        });
+      },
+    }),
+    { options },
+  );
 }

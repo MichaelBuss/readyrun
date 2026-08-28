@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { defineConfig, type ReadyRunConfig } from "./config.ts";
+import { doctorCheck, warnUnusedModelsByLabel } from "./doctor.ts";
 import { createTicketWorktree } from "./git.ts";
 import { composeWorkerPrompt } from "./prompt.ts";
 import type { Ticket } from "./ticket.ts";
@@ -21,24 +22,6 @@ export class RunCapRequiredError extends Error {
   constructor() {
     super("A Run cannot start without a cap");
     this.name = "RunCapRequiredError";
-  }
-}
-
-function warnUnusedModelsByLabel(
-  stdout: RunStdout,
-  modelsByLabel: Record<string, string> | undefined,
-  frontier: Ticket[],
-): void {
-  if (modelsByLabel === undefined) {
-    return;
-  }
-  const present = new Set(frontier.flatMap((ticket) => ticket.labels));
-  for (const label of Object.keys(modelsByLabel)) {
-    if (!present.has(label)) {
-      stdout.write(
-        `Warning: modelsByLabel key "${label}" matches no Tickets on the Frontier\n`,
-      );
-    }
   }
 }
 
@@ -76,6 +59,9 @@ export async function run(options: RunOptions): Promise<number> {
 
   const cwd = options.cwd ?? process.cwd();
   const stdout = options.stdout ?? process.stdout;
+  if (await doctorCheck(config, cwd, stdout) === 1) {
+    return 1;
+  }
   const context = config.contextFile === undefined
     ? undefined
     : await readFile(join(cwd, config.contextFile), "utf8");

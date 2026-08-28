@@ -44,6 +44,28 @@ async function defaultBranch(cwd: string): Promise<string> {
   }
 }
 
+export async function originRepository(cwd: string): Promise<string | undefined> {
+  try {
+    return parseOwnerRepo(await git(cwd, ["remote", "get-url", "origin"]));
+  } catch {
+    return undefined;
+  }
+}
+
+export function normalizeRepository(value: string): string {
+  return value.trim().replace(/\/+$/, "").replace(/\.git$/i, "").toLowerCase();
+}
+
+function parseOwnerRepo(url: string): string | undefined {
+  const trimmed = normalizeRepository(url);
+  const ssh = trimmed.match(/^git@[^:]+:(.+\/.+)$/);
+  if (ssh?.[1] !== undefined) {
+    return ssh[1];
+  }
+  const path = trimmed.match(/[:/]([^/]+\/[^/]+)$/);
+  return path?.[1];
+}
+
 export async function createTicketWorktree(
   cwd: string,
   branch: string,
