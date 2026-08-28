@@ -45,5 +45,8 @@ export function memoryTracker(options: MemoryTrackerOptions): TrackerAdapter {
       ineligible.add(ticket.id);
       return Promise.resolve();
     },
+    promptCopy(ticket) {
+      return `This Ticket is ${ticket.id} on the in-memory Tracker.\nTitle: ${ticket.title}\n\n${ticket.body}\n\n${ticket.url}`;
+    },
   });
 }
