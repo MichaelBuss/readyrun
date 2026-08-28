@@ -32,7 +32,11 @@ test("a Run with cap 1 against one unblocked Ticket starts exactly one Worker wi
   try {
     await run({
       config: defineConfig({
-        tracker: memoryTracker({ tickets: [ticket] }),
+        tracker: memoryTracker({
+          tickets: [ticket],
+          ready: "unblocked",
+          labels: ["ready-for-agent"],
+        }),
         worker,
         model: "composer-2",
       }),
@@ -66,7 +70,11 @@ test("ReadyRun creates a Branch derived from the Ticket's identity; the Ticket b
   try {
     await run({
       config: defineConfig({
-        tracker: memoryTracker({ tickets: [ticket] }),
+        tracker: memoryTracker({
+          tickets: [ticket],
+          ready: "unblocked",
+          labels: ["ready-for-agent"],
+        }),
         worker: recordingWorker({ exitCode: 0 }),
         model: "composer-2",
       }),
@@ -92,7 +100,11 @@ test("ReadyRun refuses to start a Worker on the default branch", async () => {
       () =>
         run({
           config: defineConfig({
-            tracker: memoryTracker({ tickets: [ticket] }),
+            tracker: memoryTracker({
+              tickets: [ticket],
+              ready: "unblocked",
+              labels: ["ready-for-agent"],
+            }),
             worker,
             model: "composer-2",
           }),
@@ -118,7 +130,11 @@ test("the Worker runs in a git Worktree on that Branch, not in the Consumer's pr
   try {
     await run({
       config: defineConfig({
-        tracker: memoryTracker({ tickets: [ticket] }),
+        tracker: memoryTracker({
+          tickets: [ticket],
+          ready: "unblocked",
+          labels: ["ready-for-agent"],
+        }),
         worker,
         model: "composer-2",
       }),
@@ -139,7 +155,11 @@ test("the Worker runs in a git Worktree on that Branch, not in the Consumer's pr
 
 test("on Worker success, the Ticket leaves the Frontier via the Tracker Adapter default", async () => {
   const repo = await throwawayRepo();
-  const tracker = memoryTracker({ tickets: [ticket] });
+  const tracker = memoryTracker({
+    tickets: [ticket],
+    ready: "unblocked",
+    labels: ["ready-for-agent"],
+  });
   try {
     await run({
       config: defineConfig({
@@ -161,7 +181,11 @@ test("on Worker success, the Ticket leaves the Frontier via the Tracker Adapter 
 
 test("a Consumer may override the Tracker Adapter's leave-Frontier default", async () => {
   const repo = await throwawayRepo();
-  const tracker = memoryTracker({ tickets: [ticket] });
+  const tracker = memoryTracker({
+    tickets: [ticket],
+    ready: "unblocked",
+    labels: ["ready-for-agent"],
+  });
   const overridden: string[] = [];
   try {
     await run({
@@ -193,7 +217,11 @@ test("live status on stdout shows the current Ticket, cap used, and Branch", asy
   try {
     await run({
       config: defineConfig({
-        tracker: memoryTracker({ tickets: [ticket] }),
+        tracker: memoryTracker({
+          tickets: [ticket],
+          ready: "unblocked",
+          labels: ["ready-for-agent"],
+        }),
         worker: recordingWorker({ exitCode: 0 }),
         model: "composer-2",
       }),
@@ -229,7 +257,11 @@ test("hitting the cap stops the Run without prompting", async () => {
   try {
     await run({
       config: defineConfig({
-        tracker: memoryTracker({ tickets: [ticket, second] }),
+        tracker: memoryTracker({
+          tickets: [ticket, second],
+          ready: "unblocked",
+          labels: ["ready-for-agent"],
+        }),
         worker,
         model: "composer-2",
       }),
