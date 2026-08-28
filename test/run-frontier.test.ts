@@ -1,0 +1,284 @@
+import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { test } from "node:test";
+import { promisify } from "node:util";
+import { defineConfig, run } from "../src/mod.ts";
+import { memoryTracker, recordingWorker } from "../src/testing/mod.ts";
+import { createWorkerAdapter } from "../src/worker-adapter.ts";
+import { ticket } from "./tracker-adapter-contract.ts";
+import { throwawayRepo } from "./throwaway-repo.ts";
+
+const exec = promisify(execFile);
+const silent = { write(_chunk?: string) { return true; } };
+
+async function git(cwd: string, args: string[]): Promise<string> {
+  const { stdout } = await exec("git", ["-C", cwd, ...args], {
+    encoding: "utf8",
+  });
+  return stdout.trim();
+}
+
+test("a blocked Ticket is never picked, even if it matches the selector", async () => {
+  const repo = await throwawayRepo();
+  const worker = recordingWorker({ exitCode: 0 });
+  try {
+    await run({
+      config: defineConfig({
+        tracker: memoryTracker({
+          tickets: [
+            ticket({ id: "52", labels: ["other"] }),
+            ticket({ id: "53", blockedBy: ["52"] }),
+          ],
+          ready: "unblocked",
+          labels: ["ready-for-agent"],
+        }),
+        worker,
+        model: "composer-2",
+      }),
+      cap: 2,
+      cwd: repo.cwd,
+      stdout: silent,
+    });
+
+    assert.deepEqual(worker.spawns.map((spawn) => spawn.ticket.id), []);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("the Consumer selector filters which Tickets a Run picks", async () => {
+  const repo = await throwawayRepo();
+  const worker = recordingWorker({ exitCode: 0 });
+  try {
+    await run({
+      config: defineConfig({
+        tracker: memoryTracker({
+          tickets: [
+            ticket({ id: "52", labels: ["ready-for-agent"] }),
+            ticket({ id: "99", labels: ["other"] }),
+          ],
+          ready: "unblocked",
+          labels: ["ready-for-agent"],
+        }),
+        worker,
+        model: "composer-2",
+      }),
+      cap: 2,
+      cwd: repo.cwd,
+      stdout: silent,
+    });
+
+    assert.deepEqual(worker.spawns.map((spawn) => spawn.ticket.id), ["52"]);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("an optional parent root narrows a Run to that parent's children", async () => {
+  const repo = await throwawayRepo();
+  const worker = recordingWorker({ exitCode: 0 });
+  try {
+    await run({
+      config: defineConfig({
+        tracker: memoryTracker({
+          tickets: [
+            ticket({ id: "11", parent: "8" }),
+            ticket({ id: "12", parent: "9" }),
+            ticket({ id: "8" }),
+          ],
+          ready: "unblocked",
+          labels: ["ready-for-agent"],
+          parent: "8",
+        }),
+        worker,
+        model: "composer-2",
+      }),
+      cap: 3,
+      cwd: repo.cwd,
+      stdout: silent,
+    });
+
+    assert.deepEqual(worker.spawns.map((spawn) => spawn.ticket.id), ["11"]);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("an optional ids root narrows a Run to that explicit list of Ticket ids", async () => {
+  const repo = await throwawayRepo();
+  const worker = recordingWorker({ exitCode: 0 });
+  try {
+    await run({
+      config: defineConfig({
+        tracker: memoryTracker({
+          tickets: [
+            ticket({ id: "52" }),
+            ticket({ id: "53" }),
+            ticket({ id: "57" }),
+          ],
+          ready: "unblocked",
+          labels: ["ready-for-agent"],
+          ids: ["52", "57"],
+        }),
+        worker,
+        model: "composer-2",
+      }),
+      cap: 3,
+      cwd: repo.cwd,
+      stdout: silent,
+    });
+
+    assert.deepEqual(worker.spawns.map((spawn) => spawn.ticket.id), ["52", "57"]);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("pick order is the adapter's stable ascending identifier order", async () => {
+  const repo = await throwawayRepo();
+  const worker = recordingWorker({ exitCode: 0 });
+  try {
+    await run({
+      config: defineConfig({
+        tracker: memoryTracker({
+          tickets: [ticket({ id: "57" }), ticket({ id: "52" })],
+          ready: "unblocked",
+          labels: ["ready-for-agent"],
+        }),
+        worker,
+        model: "composer-2",
+      }),
+      cap: 2,
+      cwd: repo.cwd,
+      stdout: silent,
+    });
+
+    assert.deepEqual(worker.spawns.map((spawn) => spawn.ticket.id), ["52", "57"]);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("the Frontier is recomputed after each Ticket so newly unblocked work is eligible in the same Run", async () => {
+  const repo = await throwawayRepo();
+  const worker = recordingWorker({ exitCode: 0 });
+  try {
+    await run({
+      config: defineConfig({
+        tracker: memoryTracker({
+          tickets: [
+            ticket({ id: "52" }),
+            ticket({ id: "53", blockedBy: ["52"] }),
+          ],
+          ready: "unblocked",
+          labels: ["ready-for-agent"],
+        }),
+        worker,
+        model: "composer-2",
+      }),
+      cap: 2,
+      cwd: repo.cwd,
+      stdout: silent,
+    });
+
+    assert.deepEqual(worker.spawns.map((spawn) => spawn.ticket.id), ["52", "53"]);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("an empty Frontier stops the Run as a clean finish, not an error", async () => {
+  const repo = await throwawayRepo();
+  const worker = recordingWorker({ exitCode: 0 });
+  try {
+    await run({
+      config: defineConfig({
+        tracker: memoryTracker({
+          tickets: [ticket({ id: "99", labels: ["other"] })],
+          ready: "unblocked",
+          labels: ["ready-for-agent"],
+        }),
+        worker,
+        model: "composer-2",
+      }),
+      cap: 3,
+      cwd: repo.cwd,
+      stdout: silent,
+    });
+
+    assert.equal(worker.spawns.length, 0);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("a v0 Run starts one Worker at a time; each Ticket still gets its own Branch and Worktree", async () => {
+  const repo = await throwawayRepo();
+  let inFlight = 0;
+  let maxInFlight = 0;
+  const worker = createWorkerAdapter({
+    async spawn() {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      inFlight -= 1;
+      return { exitCode: 0 };
+    },
+  });
+  try {
+    await run({
+      config: defineConfig({
+        tracker: memoryTracker({
+          tickets: [ticket({ id: "52" }), ticket({ id: "57" })],
+          ready: "unblocked",
+          labels: ["ready-for-agent"],
+        }),
+        worker,
+        model: "composer-2",
+      }),
+      cap: 2,
+      cwd: repo.cwd,
+      stdout: silent,
+    });
+
+    assert.equal(maxInFlight, 1);
+    await git(repo.cwd, ["rev-parse", "--verify", "refs/heads/readyrun/52"]);
+    await git(repo.cwd, ["rev-parse", "--verify", "refs/heads/readyrun/57"]);
+    const worktrees = await git(repo.cwd, ["worktree", "list", "--porcelain"]);
+    assert.match(worktrees, /readyrun\/52/);
+    assert.match(worktrees, /readyrun\/57/);
+    assert.equal(await git(repo.cwd, ["rev-parse", "--abbrev-ref", "HEAD"]), "main");
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("the Worker is given one Ticket, never a tree", async () => {
+  const repo = await throwawayRepo();
+  const worker = recordingWorker({ exitCode: 0 });
+  try {
+    await run({
+      config: defineConfig({
+        tracker: memoryTracker({
+          tickets: [
+            ticket({ id: "8" }),
+            ticket({ id: "11", parent: "8" }),
+            ticket({ id: "12", parent: "8" }),
+          ],
+          ready: "unblocked",
+          labels: ["ready-for-agent"],
+          parent: "8",
+        }),
+        worker,
+        model: "composer-2",
+      }),
+      cap: 3,
+      cwd: repo.cwd,
+      stdout: silent,
+    });
+
+    assert.deepEqual(worker.spawns.map((spawn) => spawn.ticket.id), ["11", "12"]);
+  } finally {
+    await repo.cleanup();
+  }
+});

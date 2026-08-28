@@ -5,4 +5,5 @@ export type Ticket = {
   url: string;
   labels: string[];
   blockedBy: string[];
+  parent?: string;
 };

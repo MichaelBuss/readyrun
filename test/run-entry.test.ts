@@ -27,6 +27,8 @@ function consumerConfig(overrides: { cap?: number } = {}) {
           blockedBy: ["52"],
         },
       ],
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
     }),
     worker: recordingWorker({ exitCode: 0 }),
     model: "composer-2",
