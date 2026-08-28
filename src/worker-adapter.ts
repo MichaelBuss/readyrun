@@ -2,9 +2,14 @@ import type { Ticket } from "./ticket.ts";
 
 const brand = Symbol("WorkerAdapter");
 
+export type Permissions = "ask" | "unattended";
+
 export type SpawnRequest = {
   ticket: Ticket;
   cwd: string;
+  model: string;
+  permissions: Permissions;
+  prompt: string;
 };
 
 export type WorkerAdapter = {
