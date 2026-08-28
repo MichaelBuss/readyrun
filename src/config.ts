@@ -1,6 +1,6 @@
 import type { Ticket } from "./ticket.ts";
 import type { TrackerAdapter } from "./tracker-adapter.ts";
-import type { WorkerAdapter } from "./worker-adapter.ts";
+import type { Permissions, WorkerAdapter } from "./worker-adapter.ts";
 import { assertKnownKeys } from "./unknown-keys.ts";
 
 const knownConfigKeys = new Set([
@@ -19,14 +19,14 @@ export type ReadyRunConfig = {
   worker: WorkerAdapter;
   model: string;
   modelsByLabel?: Record<string, string>;
-  permissions?: "ask" | "unattended";
+  permissions?: Permissions;
   contextFile?: string;
   cap?: number;
   leaveFrontier?: (ticket: Ticket) => void | Promise<void>;
 };
 
 export function defineConfig<T extends ReadyRunConfig>(config: T): T & {
-  permissions: "ask" | "unattended";
+  permissions: Permissions;
 } {
   assertKnownKeys(config, knownConfigKeys);
   return {

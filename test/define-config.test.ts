@@ -30,7 +30,10 @@ test("a Consumer can assemble defineConfig with typed Tracker Adapter and Worker
       ready: "unblocked",
       labels: ["ready-for-agent"],
     }),
-    worker: custom({ bin: "my-agent" }),
+    worker: custom({
+      bin: "my-agent",
+      unattendedFlag: "--dangerously-skip-permissions",
+    }),
     model: "local-model",
   });
   assert.equal(customConfig.model, "local-model");
@@ -47,6 +50,14 @@ test("Permissions default to ask", () => {
     model: "composer-2",
   });
   assert.equal(config.permissions, "ask");
+});
+
+test("a custom Worker Adapter is told which unattended flag to use", () => {
+  const worker = custom({
+    bin: "my-agent",
+    unattendedFlag: "--dangerously-skip-permissions",
+  });
+  assert.equal(worker.options.unattendedFlag, "--dangerously-skip-permissions");
 });
 
 test("unknown config keys are an error, not ignored", () => {
