@@ -1,0 +1,19 @@
+{
+  "name": "@readyrun/readyrun",
+  "version": "0.0.0",
+  "exports": {
+    ".": "./src/mod.ts"
+  },
+  "publish": {
+    "include": [
+      "src/**/*.ts",
+      "LICENSE",
+      "README.md",
+      "jsr.json"
+    ],
+    "exclude": [
+      "**/*.test.ts",
+      "src/testing/**"
+    ]
+  }
+}
