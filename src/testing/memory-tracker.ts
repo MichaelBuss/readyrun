@@ -7,6 +7,8 @@ export type MemoryTrackerOptions = {
   labels: string[];
   parent?: string;
   ids?: string[];
+  existingLabels?: string[];
+  canExpressBlocking?: boolean;
 };
 
 export function memoryTracker(options: MemoryTrackerOptions): TrackerAdapter {
@@ -47,6 +49,19 @@ export function memoryTracker(options: MemoryTrackerOptions): TrackerAdapter {
     },
     promptCopy(ticket) {
       return `This Ticket is ${ticket.id} on the in-memory Tracker.\nTitle: ${ticket.title}\n\n${ticket.body}\n\n${ticket.url}`;
+    },
+    inspect() {
+      const existingLabels = options.existingLabels ?? [
+        ...new Set([
+          ...options.labels,
+          ...options.tickets.flatMap((ticket) => ticket.labels),
+        ]),
+      ];
+      return Promise.resolve({
+        existingLabels,
+        selectorLabels: options.labels,
+        canExpressBlocking: options.canExpressBlocking ?? true,
+      });
     },
   });
 }

@@ -14,15 +14,18 @@ export type SpawnRequest = {
 
 export type WorkerAdapter = {
   readonly [brand]: true;
+  readonly bin?: string;
   spawn(request: SpawnRequest): Promise<{ exitCode: number }>;
 };
 
 export function createWorkerAdapter(
-  methods: Pick<WorkerAdapter, "spawn"> = {
+  methods: Partial<Pick<WorkerAdapter, "spawn" | "bin">> = {},
+): WorkerAdapter {
+  return {
+    [brand]: true,
     spawn() {
       return Promise.reject(new Error("Worker Adapter cannot spawn"));
     },
-  },
-): WorkerAdapter {
-  return { [brand]: true, ...methods };
+    ...methods,
+  };
 }
