@@ -1,3 +1,4 @@
+import type { Ticket } from "./ticket.ts";
 import type { TrackerAdapter } from "./tracker-adapter.ts";
 import type { WorkerAdapter } from "./worker-adapter.ts";
 import { assertKnownKeys } from "./unknown-keys.ts";
@@ -10,6 +11,7 @@ const knownConfigKeys = new Set([
   "permissions",
   "contextFile",
   "cap",
+  "leaveFrontier",
 ]);
 
 export type ReadyRunConfig = {
@@ -20,6 +22,7 @@ export type ReadyRunConfig = {
   permissions?: "ask" | "unattended";
   contextFile?: string;
   cap?: number;
+  leaveFrontier?: (ticket: Ticket) => void | Promise<void>;
 };
 
 export function defineConfig<T extends ReadyRunConfig>(config: T): T & {
