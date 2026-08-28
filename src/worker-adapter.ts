@@ -1,9 +1,23 @@
+import type { Ticket } from "./ticket.ts";
+
 const brand = Symbol("WorkerAdapter");
+
+export type SpawnRequest = {
+  ticket: Ticket;
+  cwd: string;
+};
 
 export type WorkerAdapter = {
   readonly [brand]: true;
+  spawn(request: SpawnRequest): Promise<{ exitCode: number }>;
 };
 
-export function createWorkerAdapter(): WorkerAdapter {
-  return { [brand]: true };
+export function createWorkerAdapter(
+  methods: Pick<WorkerAdapter, "spawn"> = {
+    spawn() {
+      return Promise.reject(new Error("Worker Adapter cannot spawn"));
+    },
+  },
+): WorkerAdapter {
+  return { [brand]: true, ...methods };
 }
