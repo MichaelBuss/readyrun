@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { defineConfig, run, RunCapRequiredError } from "../src/mod.ts";
 import { memoryTracker, recordingWorker } from "../src/testing/mod.ts";
+import { throwawayRepo } from "./throwaway-repo.ts";
+
+const silent = { write(_chunk?: string) { return true; } };
 
 function consumerConfig(overrides: { cap?: number } = {}) {
   return defineConfig({
@@ -32,7 +35,12 @@ function consumerConfig(overrides: { cap?: number } = {}) {
 }
 
 test("tests assemble config with a fake Tracker Adapter and fake Worker Adapter and invoke the same entry the CLI will use", async () => {
-  await run({ config: consumerConfig(), cap: 1 });
+  const repo = await throwawayRepo();
+  try {
+    await run({ config: consumerConfig(), cap: 1, cwd: repo.cwd, stdout: silent });
+  } finally {
+    await repo.cleanup();
+  }
 });
 
 test("a Run without a cap is refused", async () => {
@@ -47,5 +55,10 @@ test("a Run without a cap is refused", async () => {
 });
 
 test("a Run accepts a cap supplied in config", async () => {
-  await run({ config: consumerConfig({ cap: 1 }) });
+  const repo = await throwawayRepo();
+  try {
+    await run({ config: consumerConfig({ cap: 1 }), cwd: repo.cwd, stdout: silent });
+  } finally {
+    await repo.cleanup();
+  }
 });
