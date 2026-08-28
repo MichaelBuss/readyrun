@@ -95,30 +95,31 @@ test("ReadyRun creates a Branch derived from the Ticket's identity; the Ticket b
 test("ReadyRun refuses to start a Worker on the default branch", async () => {
   const repo = await throwawayRepo({ defaultBranch: "readyrun/52" });
   const worker = recordingWorker({ exitCode: 0 });
+  const chunks: string[] = [];
   try {
-    await assert.rejects(
-      () =>
-        run({
-          config: defineConfig({
-            tracker: memoryTracker({
-              tickets: [ticket],
-              ready: "unblocked",
-              labels: ["ready-for-agent"],
-            }),
-            worker,
-            model: "composer-2",
-          }),
-          cap: 1,
-          cwd: repo.cwd,
-          stdout: silent,
+    const exitCode = await run({
+      config: defineConfig({
+        tracker: memoryTracker({
+          tickets: [ticket],
+          ready: "unblocked",
+          labels: ["ready-for-agent"],
         }),
-      (error: unknown) => {
-        assert.ok(error instanceof Error);
-        assert.match(error.message, /default branch/);
-        return true;
+        worker,
+        model: "composer-2",
+      }),
+      cap: 1,
+      cwd: repo.cwd,
+      stdout: {
+        write(chunk: string) {
+          chunks.push(chunk);
+          return true;
+        },
       },
-    );
+    });
+    assert.equal(exitCode, 1);
     assert.equal(worker.spawns.length, 0);
+    assert.match(chunks.join(""), /Hard stop: Ticket 52 failed at git/);
+    assert.match(chunks.join(""), /default branch/);
   } finally {
     await repo.cleanup();
   }
