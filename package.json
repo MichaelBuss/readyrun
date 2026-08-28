@@ -5,8 +5,7 @@
   "license": "MIT",
   "type": "module",
   "exports": {
-    ".": "./src/mod.ts",
-    "./testing": "./src/testing/mod.ts"
+    ".": "./src/mod.ts"
   },
   "files": [
     "src",

@@ -2,8 +2,7 @@
   "name": "@readyrun/readyrun",
   "version": "0.0.0",
   "exports": {
-    ".": "./src/mod.ts",
-    "./testing": "./src/testing/mod.ts"
+    ".": "./src/mod.ts"
   },
   "publish": {
     "include": [
@@ -13,7 +12,8 @@
       "jsr.json"
     ],
     "exclude": [
-      "**/*.test.ts"
+      "**/*.test.ts",
+      "src/testing/**"
     ]
   }
 }
