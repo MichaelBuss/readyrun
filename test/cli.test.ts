@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -268,9 +268,8 @@ test("multiple config files of the same basename are refused", async () => {
   );
 });
 
-test("invoking the readyrun binary with no arguments prints usage", async () => {
-  const bin = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
-  const result = await promisify(execFile)(process.execPath, [bin], {
+async function invokeCli(bin: string): Promise<{ stdout: string; status: number }> {
+  return promisify(execFile)(process.execPath, [bin], {
     encoding: "utf8",
   }).then(
     (ok) => ({ stdout: ok.stdout, status: 0 }),
@@ -279,8 +278,28 @@ test("invoking the readyrun binary with no arguments prints usage", async () => 
       status: error.code ?? 1,
     }),
   );
+}
+
+test("invoking the readyrun binary with no arguments prints usage", async () => {
+  const bin = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
+  const result = await invokeCli(bin);
   assert.equal(result.status, 1);
   assert.match(result.stdout, /Usage: readyrun/);
+});
+
+test("invoking the CLI through a symlink still starts", async () => {
+  await mkdir(tmpRoot, { recursive: true });
+  const dir = await mkdtemp(join(tmpRoot, "bin-link-"));
+  try {
+    const target = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
+    const link = join(dir, "readyrun");
+    await symlink(target, link);
+    const result = await invokeCli(link);
+    assert.equal(result.status, 1);
+    assert.match(result.stdout, /Usage: readyrun/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 const initAnswers = {
