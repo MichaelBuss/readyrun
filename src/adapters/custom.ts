@@ -1,5 +1,7 @@
 import {
   createWorkerAdapter,
+  spawnWorkerBinary,
+  type SpawnRequest,
   type WorkerAdapter,
 } from "../worker-adapter.ts";
 import { assertKnownKeys } from "../unknown-keys.ts";
@@ -18,5 +20,20 @@ export type CustomWorkerAdapter = WorkerAdapter & {
 
 export function custom(options: CustomWorkerOptions): CustomWorkerAdapter {
   assertKnownKeys(options, knownCustomKeys);
-  return Object.assign(createWorkerAdapter({ bin: options.bin }), { options });
+  return Object.assign(
+    createWorkerAdapter({
+      bin: options.bin,
+      spawn(request: SpawnRequest) {
+        const args = [
+          ...(options.args ?? []),
+          "--model",
+          request.model,
+          ...(request.permissions === "unattended" ? [options.unattendedFlag] : []),
+          request.prompt,
+        ];
+        return spawnWorkerBinary(options.bin, args, request.cwd);
+      },
+    }),
+    { options },
+  );
 }

@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import type { Ticket } from "./ticket.ts";
 
 const brand = Symbol("WorkerAdapter");
@@ -28,4 +29,18 @@ export function createWorkerAdapter(
     },
     ...methods,
   };
+}
+
+export function spawnWorkerBinary(
+  bin: string,
+  args: string[],
+  cwd: string,
+): Promise<{ exitCode: number }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(bin, args, { cwd, stdio: "inherit" });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      resolve({ exitCode: code ?? 1 });
+    });
+  });
 }
