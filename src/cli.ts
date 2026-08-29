@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { doctor as doctorEntry, type DoctorOptions } from "./doctor.ts";
+import { init as initEntry, type InitAnswers, type InitOptions } from "./init.ts";
 import { run as runEntry, RunCapRequiredError, type RunOptions } from "./run.ts";
 import type { ReadyRunConfig } from "./config.ts";
 import type { Permissions } from "./worker-adapter.ts";
@@ -12,6 +13,7 @@ type Writer = { write(chunk: string): unknown };
 const usage = `Usage: readyrun <command>
 
 Commands:
+  init
   run --max <n> [--model <id>] [--permissions ask|unattended]
   doctor
 
@@ -75,6 +77,8 @@ export type CliOptions = {
   loadConfig?: (cwd: string) => Promise<ReadyRunConfig>;
   run?: (options: RunOptions) => Promise<number>;
   doctor?: (options: DoctorOptions) => Promise<number>;
+  init?: (options: InitOptions) => Promise<number>;
+  answers?: InitAnswers;
 };
 
 type RunFlags = {
@@ -117,6 +121,13 @@ function parseRunFlags(args: string[]):
 export async function cli(options: CliOptions): Promise<number> {
   const stdout = options.stdout ?? process.stdout;
   const command = options.argv[0];
+  if (command === "init") {
+    const invoke = options.init ?? initEntry;
+    return invoke({
+      cwd: options.cwd ?? process.cwd(),
+      answers: options.answers,
+    });
+  }
   if (command !== "run" && command !== "doctor") {
     stdout.write(usage);
     return 1;
