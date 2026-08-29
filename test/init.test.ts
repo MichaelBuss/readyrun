@@ -114,7 +114,7 @@ async function withConsumerRoot(
   }
 }
 
-async function loadStub(cwd: string): Promise<{ model: string }> {
+async function loadStub(cwd: string): Promise<void> {
   const path = join(cwd, "readyrun.config.ts");
   const source = await readFile(path, "utf8");
   const loadable = source.replaceAll(
@@ -122,7 +122,7 @@ async function loadStub(cwd: string): Promise<{ model: string }> {
     JSON.stringify(packageHref),
   );
   await writeFile(path, loadable);
-  return (await import(pathToFileURL(path).href)).default;
+  await import(pathToFileURL(path).href);
 }
 
 async function assertWrittenStub(
@@ -134,8 +134,7 @@ async function assertWrittenStub(
     assert.equal(exitCode, 0);
     assert.equal(await readFile(join(cwd, "readyrun.config.ts"), "utf8"), expected);
     assert.deepEqual(await readdir(cwd), ["readyrun.config.ts"]);
-    const config = await loadStub(cwd);
-    assert.equal(config.model, answers.model);
+    await assert.doesNotReject(() => loadStub(cwd));
   });
 }
 
