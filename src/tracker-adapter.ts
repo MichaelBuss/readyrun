@@ -5,6 +5,10 @@ const brand = Symbol("TrackerAdapter");
 export type TrackerInspect = {
   readonly existingLabels: readonly string[];
   readonly selectorLabels: readonly string[];
+  readonly existingStates?: readonly string[];
+  readonly selectorState?: string;
+  readonly existingProjects?: readonly string[];
+  readonly selectorProject?: string;
   readonly repository?: string;
   readonly canExpressBlocking: boolean;
 };
