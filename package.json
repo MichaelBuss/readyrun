@@ -4,6 +4,9 @@
   "description": "Walk a tracker Frontier and run one coding Worker per Ticket.",
   "license": "MIT",
   "type": "module",
+  "bin": {
+    "readyrun": "./src/cli.ts"
+  },
   "exports": {
     ".": "./src/mod.ts"
   },
