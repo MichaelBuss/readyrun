@@ -2,6 +2,8 @@ export { defineConfig } from "./config.ts";
 export type { ReadyRunConfig } from "./config.ts";
 export { doctor } from "./doctor.ts";
 export type { DoctorOptions } from "./doctor.ts";
+export { init } from "./init.ts";
+export type { InitAnswers, InitOptions } from "./init.ts";
 export { run, RunCapRequiredError } from "./run.ts";
 export type { RunOptions } from "./run.ts";
 export { DefaultBranchError } from "./git.ts";
