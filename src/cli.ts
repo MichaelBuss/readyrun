@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { doctor as doctorEntry, type DoctorOptions } from "./doctor.ts";
 import { init as initEntry, type InitAnswers, type InitOptions } from "./init.ts";
 import { run as runEntry, RunCapRequiredError, type RunOptions } from "./run.ts";
@@ -177,7 +177,11 @@ function isCliEntry(): boolean {
   if (argv1 === undefined) {
     return false;
   }
-  return import.meta.url === pathToFileURL(resolve(argv1)).href;
+  try {
+    return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(argv1);
+  } catch {
+    return import.meta.url === pathToFileURL(resolve(argv1)).href;
+  }
 }
 
 if (isCliEntry()) {
