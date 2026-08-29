@@ -1,8 +1,5 @@
-import {
-  createWorkerAdapter,
-  type WorkerAdapter,
-} from "../worker-adapter.ts";
+import { printModeWorker, type WorkerAdapter } from "../worker-adapter.ts";
 
 export function claude(): WorkerAdapter {
-  return createWorkerAdapter();
+  return printModeWorker("claude", "--dangerously-skip-permissions");
 }
