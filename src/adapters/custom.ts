@@ -18,5 +18,5 @@ export type CustomWorkerAdapter = WorkerAdapter & {
 
 export function custom(options: CustomWorkerOptions): CustomWorkerAdapter {
   assertKnownKeys(options, knownCustomKeys);
-  return Object.assign(createWorkerAdapter(), { options });
+  return Object.assign(createWorkerAdapter({ bin: options.bin }), { options });
 }
