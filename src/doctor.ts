@@ -32,6 +32,20 @@ async function check(
       failures.push(`label "${label}" does not exist on the Tracker`);
     }
   }
+  if (
+    inspect.selectorState !== undefined &&
+    !(inspect.existingStates ?? []).includes(inspect.selectorState)
+  ) {
+    failures.push(`state "${inspect.selectorState}" does not exist on the Tracker`);
+  }
+  if (
+    inspect.selectorProject !== undefined &&
+    !(inspect.existingProjects ?? []).includes(inspect.selectorProject)
+  ) {
+    failures.push(
+      `project "${inspect.selectorProject}" does not exist on the Tracker`,
+    );
+  }
   if (inspect.repository !== undefined) {
     const remote = await originRepository(cwd);
     if (remote !== normalizeRepository(inspect.repository)) {
