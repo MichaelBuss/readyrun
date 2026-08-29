@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { cli, loadConfig } from "../src/cli.ts";
-import { defineConfig, type DoctorOptions, type RunOptions } from "../src/mod.ts";
+import { defineConfig, type DoctorOptions, type InitOptions, type RunOptions } from "../src/mod.ts";
 import { memoryTracker, recordingWorker } from "../src/testing/mod.ts";
 
 const silent = { write(_chunk?: string) { return true; } };
@@ -68,6 +68,7 @@ test("bare readyrun prints usage rather than opening a menu", async () => {
   });
   const output = chunks.join("");
   assert.match(output, /Usage: readyrun/);
+  assert.match(output, /init/);
   assert.match(output, /run --max/);
   assert.match(output, /doctor/);
   assert.doesNotMatch(output, /menu|wizard|select/i);
@@ -280,4 +281,71 @@ test("invoking the readyrun binary with no arguments prints usage", async () => 
   );
   assert.equal(result.status, 1);
   assert.match(result.stdout, /Usage: readyrun/);
+});
+
+const initAnswers = {
+  tracker: {
+    kind: "github" as const,
+    repo: "acme/widgets",
+    labels: ["ready-for-agent"],
+  },
+  worker: { kind: "cursor" as const },
+  model: "composer-2",
+};
+
+test("readyrun init hands answers to the same writer the tests call", async () => {
+  const received: InitOptions[] = [];
+  const exitCode = await cli({
+    argv: ["init"],
+    cwd: "/consumer",
+    stdout: silent,
+    answers: initAnswers,
+    init: async (options) => {
+      received.push(options);
+      return 0;
+    },
+  });
+  assert.equal(exitCode, 0);
+  assert.equal(received.length, 1);
+  assert.equal(received[0]?.cwd, "/consumer");
+  assert.equal(received[0]?.answers, initAnswers);
+});
+
+test("init does not assemble a run command", async () => {
+  let ran = false;
+  const exitCode = await cli({
+    argv: ["init"],
+    cwd: "/consumer",
+    stdout: silent,
+    answers: initAnswers,
+    run: async () => {
+      ran = true;
+      return 0;
+    },
+    init: async () => 0,
+  });
+  assert.equal(exitCode, 0);
+  assert.equal(ran, false);
+});
+
+test("init writes the stub without loading a config file", async () => {
+  await withConsumerRoot(
+    async () => {},
+    async (cwd) => {
+      let loaded = false;
+      const exitCode = await cli({
+        argv: ["init"],
+        cwd,
+        stdout: silent,
+        answers: initAnswers,
+        loadConfig: async () => {
+          loaded = true;
+          return config;
+        },
+      });
+      assert.equal(exitCode, 0);
+      assert.equal(loaded, false);
+      assert.deepEqual(await readdir(cwd), ["readyrun.config.ts"]);
+    },
+  );
 });
