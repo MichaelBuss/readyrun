@@ -4,7 +4,19 @@ A TypeScript CLI that walks a tracker **Frontier** and runs one coding **Worker*
 
 This repo is the product. It is not SpeechDeck. SpeechDeck (and later Trackunit) will *depend* on it.
 
-v0 is specced, not implemented. Spec: [`docs/specs/readyrun-v0.md`](./docs/specs/readyrun-v0.md). Language: [`CONTEXT.md`](./CONTEXT.md). Decisions: [`docs/adr/`](./docs/adr/).
+Spec: [`docs/specs/readyrun-v0.md`](./docs/specs/readyrun-v0.md). Language: [`CONTEXT.md`](./CONTEXT.md). Decisions: [`docs/adr/`](./docs/adr/).
+
+Package: `@readyrun/readyrun` on [JSR](https://jsr.io/@readyrun/readyrun), not npmjs.com. A **Consumer** installs with npm/pnpm/yarn through JSR’s compatibility layer, then writes `readyrun.config.ts`.
+
+```sh
+pnpm add jsr:@readyrun/readyrun
+# npm:
+npx jsr add @readyrun/readyrun
+```
+
+```ts
+import { defineConfig, github, cursor } from "@readyrun/readyrun";
+```
 
 ```sh
 readyrun init
@@ -12,4 +24,12 @@ readyrun doctor
 readyrun run --max 5
 ```
 
-Package: JSR, once it exists. Config in the consumer: `readyrun.config.ts`.
+JSR does not put `readyrun` on PATH. Run the `cli` export as a program (do not import it):
+
+```sh
+deno run -A jsr:@readyrun/readyrun/cli init
+deno run -A jsr:@readyrun/readyrun/cli doctor
+deno run -A jsr:@readyrun/readyrun/cli run --max 5
+```
+
+From this repo, `package.json` `bin` maps `readyrun` to `src/cli.ts` (Node 24).

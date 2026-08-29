@@ -1,6 +1,6 @@
 # ReadyRun v0
 
-Vocabulary in this document is the glossary in [`CONTEXT.md`](../../CONTEXT.md). Decisions it rests on are [`docs/adr/`](../adr/) 0001–0019.
+Vocabulary in this document is the glossary in [`CONTEXT.md`](../../CONTEXT.md). Decisions it rests on are [`docs/adr/`](../adr/) 0001–0020.
 
 ## Problem Statement
 
@@ -121,7 +121,7 @@ A Run cannot start without a cap on how many Tickets it may start, so an unatten
 
 ### Shape and distribution
 
-- ReadyRun is its own repo and its own JSR package. It does not live inside a **Consumer**, and SpeechDeck is a consumer of it rather than its home (ADR 0001).
+- ReadyRun is its own repo and its own JSR package. It does not live inside a **Consumer**, and SpeechDeck is a consumer of it rather than its home (ADR 0001). It is not published to npmjs.com; a **Consumer** still installs with npm/pnpm/yarn through JSR’s compatibility layer. The CLI is the `cli` export, run as a program — JSR does not put `readyrun` on PATH (ADR 0020).
 - The public surface is a `defineConfig` function plus adapter factory functions. A **Consumer** selects one **Tracker Adapter** and one **Worker Adapter** by calling the corresponding factory. Unknown keys are rejected rather than ignored (ADR 0009, 0018).
 - Config lives in one `readyrun.config.ts` at the Consumer root, with JS and MJS accepted under the same basename. There is no search across candidate filenames and no generated scripts directory (ADR 0018).
 - The product name is ReadyRun and the binary is `readyrun`. Spur was rejected after a collision check found two existing agent harnesses shipping a `spur` binary (ADR 0015).
