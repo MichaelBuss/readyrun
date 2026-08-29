@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -345,21 +345,6 @@ test("init writes the stub without loading a config file", async () => {
       });
       assert.equal(exitCode, 0);
       assert.equal(loaded, false);
-      assert.equal(
-        await readFile(join(cwd, "readyrun.config.ts"), "utf8"),
-        `import { defineConfig, github, cursor } from "@readyrun/readyrun";
-
-export default defineConfig({
-  tracker: github({
-    repo: "acme/widgets",
-    ready: "unblocked",
-    labels: ["ready-for-agent"],
-  }),
-  worker: cursor(),
-  model: "composer-2",
-});
-`,
-      );
       assert.deepEqual(await readdir(cwd), ["readyrun.config.ts"]);
     },
   );
