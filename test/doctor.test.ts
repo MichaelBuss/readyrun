@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { test } from "node:test";
 import { promisify } from "node:util";
-import { defineConfig, custom, doctor, github, run, UnknownConfigKeyError } from "../src/mod.ts";
+import { defineConfig, custom, doctor, run, UnknownConfigKeyError } from "../src/mod.ts";
 import type { ReadyRunConfig } from "../src/mod.ts";
 import { memoryTracker, recordingWorker } from "../src/testing/mod.ts";
 import { createTrackerAdapter } from "../src/tracker-adapter.ts";
+import { githubFromWorld } from "./github-http-fixture.ts";
 import { ticket } from "./tracker-adapter-contract.ts";
 import { throwawayRepo } from "./throwaway-repo.ts";
 
@@ -110,12 +111,13 @@ test("a configured repository that is not the git remote fails Doctor and a Run 
     "git@github.com:other/place.git",
   ]);
   const chunks: string[] = [];
+  const { adapter } = githubFromWorld({
+    tickets: [ticket({ id: "52" })],
+    ready: "unblocked",
+    labels: ["ready-for-agent"],
+  });
   const config = defineConfig({
-    tracker: github({
-      repo: "acme/widgets",
-      ready: "unblocked",
-      labels: ["ready-for-agent"],
-    }),
+    tracker: adapter,
     worker,
     model: "composer-2",
   });
