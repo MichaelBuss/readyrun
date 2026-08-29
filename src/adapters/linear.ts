@@ -201,85 +201,54 @@ export function linear(
       false;
   }
 
-  async function existingLabels(): Promise<string[]> {
-    const names: string[] = [];
+  async function paginate<T, N>(
+    operationName: string,
+    query: string,
+    connection: (data: T) => { pageInfo: PageInfo; nodes: (N | null)[] },
+  ): Promise<N[]> {
+    const nodes: N[] = [];
     let cursor: string | null = null;
     while (true) {
-      const data: IssueLabelsData = await graphql<IssueLabelsData>(
-        "IssueLabels",
-        issueLabelsQuery,
-        { cursor },
-      );
-      for (const node of data.issueLabels.nodes) {
+      const data: T = await graphql<T>(operationName, query, { cursor });
+      const page = connection(data);
+      for (const node of page.nodes) {
         if (node !== null) {
-          names.push(node.name);
+          nodes.push(node);
         }
       }
-      if (!data.issueLabels.pageInfo.hasNextPage) {
+      if (!page.pageInfo.hasNextPage) {
         break;
       }
-      cursor = data.issueLabels.pageInfo.endCursor;
+      cursor = page.pageInfo.endCursor;
     }
-    return names;
-  }
-
-  async function existingStates(): Promise<StateNode[]> {
-    const states: StateNode[] = [];
-    let cursor: string | null = null;
-    while (true) {
-      const data: WorkflowStatesData = await graphql<WorkflowStatesData>(
-        "WorkflowStates",
-        workflowStatesQuery,
-        { cursor },
-      );
-      for (const node of data.workflowStates.nodes) {
-        if (node !== null) {
-          states.push(node);
-        }
-      }
-      if (!data.workflowStates.pageInfo.hasNextPage) {
-        break;
-      }
-      cursor = data.workflowStates.pageInfo.endCursor;
-    }
-    return states;
-  }
-
-  async function existingProjects(): Promise<string[]> {
-    const names: string[] = [];
-    let cursor: string | null = null;
-    while (true) {
-      const data: ProjectsData = await graphql<ProjectsData>(
-        "Projects",
-        projectsQuery,
-        { cursor },
-      );
-      for (const node of data.projects.nodes) {
-        if (node !== null) {
-          names.push(node.name);
-        }
-      }
-      if (!data.projects.pageInfo.hasNextPage) {
-        break;
-      }
-      cursor = data.projects.pageInfo.endCursor;
-    }
-    return names;
+    return nodes;
   }
 
   async function inspect() {
     const [labels, states, projects, blocking] = await Promise.all([
-      existingLabels(),
-      existingStates(),
-      existingProjects(),
+      paginate<IssueLabelsData, LabelNode>(
+        "IssueLabels",
+        issueLabelsQuery,
+        (data) => data.issueLabels,
+      ),
+      paginate<WorkflowStatesData, StateNode>(
+        "WorkflowStates",
+        workflowStatesQuery,
+        (data) => data.workflowStates,
+      ),
+      paginate<ProjectsData, ProjectNode>(
+        "Projects",
+        projectsQuery,
+        (data) => data.projects,
+      ),
       canExpressBlocking(),
     ]);
     return {
-      existingLabels: labels,
+      existingLabels: labels.map((label) => label.name),
       selectorLabels: options.label === undefined ? [] : [options.label],
       existingStates: states.map((state) => state.name),
       selectorState: options.state,
-      existingProjects: projects,
+      existingProjects: projects.map((project) => project.name),
       selectorProject: options.project,
       canExpressBlocking: blocking,
     };
@@ -292,29 +261,22 @@ export function linear(
         if (!blocking) {
           throw new Error("Linear cannot express blocking");
         }
-        const tickets: Ticket[] = [];
         suggestedBranches.clear();
-        let cursor: string | null = null;
-        while (true) {
-          const data: FrontierData = await graphql<FrontierData>(
-            "Frontier",
-            frontierQuery,
-            { cursor },
-          );
-          for (const node of data.issues.nodes) {
-            if (node === null || !matchesFrontier(node, options)) {
-              continue;
-            }
-            const ticket = toTicket(node);
-            tickets.push(ticket);
-            if (node.branchName !== null && node.branchName.length > 0) {
-              suggestedBranches.set(ticket.id, node.branchName);
-            }
+        const issues = await paginate<FrontierData, IssueNode>(
+          "Frontier",
+          frontierQuery,
+          (data) => data.issues,
+        );
+        const tickets: Ticket[] = [];
+        for (const node of issues) {
+          if (!matchesFrontier(node, options)) {
+            continue;
           }
-          if (!data.issues.pageInfo.hasNextPage) {
-            break;
+          const ticket = toTicket(node);
+          tickets.push(ticket);
+          if (node.branchName !== null && node.branchName.length > 0) {
+            suggestedBranches.set(ticket.id, node.branchName);
           }
-          cursor = data.issues.pageInfo.endCursor;
         }
         return tickets.sort((a, b) =>
           a.id.localeCompare(b.id, undefined, { numeric: true }),
