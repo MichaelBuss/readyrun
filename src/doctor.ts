@@ -20,7 +20,13 @@ async function check(
   if (typeof config.model !== "string" || config.model.length === 0) {
     failures.push("missing model default");
   }
-  const inspect = await config.tracker.inspect();
+  let inspect;
+  try {
+    inspect = await config.tracker.inspect();
+  } catch (error) {
+    failures.push(error instanceof Error ? error.message : String(error));
+    return failures;
+  }
   for (const label of inspect.selectorLabels) {
     if (!inspect.existingLabels.includes(label)) {
       failures.push(`label "${label}" does not exist on the Tracker`);
