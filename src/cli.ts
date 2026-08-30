@@ -6,7 +6,7 @@ import { doctor as doctorEntry, type DoctorOptions } from "./doctor.ts";
 import { init as initEntry, type InitAnswers, type InitOptions } from "./init.ts";
 import { run as runEntry, RunCapRequiredError, type RunOptions } from "./run.ts";
 import type { ReadyRunConfig } from "./config.ts";
-import type { Permissions } from "./worker-adapter.ts";
+import { isEffort, type Effort, type Permissions } from "./worker-adapter.ts";
 
 type Writer = { write(chunk: string): unknown };
 
@@ -14,7 +14,7 @@ const usage = `Usage: readyrun <command>
 
 Commands:
   init
-  run --max <n> [--model <id>] [--permissions ask|unattended]
+  run --max <n> [--model <id>] [--permissions ask|unattended] [--effort low|medium|high|xhigh|max]
   doctor
 
 A Run cannot start without a cap.
@@ -85,6 +85,7 @@ type RunFlags = {
   cap?: number;
   permissions?: Permissions;
   model?: string;
+  effort?: Effort;
 };
 
 function parseRunFlags(args: string[]):
@@ -93,6 +94,7 @@ function parseRunFlags(args: string[]):
   let cap: number | undefined;
   let permissions: Permissions | undefined;
   let model: string | undefined;
+  let effort: Effort | undefined;
   let sawMax = false;
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
@@ -110,12 +112,22 @@ function parseRunFlags(args: string[]):
     } else if (arg === "--model") {
       model = args[i + 1];
       i += 1;
+    } else if (arg === "--effort") {
+      const value = args[i + 1];
+      if (value === undefined || !isEffort(value)) {
+        return {
+          ok: false,
+          message: "Effort must be low, medium, high, xhigh, or max",
+        };
+      }
+      effort = value;
+      i += 1;
     }
   }
   if (sawMax && (cap === undefined || !Number.isInteger(cap) || cap < 1)) {
     return { ok: false, message: "A Run cannot start without a cap" };
   }
-  return { ok: true, cap, permissions, model };
+  return { ok: true, cap, permissions, model, effort };
 }
 
 export async function cli(options: CliOptions): Promise<number> {
@@ -159,6 +171,7 @@ export async function cli(options: CliOptions): Promise<number> {
         stdout,
         permissions: runFlags.permissions,
         model: runFlags.model,
+        effort: runFlags.effort,
       });
     } catch (error) {
       if (error instanceof RunCapRequiredError) {
