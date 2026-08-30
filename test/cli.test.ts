@@ -152,6 +152,38 @@ test("permissions default to ask unless the operator passes unattended", async (
   assert.equal(received[1]?.permissions, "unattended");
 });
 
+test("--effort overrides the config default for this Run", async () => {
+  const received: RunOptions[] = [];
+  const exitCode = await cli({
+    argv: ["run", "--max", "1", "--effort", "high"],
+    stdout: silent,
+    loadConfig: async () => config,
+    run: async (options) => {
+      received.push(options);
+      return 0;
+    },
+  });
+  assert.equal(exitCode, 0);
+  assert.equal(received[0]?.effort, "high");
+});
+
+test("Effort must be low, medium, high, xhigh, or max", async () => {
+  const chunks: string[] = [];
+  const exitCode = await cli({
+    argv: ["run", "--max", "1", "--effort", "yolo"],
+    stdout: {
+      write(chunk: string) {
+        chunks.push(chunk);
+        return true;
+      },
+    },
+    loadConfig: async () => config,
+    run: async () => 0,
+  });
+  assert.equal(exitCode, 1);
+  assert.match(chunks.join(""), /Effort must be low, medium, high, xhigh, or max/);
+});
+
 test("--model overrides the config default for this Run", async () => {
   const received: RunOptions[] = [];
   await cli({

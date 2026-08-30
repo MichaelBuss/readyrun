@@ -9,7 +9,7 @@ export type { RunOptions } from "./run.ts";
 export { DefaultBranchError } from "./git.ts";
 export type { Ticket } from "./ticket.ts";
 export type { TrackerAdapter, TrackerInspect } from "./tracker-adapter.ts";
-export type { Permissions, SpawnRequest, WorkerAdapter } from "./worker-adapter.ts";
+export type { Effort, Permissions, SpawnRequest, WorkerAdapter } from "./worker-adapter.ts";
 export { UnknownConfigKeyError } from "./unknown-keys.ts";
 export { github } from "./adapters/github.ts";
 export type { GitHubTrackerOptions } from "./adapters/github.ts";

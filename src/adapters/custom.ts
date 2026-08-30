@@ -23,11 +23,13 @@ export function custom(options: CustomWorkerOptions): CustomWorkerAdapter {
   return Object.assign(
     createWorkerAdapter({
       bin: options.bin,
+      effortFlag: "--effort",
       spawn(request: SpawnRequest) {
         const args = [
           ...(options.args ?? []),
           "--model",
           request.model,
+          ...(request.effort !== undefined ? ["--effort", request.effort] : []),
           ...(request.permissions === "unattended" ? [options.unattendedFlag] : []),
           request.prompt,
         ];

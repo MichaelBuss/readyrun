@@ -1,6 +1,6 @@
 import type { Ticket } from "./ticket.ts";
 import type { TrackerAdapter } from "./tracker-adapter.ts";
-import type { Permissions, WorkerAdapter } from "./worker-adapter.ts";
+import type { Effort, Permissions, WorkerAdapter } from "./worker-adapter.ts";
 import { assertKnownKeys } from "./unknown-keys.ts";
 
 const knownConfigKeys = new Set([
@@ -9,6 +9,7 @@ const knownConfigKeys = new Set([
   "model",
   "modelsByLabel",
   "permissions",
+  "effort",
   "contextFile",
   "cap",
   "leaveFrontier",
@@ -20,6 +21,7 @@ export type ReadyRunConfig = {
   model: string;
   modelsByLabel?: Record<string, string>;
   permissions?: Permissions;
+  effort?: Effort;
   contextFile?: string;
   cap?: number;
   leaveFrontier?: (ticket: Ticket) => void | Promise<void>;
