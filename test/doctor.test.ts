@@ -2,16 +2,45 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { test } from "node:test";
 import { promisify } from "node:util";
+import { cli } from "../src/cli.ts";
 import { defineConfig, custom, doctor, run, UnknownConfigKeyError } from "../src/mod.ts";
 import type { ReadyRunConfig } from "../src/mod.ts";
 import { memoryTracker, recordingWorker } from "../src/testing/mod.ts";
 import { createTrackerAdapter } from "../src/tracker-adapter.ts";
+import { createWorkerAdapter } from "../src/worker-adapter.ts";
 import { githubFromWorld } from "./github-http-fixture.ts";
 import { ticket } from "./tracker-adapter-contract.ts";
 import { throwawayRepo } from "./throwaway-repo.ts";
 
 const exec = promisify(execFile);
 const silent = { write(_chunk?: string) { return true; } };
+const unmappedEffort = /Doctor: effort is set but this Worker Adapter does not map it/;
+
+function capturing(): { chunks: string[]; stdout: { write(chunk: string): true } } {
+  const chunks: string[] = [];
+  return {
+    chunks,
+    stdout: {
+      write(chunk: string) {
+        chunks.push(chunk);
+        return true;
+      },
+    },
+  };
+}
+
+function unmappedEffortConfig(effort?: "high") {
+  return defineConfig({
+    tracker: memoryTracker({
+      tickets: [ticket({ id: "52" })],
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+    }),
+    worker: createWorkerAdapter(),
+    model: "composer-2",
+    ...(effort === undefined ? {} : { effort }),
+  });
+}
 
 test("a label named in the selector that does not exist on the Tracker fails Doctor and a Run will not start", async () => {
   const repo = await throwawayRepo();
@@ -320,6 +349,148 @@ test("a by-label model map that matches no Tickets is a warning, not a failure",
       /Warning: modelsByLabel key "review" matches no Tickets on the Frontier/,
     );
     assert.match(chunks.join(""), /Next Ticket: 52/);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("Doctor and a Run refuse unmapped Effort with the same output", async () => {
+  const repo = await throwawayRepo();
+  const config = unmappedEffortConfig("high");
+  const doctorOut = capturing();
+  const runOut = capturing();
+  try {
+    const doctorExit = await doctor({
+      config,
+      cwd: repo.cwd,
+      stdout: doctorOut.stdout,
+    });
+    const runExit = await run({
+      config,
+      cap: 1,
+      cwd: repo.cwd,
+      stdout: runOut.stdout,
+    });
+    assert.equal(doctorExit, 1);
+    assert.equal(runExit, 1);
+    assert.equal(doctorOut.chunks.join(""), runOut.chunks.join(""));
+    assert.match(doctorOut.chunks.join(""), unmappedEffort);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("Doctor passes when Effort is set on a Worker Adapter that maps it", async () => {
+  const repo = await throwawayRepo();
+  const worker = recordingWorker({ exitCode: 0 });
+  const doctorOut = capturing();
+  const config = defineConfig({
+    tracker: memoryTracker({
+      tickets: [ticket({ id: "52" })],
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+    }),
+    worker,
+    model: "opus",
+    effort: "high",
+  });
+  try {
+    const doctorExit = await doctor({
+      config,
+      cwd: repo.cwd,
+      stdout: doctorOut.stdout,
+    });
+    assert.equal(doctorExit, 0);
+    assert.doesNotMatch(doctorOut.chunks.join(""), /Doctor: effort/);
+    assert.match(doctorOut.chunks.join(""), /Next Ticket: 52/);
+
+    const runExit = await run({
+      config,
+      cap: 1,
+      cwd: repo.cwd,
+      stdout: silent,
+    });
+    assert.equal(runExit, 0);
+    assert.equal(worker.spawns[0]?.effort, "high");
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("a Run-level Effort override is the same Doctor refusal as config Effort", async () => {
+  const repo = await throwawayRepo();
+  const configOut = capturing();
+  const runOut = capturing();
+  try {
+    const configExit = await doctor({
+      config: unmappedEffortConfig("high"),
+      cwd: repo.cwd,
+      stdout: configOut.stdout,
+    });
+    const runExit = await run({
+      config: unmappedEffortConfig(),
+      cap: 1,
+      cwd: repo.cwd,
+      stdout: runOut.stdout,
+      effort: "max",
+    });
+    assert.equal(configExit, 1);
+    assert.equal(runExit, 1);
+    assert.equal(configOut.chunks.join(""), runOut.chunks.join(""));
+    assert.match(runOut.chunks.join(""), unmappedEffort);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("readyrun doctor and readyrun run refuse unmapped Effort with the same output", async () => {
+  const repo = await throwawayRepo();
+  const config = unmappedEffortConfig("high");
+  const doctorOut = capturing();
+  const runOut = capturing();
+  try {
+    const doctorExit = await cli({
+      argv: ["doctor"],
+      cwd: repo.cwd,
+      stdout: doctorOut.stdout,
+      loadConfig: async () => config,
+    });
+    const runExit = await cli({
+      argv: ["run", "--max", "1"],
+      cwd: repo.cwd,
+      stdout: runOut.stdout,
+      loadConfig: async () => config,
+    });
+    assert.equal(doctorExit, 1);
+    assert.equal(runExit, 1);
+    assert.equal(doctorOut.chunks.join(""), runOut.chunks.join(""));
+    assert.match(doctorOut.chunks.join(""), unmappedEffort);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("readyrun run --effort uses the same Doctor refusal as config Effort", async () => {
+  const repo = await throwawayRepo();
+  const doctorOut = capturing();
+  const runOut = capturing();
+  try {
+    const doctorExit = await cli({
+      argv: ["doctor"],
+      cwd: repo.cwd,
+      stdout: doctorOut.stdout,
+      loadConfig: async () => unmappedEffortConfig("high"),
+    });
+    const runExit = await cli({
+      argv: ["run", "--max", "1", "--effort", "max"],
+      cwd: repo.cwd,
+      stdout: runOut.stdout,
+      loadConfig: async () => unmappedEffortConfig(),
+    });
+    assert.equal(doctorExit, 1);
+    assert.equal(runExit, 1);
+    assert.equal(doctorOut.chunks.join(""), runOut.chunks.join(""));
+    assert.match(runOut.chunks.join(""), unmappedEffort);
   } finally {
     await repo.cleanup();
   }

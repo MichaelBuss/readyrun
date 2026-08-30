@@ -318,6 +318,69 @@ test("a Run-level Permissions override applies to every Ticket in that Run", asy
   }
 });
 
+test("config Effort reaches the Worker Adapter as effort, not as a vendor flag", async () => {
+  const repo = await throwawayRepo();
+  const worker = recordingWorker({ exitCode: 0 });
+  try {
+    await run({
+      config: defineConfig({
+        tracker: memoryTracker({
+          tickets: [ticket],
+          ready: "unblocked",
+          labels: ["ready-for-agent"],
+        }),
+        worker,
+        model: "opus",
+        effort: "high",
+      }),
+      cap: 1,
+      cwd: repo.cwd,
+      stdout: silent,
+    });
+
+    assert.equal(worker.spawns[0]?.effort, "high");
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("a Run-level Effort override applies to every Ticket in that Run", async () => {
+  const repo = await throwawayRepo();
+  const worker = recordingWorker({ exitCode: 0 });
+  const second: Ticket = {
+    ...ticket,
+    id: "57",
+    title: "Second Ticket",
+    body: "Also ready.",
+    url: "https://github.com/acme/widgets/issues/57",
+  };
+  try {
+    await run({
+      config: defineConfig({
+        tracker: memoryTracker({
+          tickets: [ticket, second],
+          ready: "unblocked",
+          labels: ["ready-for-agent"],
+        }),
+        worker,
+        model: "opus",
+        effort: "low",
+      }),
+      cap: 2,
+      cwd: repo.cwd,
+      stdout: silent,
+      effort: "max",
+    });
+
+    assert.deepEqual(
+      worker.spawns.map((spawn) => spawn.effort),
+      ["max", "max"],
+    );
+  } finally {
+    await repo.cleanup();
+  }
+});
+
 test("the Worker prompt includes this Ticket's identifier, title, body, and URL", async () => {
   const repo = await throwawayRepo();
   const worker = recordingWorker({ exitCode: 0 });

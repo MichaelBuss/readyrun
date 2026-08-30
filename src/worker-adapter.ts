@@ -5,22 +5,32 @@ const brand = Symbol("WorkerAdapter");
 
 export type Permissions = "ask" | "unattended";
 
+export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
+
+const efforts = new Set<string>(["low", "medium", "high", "xhigh", "max"]);
+
+export function isEffort(value: string): value is Effort {
+  return efforts.has(value);
+}
+
 export type SpawnRequest = {
   ticket: Ticket;
   cwd: string;
   model: string;
   permissions: Permissions;
+  effort?: Effort;
   prompt: string;
 };
 
 export type WorkerAdapter = {
   readonly [brand]: true;
   readonly bin?: string;
+  readonly effortFlag?: string;
   spawn(request: SpawnRequest): Promise<{ exitCode: number }>;
 };
 
 export function createWorkerAdapter(
-  methods: Partial<Pick<WorkerAdapter, "spawn" | "bin">> = {},
+  methods: Partial<Pick<WorkerAdapter, "spawn" | "bin" | "effortFlag">> = {},
 ): WorkerAdapter {
   return {
     [brand]: true,
@@ -48,11 +58,16 @@ export function spawnWorkerBinary(
 export function printModeWorker(
   bin: string,
   unattendedFlag: string,
+  effortFlag?: string,
 ): WorkerAdapter {
   return createWorkerAdapter({
     bin,
+    effortFlag,
     spawn(request: SpawnRequest) {
       const args = ["-p", "--model", request.model];
+      if (request.effort !== undefined && effortFlag !== undefined) {
+        args.push(effortFlag, request.effort);
+      }
       if (request.permissions === "unattended") {
         args.push(unattendedFlag);
       }

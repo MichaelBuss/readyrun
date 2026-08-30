@@ -39,6 +39,19 @@ test("a Consumer can assemble defineConfig with typed Tracker Adapter and Worker
   assert.equal(customConfig.model, "local-model");
 });
 
+test("Effort is an optional config default the Worker Adapter receives", () => {
+  const config = defineConfig({
+    tracker: linear({
+      ready: "unblocked",
+      label: "ready-for-agent",
+    }),
+    worker: claude(),
+    model: "opus",
+    effort: "high",
+  });
+  assert.equal(config.effort, "high");
+});
+
 test("Permissions default to ask", () => {
   const config = defineConfig({
     tracker: github({
