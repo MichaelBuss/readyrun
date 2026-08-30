@@ -62,6 +62,10 @@ _Avoid_: session, job, sprint
 How freely a **Worker** may act without asking. `"ask"` or `"unattended"`. Default `"ask"`. Vendor flags (`--yolo`, `--dangerously-skip-permissions`) stay inside the **Worker Adapter**.
 _Avoid_: yolo, autoApprove, boolean `yolo`
 
+**Effort**:
+How hard a **Worker** thinks on a **Ticket**. `"low"` | `"medium"` | `"high"` | `"xhigh"` | `"max"`. Optional. The **Worker Adapter** maps it to that vendor's flag (`--effort` for Claude and custom). Cursor takes effort as a model variant, not a flag.
+_Avoid_: max mode (Cursor's interactive slash command), ultracode (a Claude Code workflow setting)
+
 ## Relationships
 
 - One **Consumer** config selects one **Tracker**. A repo is not GitHub-and-Linear at once.
@@ -81,6 +85,7 @@ _Avoid_: yolo, autoApprove, boolean `yolo`
 - A **Run** cannot start without a cap: a maximum number of **Tickets** it may start. Hitting the cap stops the **Run**; it does not prompt. A single-**Ticket** invocation is a **Run** with cap 1. There is no unlimited **Run**.
 - A v0 **Run** starts one **Worker** at a time. That is behaviour, not the isolation model: a **Worker** is already one **Ticket**, one **Branch**, one **Worktree**, so concurrency later is a knob, not a rewrite.
 - **Permissions** are first-class on the **Run**: `"ask"` or `"unattended"`. Default `"ask"`. Never implied by looping. The **Worker Adapter** maps `"unattended"` to its flag; `custom` is told the flag. Sandbox-bypass is not a third value in v0.
+- **Effort** is first-class on the **Run**: optional config default, CLI `--effort` for this **Run**. The **Worker Adapter** maps it to `--effort`; Cursor does not — pick a model variant instead. **Doctor** fails if effort is set on an adapter that does not map it. Not authored on the **Ticket**.
 - A **Worker**’s model: config default is required (**Doctor** fail if missing). CLI `--model` overrides that default for the **Run**. A label map may override per **Ticket**. The **Ticket** body does not name a model.
 - The **Worker** prompt is owned by the package: loop rules plus **Tracker Adapter** copy (this **Ticket**’s id, title, body, URL). A **Consumer** may append a repo context file from config. That file does not replace tracker instructions. There is no repo `prompt.md` that owns the loop.
 - When a **Worker** succeeds, the **Ticket** must leave the **Frontier**. The **Tracker Adapter** has a default for that (Linear: In Review, not Done; GitHub: drop the frontier label, comment, do not close). A **Consumer** may override; they do not have to write a hook.
@@ -155,6 +160,7 @@ _Avoid_: yolo, autoApprove, boolean `yolo`
 - **Run stats** — unresolved. Token usage, context-window % across **Workers**, printed at the end of a **Run**. Wanted; not v0-blocking.
 - **Automatic review** — resolved for v0: no. A review **Ticket** on the **Frontier** is just a **Ticket**. A second **Worker** that reviews the first is later.
 - **Permissions** — resolved: `"ask"` | `"unattended"`. Default ask. Not yolo. Not a boolean.
+- **Effort** — resolved: optional config default; CLI overrides the **Run**. Adapter maps to `--effort`. Cursor does not map the flag (model variants). **Doctor** fails that pairing. Not ultracode, not max-mode.
 - **Model** — resolved: required config default; CLI overrides the **Run**; label map overrides per **Ticket**. Not authored on the **Ticket**.
 - **Hard stop** — resolved: **Tracker**/git/**Worker** failure ends the **Run**. No skip, no retry-forever. Cap and empty **Frontier** are clean stops. Harness owns **Tracker** auth; CLI owns Worker login.
 - **Worker prompt** — resolved: package + **Tracker Adapter**. Optional Consumer context file. Not a repo-owned `prompt.md`.

@@ -307,6 +307,147 @@ describe("Worker Adapters", { concurrency: false }, () => {
     });
   });
 
+  test("a Claude Worker Adapter maps Effort to --effort; omitting Effort does not pass the flag", async () => {
+    await withRecordingPath(["claude"], async ({ receiptPath }) => {
+      const withEffort = await throwawayRepo();
+      try {
+        await run({
+          config: defineConfig({
+            tracker: memoryTracker({
+              tickets: [ticket({ id: "52" })],
+              ready: "unblocked",
+              labels: ["ready-for-agent"],
+            }),
+            worker: claude(),
+            model: "opus",
+            effort: "high",
+          }),
+          cap: 1,
+          cwd: withEffort.cwd,
+          stdout: silent,
+        });
+        const receipt = await readReceipt(receiptPath);
+        assert.deepEqual(receipt.argv.slice(0, 5), [
+          "-p",
+          "--model",
+          "opus",
+          "--effort",
+          "high",
+        ]);
+      } finally {
+        await withEffort.cleanup();
+      }
+
+      const withoutEffort = await throwawayRepo();
+      try {
+        await run({
+          config: defineConfig({
+            tracker: memoryTracker({
+              tickets: [ticket({ id: "52" })],
+              ready: "unblocked",
+              labels: ["ready-for-agent"],
+            }),
+            worker: claude(),
+            model: "opus",
+          }),
+          cap: 1,
+          cwd: withoutEffort.cwd,
+          stdout: silent,
+        });
+        const receipt = await readReceipt(receiptPath);
+        assert.ok(!receipt.argv.includes("--effort"));
+      } finally {
+        await withoutEffort.cleanup();
+      }
+    });
+  });
+
+  test("Effort on a Cursor Worker Adapter fails Doctor and a Run will not start", async () => {
+    await withRecordingPath(["agent"], async ({ receiptPath }) => {
+      const repo = await throwawayRepo();
+      const doctorChunks: string[] = [];
+      const runChunks: string[] = [];
+      const config = defineConfig({
+        tracker: memoryTracker({
+          tickets: [ticket({ id: "52" })],
+          ready: "unblocked",
+          labels: ["ready-for-agent"],
+        }),
+        worker: cursor(),
+        model: "composer-2.5-fast",
+        effort: "high",
+      });
+      try {
+        const doctorExit = await doctor({
+          config,
+          cwd: repo.cwd,
+          stdout: {
+            write(chunk: string) {
+              doctorChunks.push(chunk);
+              return true;
+            },
+          },
+        });
+        const runExit = await run({
+          config,
+          cap: 1,
+          cwd: repo.cwd,
+          stdout: {
+            write(chunk: string) {
+              runChunks.push(chunk);
+              return true;
+            },
+          },
+        });
+        assert.equal(doctorExit, 1);
+        assert.equal(runExit, 1);
+        assert.equal(doctorChunks.join(""), runChunks.join(""));
+        assert.match(
+          doctorChunks.join(""),
+          /Doctor: effort is set but this Worker Adapter does not map it/,
+        );
+        assert.equal(existsSync(receiptPath), false);
+      } finally {
+        await repo.cleanup();
+      }
+    });
+  });
+
+  test("a custom Worker Adapter maps Effort to --effort", async () => {
+    const repo = await throwawayRepo();
+    try {
+      await withRecordingPath(["readyrun-worker"], async ({ bin, receiptPath }) => {
+        await run({
+          config: defineConfig({
+            tracker: memoryTracker({
+              tickets: [ticket({ id: "52" })],
+              ready: "unblocked",
+              labels: ["ready-for-agent"],
+            }),
+            worker: custom({
+              bin,
+              unattendedFlag: "--go",
+            }),
+            model: "local-model",
+            effort: "medium",
+          }),
+          cap: 1,
+          cwd: repo.cwd,
+          stdout: silent,
+        });
+        const receipt = await readReceipt(receiptPath);
+        assert.deepEqual(receipt.argv.slice(0, 4), [
+          "--model",
+          "local-model",
+          "--effort",
+          "medium",
+        ]);
+      });
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
   test("Doctor fails when the Cursor Worker binary is missing, and a Run will not start", async () => {
     const repo = await throwawayRepo();
     const previousPath = process.env.PATH;

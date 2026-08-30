@@ -3,6 +3,7 @@ import { delimiter, isAbsolute, join } from "node:path";
 import { defineConfig, type ReadyRunConfig } from "./config.ts";
 import { originRepository, normalizeRepository } from "./git.ts";
 import type { Ticket } from "./ticket.ts";
+import type { Effort } from "./worker-adapter.ts";
 
 type DoctorStdout = { write(chunk: string): unknown };
 
@@ -15,6 +16,7 @@ export type DoctorOptions = {
 async function check(
   config: ReadyRunConfig,
   cwd: string,
+  effort: Effort | undefined,
 ): Promise<string[]> {
   const failures: string[] = [];
   if (typeof config.model !== "string" || config.model.length === 0) {
@@ -48,7 +50,10 @@ async function check(
   }
   if (inspect.repository !== undefined) {
     const remote = await originRepository(cwd);
-    if (remote !== normalizeRepository(inspect.repository)) {
+    if (
+      remote === undefined ||
+      normalizeRepository(remote) !== normalizeRepository(inspect.repository)
+    ) {
       failures.push(
         `configured repository ${inspect.repository} is not the git remote (${remote ?? "none"})`,
       );
@@ -61,6 +66,9 @@ async function check(
   }
   if (config.worker.bin !== undefined && !workerBinaryExists(config.worker.bin)) {
     failures.push(`Worker binary "${config.worker.bin}" is missing`);
+  }
+  if (effort !== undefined && config.worker.effortFlag === undefined) {
+    failures.push("effort is set but this Worker Adapter does not map it");
   }
   return failures;
 }
@@ -95,8 +103,9 @@ export async function doctorCheck(
   config: ReadyRunConfig,
   cwd: string,
   stdout: DoctorStdout,
+  effort: Effort | undefined = config.effort,
 ): Promise<0 | 1> {
-  const failures = await check(config, cwd);
+  const failures = await check(config, cwd, effort);
   if (failures.length === 0) {
     return 0;
   }

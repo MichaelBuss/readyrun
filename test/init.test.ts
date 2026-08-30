@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promis
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { init, type InitAnswers } from "../src/mod.ts";
+import { configWrittenMessage, init, parseListedModels, type InitAnswers } from "../src/init.ts";
 
 const tmpRoot = join(fileURLToPath(new URL(".", import.meta.url)), ".tmp");
 const packageHref = pathToFileURL(
@@ -40,6 +40,7 @@ const linearClaudeAnswers: InitAnswers = {
   },
   worker: { kind: "claude" },
   model: "opus",
+  effort: "high",
 };
 
 const linearClaudeStub = `import { defineConfig, linear, claude } from "@readyrun/readyrun";
@@ -51,6 +52,7 @@ export default defineConfig({
   }),
   worker: claude(),
   model: "opus",
+  effort: "high",
 });
 `;
 
@@ -152,4 +154,35 @@ test("init writes a custom Worker Adapter into the stub", async () => {
 
 test("init writes a Linear state Frontier selector into the stub", async () => {
   await assertWrittenStub(linearStateAnswers, linearStateStub);
+});
+
+test("parseListedModels reads id and label from agent --list-models output", () => {
+  assert.deepEqual(
+    parseListedModels(`Available models
+auto - Auto
+composer-2.5 - Composer 2.5 (default)
+composer-2 - Composer 2
+`),
+    [
+      { id: "auto", label: "Auto" },
+      { id: "composer-2.5", label: "Composer 2.5", hint: "default" },
+      { id: "composer-2", label: "Composer 2" },
+    ],
+  );
+});
+
+test("parseListedModels strips ANSI color and current markers", () => {
+  assert.deepEqual(
+    parseListedModels(
+      "\u001b[36mauto\u001b[39m \u001b[2m- Auto (current)\u001b[22m\n",
+    ),
+    [{ id: "auto", label: "Auto", hint: "current" }],
+  );
+});
+
+test("the Init outro links the written stub", () => {
+  assert.equal(
+    configWrittenMessage("/tmp/readyrun.config.ts"),
+    "Wrote \u001b]8;;file:///tmp/readyrun.config.ts\u001b\\readyrun.config.ts\u001b]8;;\u001b\\",
+  );
 });

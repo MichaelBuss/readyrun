@@ -1,6 +1,10 @@
+import { execFile } from "node:child_process";
 import { writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 import {
+  autocomplete,
   cancel,
   intro,
   isCancel,
@@ -8,6 +12,11 @@ import {
   select,
   text,
 } from "@clack/prompts";
+import { originRepository } from "./git.ts";
+import { isEffort, type Effort } from "./worker-adapter.ts";
+
+const exec = promisify(execFile);
+const otherModel = "__other__";
 
 export type InitTracker =
   | {
@@ -31,12 +40,32 @@ export type InitAnswers = {
   tracker: InitTracker;
   worker: InitWorker;
   model: string;
+  effort?: Effort;
 };
 
 export type InitOptions = {
   cwd: string;
   answers?: InitAnswers;
 };
+
+export type ListedModel = {
+  id: string;
+  label: string;
+  hint?: string;
+};
+
+const fallbackCursorModels: ListedModel[] = [
+  { id: "composer-2.5", label: "Composer 2.5" },
+  { id: "composer-2", label: "Composer 2" },
+  { id: "auto", label: "Auto" },
+];
+
+const claudeModels: ListedModel[] = [
+  { id: "opus", label: "Opus" },
+  { id: "sonnet", label: "Sonnet" },
+  { id: "haiku", label: "Haiku" },
+  { id: "fable", label: "Fable" },
+];
 
 function linearSelector(tracker: Extract<InitTracker, { kind: "linear" }>): string {
   if (tracker.state !== undefined) {
@@ -73,12 +102,15 @@ function workerCall(worker: InitWorker): string {
 }
 
 function configStub(answers: InitAnswers): string {
+  const effortLine = answers.effort === undefined
+    ? ""
+    : `\n  effort: ${JSON.stringify(answers.effort)},`;
   return `import { defineConfig, ${answers.tracker.kind}, ${answers.worker.kind} } from "@readyrun/readyrun";
 
 export default defineConfig({
   tracker: ${trackerCall(answers.tracker)},
   worker: ${workerCall(answers.worker)},
-  model: ${JSON.stringify(answers.model)},
+  model: ${JSON.stringify(answers.model)},${effortLine}
 });
 `;
 }
@@ -98,7 +130,77 @@ function unlessCancelled<T>(value: T | symbol): T | undefined {
   return value;
 }
 
-async function collectInitAnswers(): Promise<InitAnswers | undefined> {
+const ansi = /\u001b\[[0-9;]*m/g;
+const listedMarker = /\s*\((default|current)\)\s*$/i;
+
+export function parseListedModels(stdout: string): ListedModel[] {
+  const seen = new Set<string>();
+  const models: ListedModel[] = [];
+  for (const raw of stdout.split(/\r?\n/)) {
+    const line = raw.replace(ansi, "").trim();
+    if (
+      line.length === 0 ||
+      line === "Available models" ||
+      line.startsWith("Tip:")
+    ) {
+      continue;
+    }
+    const idx = line.indexOf(" - ");
+    if (idx < 0) {
+      continue;
+    }
+    const id = line.slice(0, idx).trim();
+    if (id.length === 0 || seen.has(id)) {
+      continue;
+    }
+    let label = line.slice(idx + 3).trim();
+    const mark = label.match(listedMarker);
+    if (mark?.index !== undefined) {
+      label = label.slice(0, mark.index).trim();
+    }
+    seen.add(id);
+    const model: ListedModel = {
+      id,
+      label: label.length > 0 ? label : id,
+    };
+    if (mark?.[1] !== undefined) {
+      model.hint = mark[1].toLowerCase();
+    }
+    models.push(model);
+  }
+  return models;
+}
+
+export function configWrittenMessage(path: string): string {
+  const href = pathToFileURL(resolve(path)).href;
+  return `Wrote \u001b]8;;${href}\u001b\\readyrun.config.ts\u001b]8;;\u001b\\`;
+}
+
+async function listCursorModels(): Promise<ListedModel[]> {
+  for (const bin of ["agent", "cursor-agent"]) {
+    try {
+      const { stdout } = await exec(bin, ["--list-models"], {
+        encoding: "utf8",
+        timeout: 4000,
+        env: {
+          ...process.env,
+          NO_COLOR: "1",
+          FORCE_COLOR: "0",
+          TERM: "dumb",
+        },
+      });
+      const models = parseListedModels(stdout);
+      if (models.length > 0) {
+        return models;
+      }
+    } catch {
+      // Try the next binary, then the fallback catalog.
+    }
+  }
+  return fallbackCursorModels;
+}
+
+async function collectInitAnswers(cwd: string): Promise<InitAnswers | undefined> {
   intro("ReadyRun");
   const trackerKind = unlessCancelled(
     await select({
@@ -112,7 +214,7 @@ async function collectInitAnswers(): Promise<InitAnswers | undefined> {
   if (trackerKind === undefined) {
     return undefined;
   }
-  const tracker = await collectTracker(trackerKind);
+  const tracker = await collectTracker(trackerKind, cwd);
   if (tracker === undefined) {
     return undefined;
   }
@@ -120,27 +222,28 @@ async function collectInitAnswers(): Promise<InitAnswers | undefined> {
   if (worker === undefined) {
     return undefined;
   }
-  const model = unlessCancelled(
-    await text({
-      message: "Default model",
-      placeholder: "composer-2",
-      validate: required,
-    }),
-  );
+  const model = await collectModel(worker);
   if (model === undefined) {
     return undefined;
   }
-  return { tracker, worker, model: model.trim() };
+  const effort = await collectEffort(worker);
+  if (effort === "cancelled") {
+    return undefined;
+  }
+  return { tracker, worker, model, effort };
 }
 
 async function collectTracker(
   kind: "github" | "linear",
+  cwd: string,
 ): Promise<InitTracker | undefined> {
   if (kind === "github") {
+    const suggested = await originRepository(cwd);
     const repo = unlessCancelled(
       await text({
         message: "GitHub repository",
         placeholder: "owner/name",
+        initialValue: suggested,
         validate: required,
       }),
     );
@@ -151,6 +254,7 @@ async function collectTracker(
       await text({
         message: "Frontier labels",
         placeholder: "ready-for-agent",
+        initialValue: "ready-for-agent",
         validate: required,
       }),
     );
@@ -224,6 +328,7 @@ async function collectWorker(): Promise<InitWorker | undefined> {
     await text({
       message: "Unattended flag",
       placeholder: "--dangerously-skip-permissions",
+      initialValue: "--dangerously-skip-permissions",
       validate: required,
     }),
   );
@@ -233,15 +338,111 @@ async function collectWorker(): Promise<InitWorker | undefined> {
   return { kind: "custom", bin: bin.trim(), unattendedFlag: unattendedFlag.trim() };
 }
 
+async function collectModel(worker: InitWorker): Promise<string | undefined> {
+  if (worker.kind === "custom") {
+    const typed = unlessCancelled(
+      await text({
+        message: "Default model",
+        validate: required,
+      }),
+    );
+    return typed?.trim();
+  }
+  const models = worker.kind === "cursor"
+    ? await listCursorModels()
+    : claudeModels;
+  if (models.length === 0) {
+    const typed = unlessCancelled(
+      await text({
+        message: "Default model",
+        validate: required,
+      }),
+    );
+    return typed?.trim();
+  }
+  const initial = models.find((model) => model.hint === "default")?.id ??
+    models[0]?.id;
+  const options = [
+    ...models.map((model) => ({
+      value: model.id,
+      label: model.label,
+      hint: model.hint === undefined ? model.id : `${model.id} · ${model.hint}`,
+    })),
+    { value: otherModel, label: "Other…" },
+  ];
+  const picked = unlessCancelled(
+    models.length > 8
+      ? await autocomplete({
+        message: "Default model",
+        options,
+        initialValue: initial,
+        placeholder: "Type to search…",
+      })
+      : await select({
+        message: "Default model",
+        options,
+        initialValue: initial,
+      }),
+  );
+  if (picked === undefined) {
+    return undefined;
+  }
+  if (picked !== otherModel) {
+    return picked;
+  }
+  const typed = unlessCancelled(
+    await text({
+      message: "Default model",
+      validate: required,
+    }),
+  );
+  return typed?.trim();
+}
+
+const workerDefaultEffort = "default";
+
+async function collectEffort(
+  worker: InitWorker,
+): Promise<Effort | undefined | "cancelled"> {
+  if (worker.kind === "cursor") {
+    return undefined;
+  }
+  const picked = unlessCancelled(
+    await select({
+      message: "Effort",
+      options: [
+        { value: workerDefaultEffort, label: "Worker default" },
+        { value: "low" as const, label: "Low" },
+        { value: "medium" as const, label: "Medium" },
+        { value: "high" as const, label: "High" },
+        { value: "xhigh" as const, label: "Extra high" },
+        { value: "max" as const, label: "Max" },
+      ],
+      initialValue: "high",
+    }),
+  );
+  if (picked === undefined) {
+    return "cancelled";
+  }
+  if (picked === workerDefaultEffort) {
+    return undefined;
+  }
+  if (!isEffort(picked)) {
+    return undefined;
+  }
+  return picked;
+}
+
 export async function init(options: InitOptions): Promise<number> {
   const prompted = options.answers === undefined;
-  const answers = options.answers ?? await collectInitAnswers();
+  const answers = options.answers ?? await collectInitAnswers(options.cwd);
   if (answers === undefined) {
     return 1;
   }
-  await writeFile(join(options.cwd, "readyrun.config.ts"), configStub(answers));
+  const path = resolve(options.cwd, "readyrun.config.ts");
+  await writeFile(path, configStub(answers));
   if (prompted) {
-    outro("Wrote readyrun.config.ts");
+    outro(configWrittenMessage(path));
   }
   return 0;
 }

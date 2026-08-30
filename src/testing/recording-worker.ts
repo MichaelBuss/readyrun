@@ -20,6 +20,7 @@ export function recordingWorker(
 
   return Object.assign(
     createWorkerAdapter({
+      effortFlag: "--effort",
       spawn(request: SpawnRequest) {
         spawns.push(request);
         return Promise.resolve({ exitCode });

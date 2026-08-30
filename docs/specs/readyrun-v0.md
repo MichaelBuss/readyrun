@@ -1,6 +1,6 @@
 # ReadyRun v0
 
-Vocabulary in this document is the glossary in [`CONTEXT.md`](../../CONTEXT.md). Decisions it rests on are [`docs/adr/`](../adr/) 0001–0020.
+Vocabulary in this document is the glossary in [`CONTEXT.md`](../../CONTEXT.md). Decisions it rests on are [`docs/adr/`](../adr/) 0001–0021.
 
 ## Problem Statement
 
@@ -87,6 +87,9 @@ A Run cannot start without a cap on how many Tickets it may start, so an unatten
 45. As an operator, I want a command-line model override for one **Run**, so that I can try a cheaper or stronger model without editing config.
 46. As a repo maintainer, I want a by-label model map, so that review-shaped **Tickets** can use a different model from implementation ones.
 47. As a repo maintainer, I want no model named in the **Ticket** body, so that routing is a repo decision rather than per-issue authoring.
+47a. As a repo maintainer, I want an optional effort default in config, so that Claude and custom **Workers** think at a known level.
+47b. As an operator, I want a command-line effort override for one **Run**, so that I can try a cheaper or deeper pass without editing config.
+47c. As a repo maintainer on Cursor, I want effort to stay a model variant rather than a flag the **Worker** would reject.
 48. As an operator, I want **Permissions** to be a named choice between asking and unattended, so that the setting reads as intent rather than as a vendor flag.
 49. As an operator, I want asking to be the default, so that the first time I run ReadyRun I see what it wants to do.
 50. As an operator, I want looping never to imply unattended, so that a long **Run** does not silently grant the **Worker** free rein.
@@ -159,6 +162,7 @@ A Run cannot start without a cap on how many Tickets it may start, so an unatten
 
 - **Permissions** is a Run-level value of `ask` or `unattended`, defaulting to `ask`. Looping never implies unattended. Each Worker Adapter maps `unattended` onto its own auto-approve flag; the custom adapter is told which flag to use. Sandbox bypass is not a third value in v0 (ADR 0011).
 - Model resolution is: a required config default, overridden by a command-line model for the whole Run, overridden by a by-label map for an individual Ticket. Doctor fails when the default is missing. The Ticket body never names a model (ADR 0012).
+- **Effort** is an optional config default (`low` | `medium` | `high` | `xhigh` | `max`), overridden by `--effort` for the Run. The Worker Adapter maps it onto `--effort`. Cursor does not take that flag; Doctor fails if effort is set on an adapter that does not map it (ADR 0021).
 
 ### The Worker prompt
 
@@ -174,7 +178,7 @@ A Run cannot start without a cap on how many Tickets it may start, so an unatten
 
 ### Doctor and Init
 
-- Doctor and the start of a Run share one check. Anything that makes the Frontier a lie is fatal: unknown keys, a missing label, a configured repository that is not the git remote, unblocked ordering the Tracker cannot express, a missing Worker binary, a missing model default. Unused routing warns. The check runs once at start rather than per iteration (ADR 0009).
+- Doctor and the start of a Run share one check. Anything that makes the Frontier a lie is fatal: unknown keys, a missing label, a configured repository that is not the git remote, unblocked ordering the Tracker cannot express, a missing Worker binary, a missing model default, effort set on an adapter that does not map it. Unused routing warns. The check runs once at start rather than per iteration (ADR 0009).
 - Doctor also reports the Ticket that would be picked next.
 - Init is the single interactive surface: it asks for tracker, worker and frontier selector, then writes the config stub (ADR 0019).
 

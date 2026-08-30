@@ -5,7 +5,7 @@ import { doctorCheck, warnUnusedModelsByLabel } from "./doctor.ts";
 import { createTicketWorktree } from "./git.ts";
 import { composeWorkerPrompt } from "./prompt.ts";
 import type { Ticket } from "./ticket.ts";
-import type { Permissions } from "./worker-adapter.ts";
+import type { Effort, Permissions } from "./worker-adapter.ts";
 
 type RunStdout = { write(chunk: string): unknown };
 
@@ -16,6 +16,7 @@ export type RunOptions = {
   stdout?: RunStdout;
   model?: string;
   permissions?: Permissions;
+  effort?: Effort;
 };
 
 export class RunCapRequiredError extends Error {
@@ -59,7 +60,7 @@ export async function run(options: RunOptions): Promise<number> {
 
   const cwd = options.cwd ?? process.cwd();
   const stdout = options.stdout ?? process.stdout;
-  if (await doctorCheck(config, cwd, stdout) === 1) {
+  if (await doctorCheck(config, cwd, stdout, options.effort ?? config.effort) === 1) {
     return 1;
   }
   const context = config.contextFile === undefined
@@ -105,6 +106,7 @@ export async function run(options: RunOptions): Promise<number> {
         cwd: worktree,
         model: resolveModel(ticket, config, options.model),
         permissions: options.permissions ?? config.permissions,
+        effort: options.effort ?? config.effort,
         prompt: composeWorkerPrompt(config.tracker.promptCopy(ticket), context),
       });
     } catch {
