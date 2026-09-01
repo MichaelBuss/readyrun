@@ -47,7 +47,7 @@ The check that config matches the **Tracker**. A **Run** will not start if it fa
 _Avoid_: lint (SpeechDeck’s word), validate
 
 **Init**:
-The command that writes a stub `readyrun.config.ts` in the **Consumer** root. Interactive by default (Clack); scriptable with `--answers <file>` so a CI job or agent can drive it without a TTY. It does not assemble `run`. It also makes sure the **Consumer**'s `.gitignore` covers `.readyrun/`, the directory `run` creates **Worktrees** under, so a **Consumer** never has to add that line by hand.
+The command that writes a stub `readyrun.config.ts` in the **Consumer** root. Interactive by default (Clack); scriptable with `--answers <file>` so CI or a template-repo setup script can drive it without a TTY. It does not assemble `run`. It also makes sure the **Consumer**'s `.gitignore` covers `.readyrun/`, the directory `run` creates **Worktrees** under, so a **Consumer** never has to add that line by hand.
 _Avoid_: setup-ralph, generated `ralph/` folder, command wizard
 
 **Consumer**:
