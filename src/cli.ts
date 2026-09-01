@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 import { existsSync, realpathSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { doctor as doctorEntry, type DoctorOptions } from "./doctor.ts";
-import { init as initEntry, type InitAnswers, type InitOptions } from "./init.ts";
+import { init as initEntry, parseInitAnswers, type InitAnswers, type InitOptions } from "./init.ts";
 import { run as runEntry, RunCapRequiredError, type RunOptions } from "./run.ts";
 import type { ReadyRunConfig } from "./config.ts";
 import { isEffort, type Effort, type Permissions } from "./worker-adapter.ts";
@@ -13,7 +14,7 @@ type Writer = { write(chunk: string): unknown };
 const usage = `Usage: readyrun <command>
 
 Commands:
-  init
+  init [--answers <file>]
   run --max <n> [--model <id>] [--permissions ask|unattended] [--effort low|medium|high|xhigh|max]
   doctor
 
@@ -130,15 +131,67 @@ function parseRunFlags(args: string[]):
   return { ok: true, cap, permissions, model, effort };
 }
 
+function parseInitFlags(args: string[]):
+  | { ok: true; answersPath?: string }
+  | { ok: false; message: string } {
+  if (args.length === 0) {
+    return { ok: true };
+  }
+  if (args[0] === "--answers") {
+    const answersPath = args[1];
+    if (answersPath === undefined || answersPath.length === 0) {
+      return { ok: false, message: "--answers requires a file path" };
+    }
+    if (args.length > 2) {
+      return { ok: false, message: "init accepts --answers <file>" };
+    }
+    return { ok: true, answersPath };
+  }
+  return { ok: false, message: "init accepts --answers <file>" };
+}
+
+async function answersFromFile(
+  cwd: string,
+  answersPath: string,
+): Promise<{ ok: true; answers: InitAnswers } | { ok: false; message: string }> {
+  const path = resolve(cwd, answersPath);
+  let raw: string;
+  try {
+    raw = await readFile(path, "utf8");
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return { ok: false, message: `Could not read answers file: ${detail}` };
+  }
+  try {
+    return parseInitAnswers(JSON.parse(raw));
+  } catch {
+    return { ok: false, message: "Answers file is not valid JSON" };
+  }
+}
+
 export async function cli(options: CliOptions): Promise<number> {
   const stdout = options.stdout ?? process.stdout;
   const command = options.argv[0];
   if (command === "init") {
     const invoke = options.init ?? initEntry;
-    return invoke({
-      cwd: options.cwd ?? process.cwd(),
-      answers: options.answers,
-    });
+    const cwd = options.cwd ?? process.cwd();
+    if (options.answers !== undefined) {
+      return invoke({ cwd, answers: options.answers });
+    }
+    const flags = parseInitFlags(options.argv.slice(1));
+    if (!flags.ok) {
+      stdout.write(`${flags.message}\n`);
+      return 1;
+    }
+    if (flags.answersPath === undefined) {
+      return invoke({ cwd });
+    }
+    const loaded = await answersFromFile(cwd, flags.answersPath);
+    if (!loaded.ok) {
+      stdout.write(`${loaded.message}\n`);
+      return 1;
+    }
+    return invoke({ cwd, answers: loaded.answers });
   }
   if (command !== "run" && command !== "doctor") {
     stdout.write(usage);
