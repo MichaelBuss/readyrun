@@ -36,18 +36,42 @@ defineConfig({
 claude({ extraArgs: ["--verbose"] });
 ```
 
+`cursor()` shells out to `agent`, `claude()` shells out to `claude`; both must already be installed and authenticated before `run` — ReadyRun does not manage CLI auth.
+
 ```sh
 readyrun init
 readyrun doctor
 readyrun run --max 5
 ```
 
-JSR does not put `readyrun` on PATH. Run the `cli` export as a program (do not import it):
+JSR does not put `readyrun` on PATH. Run the `cli` export as a program (Deno):
 
 ```sh
 deno run -A jsr:@readyrun/readyrun/cli init
 deno run -A jsr:@readyrun/readyrun/cli doctor
 deno run -A jsr:@readyrun/readyrun/cli run --max 5
+```
+
+pnpm/npm/yarn: JSR's npm-compat tarball strips `bin`, so `pnpm exec readyrun` and `npx readyrun` fail with no hint at the fix. Import the `cli` export from a two-line wrapper script instead, and call that from a `package.json` script:
+
+```js
+// readyrun-cli.mjs
+import { cli } from "@readyrun/readyrun/cli";
+process.exitCode = await cli({ argv: process.argv.slice(2) });
+```
+
+```json
+{
+  "scripts": {
+    "readyrun": "node readyrun-cli.mjs"
+  }
+}
+```
+
+```sh
+pnpm readyrun init
+pnpm readyrun doctor
+pnpm readyrun run --max 5
 ```
 
 From this repo, `package.json` `bin` maps `readyrun` to `src/cli.ts` (Node 24).
