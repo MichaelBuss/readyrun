@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
@@ -433,6 +433,13 @@ async function collectEffort(
   return picked;
 }
 
+const gitignoreEntry = ".readyrun/";
+
+async function ensureGitignored(cwd: string): Promise<void> {
+  const path = resolve(cwd, ".gitignore");
+  await writeFile(path, `${gitignoreEntry}\n`);
+}
+
 export async function init(options: InitOptions): Promise<number> {
   const prompted = options.answers === undefined;
   const answers = options.answers ?? await collectInitAnswers(options.cwd);
@@ -441,6 +448,7 @@ export async function init(options: InitOptions): Promise<number> {
   }
   const path = resolve(options.cwd, "readyrun.config.ts");
   await writeFile(path, configStub(answers));
+  await ensureGitignored(options.cwd);
   if (prompted) {
     outro(configWrittenMessage(path));
   }

@@ -135,7 +135,10 @@ async function assertWrittenStub(
     const exitCode = await init({ cwd, answers });
     assert.equal(exitCode, 0);
     assert.equal(await readFile(join(cwd, "readyrun.config.ts"), "utf8"), expected);
-    assert.deepEqual(await readdir(cwd), ["readyrun.config.ts"]);
+    assert.deepEqual(
+      [...await readdir(cwd)].sort(),
+      [".gitignore", "readyrun.config.ts"],
+    );
     await assert.doesNotReject(() => loadStub(cwd));
   });
 }
@@ -178,6 +181,14 @@ test("parseListedModels strips ANSI color and current markers", () => {
     ),
     [{ id: "auto", label: "Auto", hint: "current" }],
   );
+});
+
+test("init creates a .gitignore that ignores .readyrun/ when none exists", async () => {
+  await withConsumerRoot(async (cwd) => {
+    const exitCode = await init({ cwd, answers: githubCursorAnswers });
+    assert.equal(exitCode, 0);
+    assert.equal(await readFile(join(cwd, ".gitignore"), "utf8"), ".readyrun/\n");
+  });
 });
 
 test("the Init outro links the written stub", () => {
