@@ -12,6 +12,7 @@ import {
   select,
   text,
 } from "@clack/prompts";
+import { ensureReadyrunGitignored } from "./gitignore.ts";
 import { originRepository } from "./git.ts";
 import { isEffort, type Effort } from "./worker-adapter.ts";
 
@@ -441,6 +442,7 @@ export async function init(options: InitOptions): Promise<number> {
   }
   const path = resolve(options.cwd, "readyrun.config.ts");
   await writeFile(path, configStub(answers));
+  await ensureReadyrunGitignored(options.cwd);
   if (prompted) {
     outro(configWrittenMessage(path));
   }
