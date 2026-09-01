@@ -135,7 +135,10 @@ async function assertWrittenStub(
     const exitCode = await init({ cwd, answers });
     assert.equal(exitCode, 0);
     assert.equal(await readFile(join(cwd, "readyrun.config.ts"), "utf8"), expected);
-    assert.deepEqual(await readdir(cwd), ["readyrun.config.ts"]);
+    assert.deepEqual(
+      [...await readdir(cwd)].sort(),
+      [".gitignore", "readyrun.config.ts"],
+    );
     await assert.doesNotReject(() => loadStub(cwd));
   });
 }
@@ -178,6 +181,59 @@ test("parseListedModels strips ANSI color and current markers", () => {
     ),
     [{ id: "auto", label: "Auto", hint: "current" }],
   );
+});
+
+test("init creates a .gitignore that ignores .readyrun/ when none exists", async () => {
+  await withConsumerRoot(async (cwd) => {
+    const exitCode = await init({ cwd, answers: githubCursorAnswers });
+    assert.equal(exitCode, 0);
+    assert.equal(await readFile(join(cwd, ".gitignore"), "utf8"), ".readyrun/\n");
+  });
+});
+
+test("init appends .readyrun/ to an existing .gitignore that lacks it", async () => {
+  await withConsumerRoot(async (cwd) => {
+    await writeFile(join(cwd, ".gitignore"), "node_modules/\n");
+    const exitCode = await init({ cwd, answers: githubCursorAnswers });
+    assert.equal(exitCode, 0);
+    assert.equal(
+      await readFile(join(cwd, ".gitignore"), "utf8"),
+      "node_modules/\n.readyrun/\n",
+    );
+  });
+});
+
+test("init does not duplicate .readyrun/ when the exact line is already present", async () => {
+  await withConsumerRoot(async (cwd) => {
+    await writeFile(join(cwd, ".gitignore"), "node_modules/\n.readyrun/\n");
+    const exitCode = await init({ cwd, answers: githubCursorAnswers });
+    assert.equal(exitCode, 0);
+    assert.equal(
+      await readFile(join(cwd, ".gitignore"), "utf8"),
+      "node_modules/\n.readyrun/\n",
+    );
+  });
+});
+
+test("init does not duplicate .readyrun/ when a broader pattern already covers it", async () => {
+  await withConsumerRoot(async (cwd) => {
+    await writeFile(join(cwd, ".gitignore"), "node_modules/\n.ready*\n");
+    const exitCode = await init({ cwd, answers: githubCursorAnswers });
+    assert.equal(exitCode, 0);
+    assert.equal(
+      await readFile(join(cwd, ".gitignore"), "utf8"),
+      "node_modules/\n.ready*\n",
+    );
+  });
+});
+
+test("init does not duplicate .readyrun/ when the existing line is root-anchored or dir-only", async () => {
+  await withConsumerRoot(async (cwd) => {
+    await writeFile(join(cwd, ".gitignore"), "/.readyrun\n");
+    const exitCode = await init({ cwd, answers: githubCursorAnswers });
+    assert.equal(exitCode, 0);
+    assert.equal(await readFile(join(cwd, ".gitignore"), "utf8"), "/.readyrun\n");
+  });
 });
 
 test("the Init outro links the written stub", () => {

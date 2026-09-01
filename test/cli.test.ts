@@ -396,7 +396,10 @@ test("init writes the stub without loading a config file", async () => {
       });
       assert.equal(exitCode, 0);
       assert.equal(loaded, false);
-      assert.deepEqual(await readdir(cwd), ["readyrun.config.ts"]);
+      assert.deepEqual(
+        [...await readdir(cwd)].sort(),
+        [".gitignore", "readyrun.config.ts"],
+      );
     },
   );
 });
