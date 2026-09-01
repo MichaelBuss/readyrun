@@ -58,9 +58,33 @@ export function spawnWorkerBinary(
   });
 }
 
+export function execProbe(bin: string, args: string[]): Promise<ProbeResult> {
+  return new Promise((resolve) => {
+    const child = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let output = "";
+    child.stdout?.on("data", (chunk: Buffer) => {
+      output += chunk.toString();
+    });
+    child.stderr?.on("data", (chunk: Buffer) => {
+      output += chunk.toString();
+    });
+    child.on("error", (error) => {
+      resolve({ ok: false, detail: error.message });
+    });
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolve({ ok: true });
+      } else {
+        resolve({ ok: false, detail: output.trim() || `exited with code ${code}` });
+      }
+    });
+  });
+}
+
 export type PrintModeWorkerOptions = {
   effortFlag?: string;
   extraArgs?: string[];
+  probeArgs?: string[];
 };
 
 export function printModeWorker(
@@ -68,10 +92,11 @@ export function printModeWorker(
   unattendedFlag: string,
   options: PrintModeWorkerOptions = {},
 ): WorkerAdapter {
-  const { effortFlag, extraArgs } = options;
+  const { effortFlag, extraArgs, probeArgs } = options;
   return createWorkerAdapter({
     bin,
     effortFlag,
+    probe: probeArgs === undefined ? undefined : () => execProbe(bin, probeArgs),
     spawn(request: SpawnRequest) {
       const args = ["-p", ...(extraArgs ?? []), "--model", request.model];
       if (request.effort !== undefined && effortFlag !== undefined) {

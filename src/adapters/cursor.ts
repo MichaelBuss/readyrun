@@ -9,5 +9,8 @@ export type CursorWorkerOptions = {
 
 export function cursor(options: CursorWorkerOptions = {}): WorkerAdapter {
   assertKnownKeys(options, knownCursorKeys);
-  return printModeWorker("agent", "--yolo", { extraArgs: options.extraArgs });
+  return printModeWorker("agent", "--yolo", {
+    extraArgs: options.extraArgs,
+    probeArgs: ["status"],
+  });
 }
