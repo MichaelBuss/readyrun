@@ -47,13 +47,21 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: Read origin/main's version as a bump baseline
+        id: baseline
+        run: |
+          set -euo pipefail
+          git fetch origin main --depth=1
+          VERSION="$(git show origin/main:jsr.json | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version")"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
       - id: bump
         env:
           COMMENT: ${{ github.event.comment.body }}
+          BASELINE: ${{ steps.baseline.outputs.version }}
         run: |
           set -euo pipefail
           SPEC="$(echo "$COMMENT" | awk '{print $2}')"
-          OUTPUT="$(node scripts/bump.ts ${SPEC:+"$SPEC"})"
+          OUTPUT="$(node scripts/bump.ts ${SPEC:+"$SPEC"} --baseline "$BASELINE")"
           echo "$OUTPUT"
           VERSION="${OUTPUT##* → }"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
