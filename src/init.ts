@@ -49,6 +49,146 @@ export type InitOptions = {
   answers?: InitAnswers;
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function extraKeys(value: object, known: ReadonlySet<string>): string[] {
+  return Object.keys(value).filter((key) => !known.has(key));
+}
+
+function requiredString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? undefined : trimmed;
+}
+
+function parseInitTracker(
+  value: unknown,
+): { ok: true; tracker: InitTracker } | { ok: false; message: string } {
+  if (!isRecord(value)) {
+    return { ok: false, message: "Answers must include a tracker" };
+  }
+  if (value.kind === "github") {
+    const extra = extraKeys(value, new Set(["kind", "repo", "labels"]));
+    if (extra.length > 0) {
+      return { ok: false, message: `Unknown tracker key${extra.length === 1 ? "" : "s"}: ${extra.join(", ")}` };
+    }
+    const repo = requiredString(value.repo);
+    if (repo === undefined) {
+      return { ok: false, message: "GitHub tracker requires a repo" };
+    }
+    if (!Array.isArray(value.labels)) {
+      return { ok: false, message: "GitHub tracker requires labels" };
+    }
+    const labels: string[] = [];
+    for (const label of value.labels) {
+      if (typeof label !== "string") {
+        return { ok: false, message: "GitHub tracker requires labels" };
+      }
+      const trimmed = label.trim();
+      if (trimmed.length > 0) {
+        labels.push(trimmed);
+      }
+    }
+    if (labels.length === 0) {
+      return { ok: false, message: "GitHub tracker requires labels" };
+    }
+    return { ok: true, tracker: { kind: "github", repo, labels } };
+  }
+  if (value.kind === "linear") {
+    const extra = extraKeys(value, new Set(["kind", "state", "label", "project"]));
+    if (extra.length > 0) {
+      return { ok: false, message: `Unknown tracker key${extra.length === 1 ? "" : "s"}: ${extra.join(", ")}` };
+    }
+    const state = requiredString(value.state);
+    const label = requiredString(value.label);
+    const project = requiredString(value.project);
+    const selectors = [state, label, project].filter((selector) => selector !== undefined);
+    if (selectors.length !== 1) {
+      return { ok: false, message: "Linear tracker requires a state, label, or project" };
+    }
+    if (state !== undefined) {
+      return { ok: true, tracker: { kind: "linear", state } };
+    }
+    if (project !== undefined) {
+      return { ok: true, tracker: { kind: "linear", project } };
+    }
+    if (label === undefined) {
+      return { ok: false, message: "Linear tracker requires a state, label, or project" };
+    }
+    return { ok: true, tracker: { kind: "linear", label } };
+  }
+  return { ok: false, message: "Tracker must be github or linear" };
+}
+
+function parseInitWorker(
+  value: unknown,
+): { ok: true; worker: InitWorker } | { ok: false; message: string } {
+  if (!isRecord(value)) {
+    return { ok: false, message: "Answers must include a worker" };
+  }
+  if (value.kind === "cursor" || value.kind === "claude") {
+    const extra = extraKeys(value, new Set(["kind"]));
+    if (extra.length > 0) {
+      return { ok: false, message: `Unknown worker key${extra.length === 1 ? "" : "s"}: ${extra.join(", ")}` };
+    }
+    return { ok: true, worker: { kind: value.kind } };
+  }
+  if (value.kind === "custom") {
+    const extra = extraKeys(value, new Set(["kind", "bin", "unattendedFlag"]));
+    if (extra.length > 0) {
+      return { ok: false, message: `Unknown worker key${extra.length === 1 ? "" : "s"}: ${extra.join(", ")}` };
+    }
+    const bin = requiredString(value.bin);
+    const unattendedFlag = requiredString(value.unattendedFlag);
+    if (bin === undefined || unattendedFlag === undefined) {
+      return { ok: false, message: "Custom worker requires a bin and unattendedFlag" };
+    }
+    return { ok: true, worker: { kind: "custom", bin, unattendedFlag } };
+  }
+  return { ok: false, message: "Worker must be cursor, claude, or custom" };
+}
+
+export function parseInitAnswers(
+  value: unknown,
+): { ok: true; answers: InitAnswers } | { ok: false; message: string } {
+  if (!isRecord(value)) {
+    return { ok: false, message: "Answers must be a JSON object" };
+  }
+  const extra = extraKeys(value, new Set(["tracker", "worker", "model", "effort"]));
+  if (extra.length > 0) {
+    return {
+      ok: false,
+      message: `Unknown answers key${extra.length === 1 ? "" : "s"}: ${extra.join(", ")}`,
+    };
+  }
+  const tracker = parseInitTracker(value.tracker);
+  if (!tracker.ok) {
+    return tracker;
+  }
+  const worker = parseInitWorker(value.worker);
+  if (!worker.ok) {
+    return worker;
+  }
+  const model = requiredString(value.model);
+  if (model === undefined) {
+    return { ok: false, message: "Answers must include a model" };
+  }
+  if (value.effort === undefined) {
+    return { ok: true, answers: { tracker: tracker.tracker, worker: worker.worker, model } };
+  }
+  if (typeof value.effort !== "string" || !isEffort(value.effort)) {
+    return { ok: false, message: "Effort must be low, medium, high, xhigh, or max" };
+  }
+  return {
+    ok: true,
+    answers: { tracker: tracker.tracker, worker: worker.worker, model, effort: value.effort },
+  };
+}
+
 export type ListedModel = {
   id: string;
   label: string;
