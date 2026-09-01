@@ -620,6 +620,45 @@ test("a Worker Adapter probe that reports ok does not fail Doctor", async () => 
   }
 });
 
+test("a missing Worker binary skips the probe rather than running it against a binary that isn't there", async () => {
+  const repo = await throwawayRepo();
+  const chunks: string[] = [];
+  let probed = false;
+  const config = defineConfig({
+    tracker: memoryTracker({
+      tickets: [ticket({ id: "52" })],
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+    }),
+    worker: createWorkerAdapter({
+      bin: "/no/such/readyrun-worker",
+      probe: () => {
+        probed = true;
+        return Promise.resolve({ ok: true });
+      },
+    }),
+    model: "composer-2",
+  });
+  try {
+    const doctorExit = await doctor({
+      config,
+      cwd: repo.cwd,
+      stdout: {
+        write(chunk: string) {
+          chunks.push(chunk);
+          return true;
+        },
+      },
+    });
+    assert.equal(doctorExit, 1);
+    assert.match(chunks.join(""), /Doctor: Worker binary "\/no\/such\/readyrun-worker" is missing/);
+    assert.doesNotMatch(chunks.join(""), /probe/);
+    assert.equal(probed, false);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
 test("a Worker Adapter with no probe defined keeps today's existence-only check", async () => {
   const repo = await throwawayRepo();
   const worker = recordingWorker({ exitCode: 0 });

@@ -58,6 +58,12 @@ export function spawnWorkerBinary(
   });
 }
 
+// Not every coding CLI's status/whoami command documents an exit code that
+// distinguishes logged-in from not (Claude's `auth status` does; Cursor's
+// `agent status` does not). Recognizing this text alongside the exit code
+// keeps the probe honest for CLIs that always exit 0 but print the failure.
+const authFailureText = /not authenticated|not logged in|unauthenticated|authentication required/i;
+
 export function execProbe(bin: string, args: string[]): Promise<ProbeResult> {
   return new Promise((resolve) => {
     const child = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"] });
@@ -72,7 +78,9 @@ export function execProbe(bin: string, args: string[]): Promise<ProbeResult> {
       resolve({ ok: false, detail: error.message });
     });
     child.on("close", (code) => {
-      if (code === 0) {
+      if (authFailureText.test(output)) {
+        resolve({ ok: false, detail: output.trim() });
+      } else if (code === 0) {
         resolve({ ok: true });
       } else {
         resolve({ ok: false, detail: output.trim() || `exited with code ${code}` });
