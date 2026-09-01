@@ -89,12 +89,12 @@ export function previewPublish(input: {
 
   if (!alreadyPublished) {
     const headline = `Ready to ship ${input.localVersion}`;
-    const detail = `${pkg} is not on JSR yet; running the release workflow now would publish it.`;
+    const detail = `${pkg} is not on JSR yet; merging this PR will publish it.`;
     return {
       willPublish: true,
       headline,
       detail,
-      markdown: `**Ready to ship.** \`${pkg}\` is not on JSR yet; running the release workflow would publish it.`,
+      markdown: `**Ready to ship.** \`${pkg}\` is not on JSR yet; merging this PR will publish it.`,
     };
   }
 
@@ -109,17 +109,17 @@ export function previewPublish(input: {
     };
   }
 
-  const headline = "Included in the next release";
-  const detail = `${pkg} is already on JSR. Published files changed (${fileList}); they will ship the next time the release workflow bumps the version.`;
+  const headline = "Will not publish until bumped";
+  const detail = `${pkg} is already on JSR. Published files changed (${fileList}); merging as-is will not publish them.`;
   return {
     willPublish: false,
     headline,
     detail,
-    markdown: `**Included in the next release.** \`${pkg}\` is already on JSR.
+    markdown: `**Will not publish until bumped.** \`${pkg}\` is already on JSR.
 
 Published files in this PR: ${fileList}.
 
-These will ship the next time someone runs the release workflow (Actions → CI → Run workflow) and bumps the version.`,
+No pressure — this is just informational, merging will not fail. Comment \`/bump\` (or \`/bump minor\` / \`/bump major\`) on this PR whenever you want these changes to ship, and it will push a version bump to this branch.`,
   };
 }
 

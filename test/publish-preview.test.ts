@@ -60,7 +60,7 @@ test("the same version with only test or docs changes has no package changes", (
   assert.equal(result.headline, "No package changes");
 });
 
-test("the same version with published file changes is included in the next release", () => {
+test("the same version with published file changes will not publish until bumped", () => {
   const result = previewPublish({
     name: "@readyrun/readyrun",
     localVersion: "0.1.1",
@@ -69,8 +69,8 @@ test("the same version with published file changes is included in the next relea
     publish: publish.publish,
   });
   assert.equal(result.willPublish, false);
-  assert.equal(result.headline, "Included in the next release");
-  assert.match(result.markdown, /release workflow/);
+  assert.equal(result.headline, "Will not publish until bumped");
+  assert.match(result.markdown, /\/bump/);
   assert.match(result.detail, /src\/init\.ts/);
 });
 
