@@ -22,15 +22,18 @@ export type SpawnRequest = {
   prompt: string;
 };
 
+export type ProbeResult = { ok: true } | { ok: false; detail: string };
+
 export type WorkerAdapter = {
   readonly [brand]: true;
   readonly bin?: string;
   readonly effortFlag?: string;
+  readonly probe?: () => Promise<ProbeResult>;
   spawn(request: SpawnRequest): Promise<{ exitCode: number }>;
 };
 
 export function createWorkerAdapter(
-  methods: Partial<Pick<WorkerAdapter, "spawn" | "bin" | "effortFlag">> = {},
+  methods: Partial<Pick<WorkerAdapter, "spawn" | "bin" | "effortFlag" | "probe">> = {},
 ): WorkerAdapter {
   return {
     [brand]: true,
@@ -55,9 +58,41 @@ export function spawnWorkerBinary(
   });
 }
 
+// Not every coding CLI's status/whoami command documents an exit code that
+// distinguishes logged-in from not (Claude's `auth status` does; Cursor's
+// `agent status` does not). Recognizing this text alongside the exit code
+// keeps the probe honest for CLIs that always exit 0 but print the failure.
+const authFailureText = /not authenticated|not logged in|unauthenticated|authentication required/i;
+
+export function execProbe(bin: string, args: string[]): Promise<ProbeResult> {
+  return new Promise((resolve) => {
+    const child = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let output = "";
+    child.stdout?.on("data", (chunk: Buffer) => {
+      output += chunk.toString();
+    });
+    child.stderr?.on("data", (chunk: Buffer) => {
+      output += chunk.toString();
+    });
+    child.on("error", (error) => {
+      resolve({ ok: false, detail: error.message });
+    });
+    child.on("close", (code) => {
+      if (authFailureText.test(output)) {
+        resolve({ ok: false, detail: output.trim() });
+      } else if (code === 0) {
+        resolve({ ok: true });
+      } else {
+        resolve({ ok: false, detail: output.trim() || `exited with code ${code}` });
+      }
+    });
+  });
+}
+
 export type PrintModeWorkerOptions = {
   effortFlag?: string;
   extraArgs?: string[];
+  probeArgs?: string[];
 };
 
 export function printModeWorker(
@@ -65,10 +100,11 @@ export function printModeWorker(
   unattendedFlag: string,
   options: PrintModeWorkerOptions = {},
 ): WorkerAdapter {
-  const { effortFlag, extraArgs } = options;
+  const { effortFlag, extraArgs, probeArgs } = options;
   return createWorkerAdapter({
     bin,
     effortFlag,
+    probe: probeArgs === undefined ? undefined : () => execProbe(bin, probeArgs),
     spawn(request: SpawnRequest) {
       const args = ["-p", ...(extraArgs ?? []), "--model", request.model];
       if (request.effort !== undefined && effortFlag !== undefined) {

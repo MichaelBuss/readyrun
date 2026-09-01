@@ -12,5 +12,6 @@ export function claude(options: ClaudeWorkerOptions = {}): WorkerAdapter {
   return printModeWorker("claude", "--dangerously-skip-permissions", {
     effortFlag: "--effort",
     extraArgs: options.extraArgs,
+    probeArgs: ["auth", "status"],
   });
 }

@@ -26,6 +26,10 @@ writeFileSync(process.env.READYRUN_SPAWN_RECEIPT, JSON.stringify({
   argv: process.argv.slice(2),
   cwd: process.cwd(),
 }));
+if (process.env.READYRUN_STUB_STDOUT !== undefined) {
+  process.stdout.write(process.env.READYRUN_STUB_STDOUT);
+}
+process.exitCode = Number(process.env.READYRUN_STUB_EXIT_CODE ?? "0");
 `;
 
 async function withRecordingPath(
@@ -406,7 +410,8 @@ describe("Worker Adapters", { concurrency: false }, () => {
           doctorChunks.join(""),
           /Doctor: effort is set but this Worker Adapter does not map it/,
         );
-        assert.equal(existsSync(receiptPath), false);
+        const receipt = await readReceipt(receiptPath);
+        assert.deepEqual(receipt.argv, ["status"]);
       } finally {
         await repo.cleanup();
       }
@@ -585,7 +590,7 @@ describe("Worker Adapters", { concurrency: false }, () => {
     });
   });
 
-  test("Doctor does not spawn the Worker or log it in when the binary is present", async () => {
+  test("Doctor runs the Cursor Worker Adapter's probe and passes when it reports authenticated", async () => {
     const repo = await throwawayRepo();
     try {
       await withRecordingPath(["agent"], async ({ receiptPath }) => {
@@ -597,6 +602,215 @@ describe("Worker Adapters", { concurrency: false }, () => {
               labels: ["ready-for-agent"],
             }),
             worker: cursor(),
+            model: "composer-2",
+          }),
+          cwd: repo.cwd,
+          stdout: silent,
+        });
+        assert.equal(doctorExit, 0);
+        const receipt = await readReceipt(receiptPath);
+        assert.deepEqual(receipt.argv, ["status"]);
+      });
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("Doctor fails with a probe-specific message when the Cursor CLI reports not authenticated", async () => {
+    const repo = await throwawayRepo();
+    const previousExitCode = process.env.READYRUN_STUB_EXIT_CODE;
+    process.env.READYRUN_STUB_EXIT_CODE = "1";
+    try {
+      await withRecordingPath(["agent"], async () => {
+        const chunks: string[] = [];
+        const doctorExit = await doctor({
+          config: defineConfig({
+            tracker: memoryTracker({
+              tickets: [ticket({ id: "52" })],
+              ready: "unblocked",
+              labels: ["ready-for-agent"],
+            }),
+            worker: cursor(),
+            model: "composer-2",
+          }),
+          cwd: repo.cwd,
+          stdout: {
+            write(chunk: string) {
+              chunks.push(chunk);
+              return true;
+            },
+          },
+        });
+        assert.equal(doctorExit, 1);
+        assert.match(chunks.join(""), /Doctor: Worker Adapter probe failed/);
+        assert.doesNotMatch(chunks.join(""), /is missing/);
+      });
+    } finally {
+      if (previousExitCode === undefined) {
+        delete process.env.READYRUN_STUB_EXIT_CODE;
+      } else {
+        process.env.READYRUN_STUB_EXIT_CODE = previousExitCode;
+      }
+      await repo.cleanup();
+    }
+  });
+
+  test("Doctor fails the Cursor probe on auth-failure text even when the CLI exits 0", async () => {
+    const repo = await throwawayRepo();
+    const previousStdout = process.env.READYRUN_STUB_STDOUT;
+    process.env.READYRUN_STUB_STDOUT = "Not authenticated. Run agent login.";
+    try {
+      await withRecordingPath(["agent"], async () => {
+        const chunks: string[] = [];
+        const doctorExit = await doctor({
+          config: defineConfig({
+            tracker: memoryTracker({
+              tickets: [ticket({ id: "52" })],
+              ready: "unblocked",
+              labels: ["ready-for-agent"],
+            }),
+            worker: cursor(),
+            model: "composer-2",
+          }),
+          cwd: repo.cwd,
+          stdout: {
+            write(chunk: string) {
+              chunks.push(chunk);
+              return true;
+            },
+          },
+        });
+        assert.equal(doctorExit, 1);
+        assert.match(chunks.join(""), /Doctor: Worker Adapter probe failed/);
+      });
+    } finally {
+      if (previousStdout === undefined) {
+        delete process.env.READYRUN_STUB_STDOUT;
+      } else {
+        process.env.READYRUN_STUB_STDOUT = previousStdout;
+      }
+      await repo.cleanup();
+    }
+  });
+
+  test("Doctor runs the Claude Worker Adapter's probe and passes when it reports authenticated", async () => {
+    const repo = await throwawayRepo();
+    try {
+      await withRecordingPath(["claude"], async ({ receiptPath }) => {
+        const doctorExit = await doctor({
+          config: defineConfig({
+            tracker: memoryTracker({
+              tickets: [ticket({ id: "52" })],
+              ready: "unblocked",
+              labels: ["ready-for-agent"],
+            }),
+            worker: claude(),
+            model: "opus",
+          }),
+          cwd: repo.cwd,
+          stdout: silent,
+        });
+        assert.equal(doctorExit, 0);
+        const receipt = await readReceipt(receiptPath);
+        assert.deepEqual(receipt.argv, ["auth", "status"]);
+      });
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("Doctor fails with a probe-specific message when the Claude CLI reports not authenticated", async () => {
+    const repo = await throwawayRepo();
+    const previousExitCode = process.env.READYRUN_STUB_EXIT_CODE;
+    process.env.READYRUN_STUB_EXIT_CODE = "1";
+    try {
+      await withRecordingPath(["claude"], async () => {
+        const chunks: string[] = [];
+        const doctorExit = await doctor({
+          config: defineConfig({
+            tracker: memoryTracker({
+              tickets: [ticket({ id: "52" })],
+              ready: "unblocked",
+              labels: ["ready-for-agent"],
+            }),
+            worker: claude(),
+            model: "opus",
+          }),
+          cwd: repo.cwd,
+          stdout: {
+            write(chunk: string) {
+              chunks.push(chunk);
+              return true;
+            },
+          },
+        });
+        assert.equal(doctorExit, 1);
+        assert.match(chunks.join(""), /Doctor: Worker Adapter probe failed/);
+        assert.doesNotMatch(chunks.join(""), /is missing/);
+      });
+    } finally {
+      if (previousExitCode === undefined) {
+        delete process.env.READYRUN_STUB_EXIT_CODE;
+      } else {
+        process.env.READYRUN_STUB_EXIT_CODE = previousExitCode;
+      }
+      await repo.cleanup();
+    }
+  });
+
+  test("a Run also refuses to start when the Cursor CLI probe reports not authenticated", async () => {
+    const repo = await throwawayRepo();
+    const previousExitCode = process.env.READYRUN_STUB_EXIT_CODE;
+    process.env.READYRUN_STUB_EXIT_CODE = "1";
+    try {
+      await withRecordingPath(["agent"], async ({ receiptPath }) => {
+        const chunks: string[] = [];
+        const runExit = await run({
+          config: defineConfig({
+            tracker: memoryTracker({
+              tickets: [ticket({ id: "52" })],
+              ready: "unblocked",
+              labels: ["ready-for-agent"],
+            }),
+            worker: cursor(),
+            model: "composer-2",
+          }),
+          cap: 1,
+          cwd: repo.cwd,
+          stdout: {
+            write(chunk: string) {
+              chunks.push(chunk);
+              return true;
+            },
+          },
+        });
+        assert.equal(runExit, 1);
+        assert.match(chunks.join(""), /Doctor: Worker Adapter probe failed/);
+        const receipt = await readReceipt(receiptPath);
+        assert.deepEqual(receipt.argv, ["status"]);
+      });
+    } finally {
+      if (previousExitCode === undefined) {
+        delete process.env.READYRUN_STUB_EXIT_CODE;
+      } else {
+        process.env.READYRUN_STUB_EXIT_CODE = previousExitCode;
+      }
+      await repo.cleanup();
+    }
+  });
+
+  test("Doctor does not spawn a custom Worker Adapter with no probe defined", async () => {
+    const repo = await throwawayRepo();
+    try {
+      await withRecordingPath(["readyrun-worker"], async ({ bin, receiptPath }) => {
+        const doctorExit = await doctor({
+          config: defineConfig({
+            tracker: memoryTracker({
+              tickets: [ticket({ id: "52" })],
+              ready: "unblocked",
+              labels: ["ready-for-agent"],
+            }),
+            worker: custom({ bin, unattendedFlag: "--go" }),
             model: "composer-2",
           }),
           cwd: repo.cwd,
