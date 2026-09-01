@@ -47,7 +47,7 @@ The check that config matches the **Tracker**. A **Run** will not start if it fa
 _Avoid_: lint (SpeechDeck’s word), validate
 
 **Init**:
-The command that writes a stub `readyrun.config.ts` in the **Consumer** root. Interactive (Clack). It does not assemble `run`. It also makes sure the **Consumer**'s `.gitignore` covers `.readyrun/`, the directory `run` creates **Worktrees** under, so a **Consumer** never has to add that line by hand.
+The command that writes a stub `readyrun.config.ts` in the **Consumer** root. Interactive by default (Clack); scriptable with `--answers <file>` so a CI job or agent can drive it without a TTY. It does not assemble `run`. It also makes sure the **Consumer**'s `.gitignore` covers `.readyrun/`, the directory `run` creates **Worktrees** under, so a **Consumer** never has to add that line by hand.
 _Avoid_: setup-ralph, generated `ralph/` folder, command wizard
 
 **Consumer**:
@@ -82,7 +82,7 @@ _Avoid_: max mode (Cursor's interactive slash command), ultracode (a Claude Code
 - A **Run** (and **Doctor**) refuse to start if config lies about the **Frontier**: missing labels, repo ≠ remote, `unblocked` claimed but the **Tracker** cannot say so, unknown keys. Unused knobs (a label map with no matching **Tickets**) warn. The check is once at **Run** start, not every iteration.
 - When a **Worker Adapter** defines a probe, **Doctor** runs it once the binary is confirmed to exist, and a probe failure is reported distinctly from a missing binary. A **Worker Adapter** with no probe (`custom` today) keeps the existence-only check unchanged.
 - **ReadyRun** loads one `readyrun.config.ts` (same basename, JS/MJS allowed) at the **Consumer** root. **Init** writes that stub. There is no generated scripts folder and no search through other config filenames.
-- **Init** is the only Clack UI. `run` and `doctor` are flags plus stdout. There is no wizard that assembles a `run` command. Bare `readyrun` is usage, not a menu. An unattended **Run** must not prompt.
+- **Init** is the only Clack UI, and Clack is its default. `--answers <file>` is the scriptable path through the same writer; it is not a second prompt UI. `run` and `doctor` are flags plus stdout. There is no wizard that assembles a `run` command. Bare `readyrun` is usage, not a menu. An unattended **Run** must not prompt.
 - A **Run** cannot start without a cap: a maximum number of **Tickets** it may start. Hitting the cap stops the **Run**; it does not prompt. A single-**Ticket** invocation is a **Run** with cap 1. There is no unlimited **Run**.
 - A v0 **Run** starts one **Worker** at a time. That is behaviour, not the isolation model: a **Worker** is already one **Ticket**, one **Branch**, one **Worktree**, so concurrency later is a knob, not a rewrite.
 - **Permissions** are first-class on the **Run**: `"ask"` or `"unattended"`. Default `"ask"`. Never implied by looping. The **Worker Adapter** maps `"unattended"` to its flag; `custom` is told the flag. Sandbox-bypass is not a third value in v0.
@@ -120,6 +120,9 @@ _Avoid_: max mode (Cursor's interactive slash command), ultracode (a Claude Code
 >
 > **Dev:** "Can I get a Clack menu that builds `readyrun run --max 5`?"
 > **Domain expert:** "No. Clack is **Init**. `run` is flags. Unattended cannot ask you."
+>
+> **Dev:** "Can CI or an agent run **Init** without a TTY?"
+> **Domain expert:** "Yes. Default is Clack. Pass `--answers` with the same shape the prompts collect. That does not make **Init** a `run` wizard."
 >
 > **Dev:** "Do I put the branch name on the GitHub issue?"
 > **Domain expert:** "No. When the **Worker** starts, the harness makes a **Branch** from the **Ticket** id. You don't author that."
@@ -168,4 +171,4 @@ _Avoid_: max mode (Cursor's interactive slash command), ultracode (a Claude Code
 - **Frontier query** — resolved: `ready: "unblocked"` + selector + optional root. Not parent-only, not labels without unblocked.
 - **Pick order** — resolved: stable **Tracker Adapter** order (GitHub: issue number ascending). No priority on the **Ticket**.
 - **Config file** — resolved: `readyrun.config.ts` at the **Consumer** root. **Init** writes it. No `ralph/` scripts, no cosmiconfig.
-- **Clack** — resolved: **Init** only. Not a command assembler in front of `run`.
+- **Clack** — resolved: **Init** only, and interactive by default. `--answers` scripts **Init** without a TTY; it is not a command assembler in front of `run`.
