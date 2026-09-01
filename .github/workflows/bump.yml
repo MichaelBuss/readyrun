@@ -1,0 +1,104 @@
+name: Bump version
+
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump for the checked-out branch
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: read
+
+jobs:
+  bump:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request &&
+       startsWith(github.event.comment.body, '/bump'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Require a maintainer to trigger a /bump comment
+        if: github.event_name == 'issue_comment'
+        env:
+          ASSOCIATION: ${{ github.event.comment.author_association }}
+        run: |
+          case "$ASSOCIATION" in
+            OWNER|MEMBER|COLLABORATOR) ;;
+            *)
+              echo "::error::Only maintainers can trigger /bump (got: $ASSOCIATION)."
+              exit 1
+              ;;
+          esac
+      - name: Resolve target branch, bump kind, and PR number
+        id: target
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          COMMENT: ${{ github.event.comment.body }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          DISPATCH_BUMP: ${{ inputs.bump }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "ref=$REF_NAME" >> "$GITHUB_OUTPUT"
+            echo "spec=$DISPATCH_BUMP" >> "$GITHUB_OUTPUT"
+            echo "pr=" >> "$GITHUB_OUTPUT"
+          else
+            REF="$(gh pr view "$PR_NUMBER" --repo "$REPO" --json headRefName -q .headRefName)"
+            echo "ref=$REF" >> "$GITHUB_OUTPUT"
+            echo "spec=$(echo "$COMMENT" | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+            echo "pr=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.target.outputs.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - id: bump
+        env:
+          SPEC: ${{ steps.target.outputs.spec }}
+        run: |
+          set -euo pipefail
+          OUTPUT="$(node scripts/bump.ts ${SPEC:+"$SPEC"})"
+          echo "$OUTPUT"
+          VERSION="${OUTPUT##* → }"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Commit and push the bump
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json jsr.json
+          git commit -m "chore: bump version to v${{ steps.bump.outputs.version }}"
+          git push origin "HEAD:${{ steps.target.outputs.ref }}"
+      - name: Confirm on the PR
+        if: steps.target.outputs.pr != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh pr comment "${{ steps.target.outputs.pr }}" --repo "$REPO" \
+            --body "Bumped to \`v${{ steps.bump.outputs.version }}\`. Merging this PR will publish it."
+      - name: Summary
+        if: steps.target.outputs.pr == ''
+        run: |
+          echo "::notice::Bumped ${{ steps.target.outputs.ref }} to v${{ steps.bump.outputs.version }}."
