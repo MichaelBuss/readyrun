@@ -24,6 +24,84 @@ jobs:
       - run: npm test
       - run: npx jsr publish --dry-run
 
+  publish-preview:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      headline: ${{ steps.preview.outputs.headline }}
+      ok: ${{ steps.preview.outputs.ok }}
+      detail: ${{ steps.preview.outputs.detail }}
+      markdown: ${{ steps.preview.outputs.markdown }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - id: preview
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          git diff --name-only "$BASE_SHA" HEAD > /tmp/changed.txt
+          if ! curl -fsSL https://jsr.io/@readyrun/readyrun/meta.json -o /tmp/jsr-meta.json; then
+            {
+              echo "headline=Could not reach JSR"
+              echo "ok=true"
+              echo "willPublish=false"
+              echo "detail<<EOF"
+              echo "Could not fetch jsr.io metadata; skipping publish preview."
+              echo "EOF"
+              echo "markdown<<EOF"
+              echo "Could not fetch jsr.io metadata; skipping publish preview."
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          node --experimental-strip-types scripts/publish-preview.ts \
+            --jsr jsr.json \
+            --meta /tmp/jsr-meta.json \
+            --changed-files /tmp/changed.txt \
+            --ci
+
+  publish-on-merge:
+    if: github.event_name == 'pull_request'
+    needs: publish-preview
+    name: ${{ needs.publish-preview.outputs.headline }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Comment and fail if merge would skip a needed publish
+        env:
+          DETAIL: ${{ needs.publish-preview.outputs.detail }}
+          OK: ${{ needs.publish-preview.outputs.ok }}
+          MARKDOWN: ${{ needs.publish-preview.outputs.markdown }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$DETAIL" | tee -a "$GITHUB_STEP_SUMMARY"
+          MARKER="<!-- readyrun-publish-preview -->"
+          {
+            printf '%s\n\n' "$MARKER"
+            printf '%s\n' "$MARKDOWN"
+          } > /tmp/comment.md
+          EXISTING="$(gh api --paginate "repos/${REPO}/issues/${PR_NUMBER}/comments" --jq ".[] | select(.body | contains(\"${MARKER}\")) | .id" | awk 'NR==1')"
+          if [ -n "$EXISTING" ]; then
+            gh api --method PATCH "repos/${REPO}/issues/comments/${EXISTING}" -F body=@/tmp/comment.md
+          else
+            gh api --method POST "repos/${REPO}/issues/${PR_NUMBER}/comments" -F body=@/tmp/comment.md
+          fi
+          if [ "$OK" != "true" ]; then
+            echo "::error::${DETAIL}"
+            exit 1
+          fi
+          echo "::notice::${DETAIL}"
+
   publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
