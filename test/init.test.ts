@@ -203,6 +203,30 @@ test("init appends .readyrun/ to an existing .gitignore that lacks it", async ()
   });
 });
 
+test("init does not duplicate .readyrun/ when the exact line is already present", async () => {
+  await withConsumerRoot(async (cwd) => {
+    await writeFile(join(cwd, ".gitignore"), "node_modules/\n.readyrun/\n");
+    const exitCode = await init({ cwd, answers: githubCursorAnswers });
+    assert.equal(exitCode, 0);
+    assert.equal(
+      await readFile(join(cwd, ".gitignore"), "utf8"),
+      "node_modules/\n.readyrun/\n",
+    );
+  });
+});
+
+test("init does not duplicate .readyrun/ when a broader pattern already covers it", async () => {
+  await withConsumerRoot(async (cwd) => {
+    await writeFile(join(cwd, ".gitignore"), "node_modules/\n.ready*\n");
+    const exitCode = await init({ cwd, answers: githubCursorAnswers });
+    assert.equal(exitCode, 0);
+    assert.equal(
+      await readFile(join(cwd, ".gitignore"), "utf8"),
+      "node_modules/\n.ready*\n",
+    );
+  });
+});
+
 test("the Init outro links the written stub", () => {
   assert.equal(
     configWrittenMessage("/tmp/readyrun.config.ts"),

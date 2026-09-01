@@ -446,11 +446,39 @@ async function readGitignore(path: string): Promise<string | undefined> {
   }
 }
 
+function globToRegExp(pattern: string): RegExp {
+  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+  const wildcarded = escaped.replace(/\*/g, ".*").replace(/\?/g, ".");
+  return new RegExp(`^${wildcarded}$`);
+}
+
+/**
+ * Whether a single .gitignore line already covers the .readyrun/ directory,
+ * either as the exact line or a broader pattern (e.g. `.ready*`, `.*`) that
+ * would match it too. Patterns anchored to a nested path (containing a `/`
+ * other than a trailing one) are conservatively treated as not covering it.
+ */
+function coversReadyrunDir(line: string): boolean {
+  const trimmed = line.trim();
+  if (trimmed.length === 0 || trimmed.startsWith("#") || trimmed.startsWith("!")) {
+    return false;
+  }
+  const unanchored = trimmed.startsWith("/") ? trimmed.slice(1) : trimmed;
+  const dirless = unanchored.endsWith("/") ? unanchored.slice(0, -1) : unanchored;
+  if (dirless.length === 0 || dirless.includes("/")) {
+    return false;
+  }
+  return globToRegExp(dirless).test(".readyrun");
+}
+
 async function ensureGitignored(cwd: string): Promise<void> {
   const path = resolve(cwd, ".gitignore");
   const existing = await readGitignore(path);
   if (existing === undefined) {
     await writeFile(path, `${gitignoreEntry}\n`);
+    return;
+  }
+  if (existing.split(/\r?\n/).some(coversReadyrunDir)) {
     return;
   }
   const needsNewline = existing.length > 0 && !existing.endsWith("\n");
