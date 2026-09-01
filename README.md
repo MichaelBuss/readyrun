@@ -18,6 +18,13 @@ npx jsr add @readyrun/readyrun
 import { defineConfig, github, cursor } from "@readyrun/readyrun";
 ```
 
+`cursor()` and `claude()` accept an optional `extraArgs: string[]` for a static vendor flag beyond model — Effort already has a first-class `effort` config default (see below), but any other flag your Worker binary takes can be passed the same way `custom()`'s `args` are, without dropping to `custom()`:
+
+```ts
+cursor({ extraArgs: ["--reasoning-effort", "high"] });
+claude({ extraArgs: ["--verbose"] });
+```
+
 ```sh
 readyrun init
 readyrun doctor
