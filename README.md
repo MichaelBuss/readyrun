@@ -57,6 +57,7 @@ defineConfig({ tracker: jira, worker: cursor(), model: "composer-2" });
 
 ```sh
 readyrun init
+readyrun init --answers answers.json
 readyrun doctor
 readyrun run --max 5
 ```
@@ -65,6 +66,7 @@ JSR does not put `readyrun` on PATH. Run the `cli` export as a program (Deno):
 
 ```sh
 deno run -A jsr:@readyrun/readyrun/cli init
+deno run -A jsr:@readyrun/readyrun/cli init --answers answers.json
 deno run -A jsr:@readyrun/readyrun/cli doctor
 deno run -A jsr:@readyrun/readyrun/cli run --max 5
 ```
@@ -87,6 +89,7 @@ process.exitCode = await cli({ argv: process.argv.slice(2) });
 
 ```sh
 pnpm readyrun init
+pnpm readyrun init --answers answers.json
 pnpm readyrun doctor
 pnpm readyrun run --max 5
 ```

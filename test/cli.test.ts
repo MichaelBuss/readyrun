@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -300,14 +300,20 @@ test("multiple config files of the same basename are refused", async () => {
   );
 });
 
-async function invokeCli(bin: string): Promise<{ stdout: string; status: number }> {
-  return promisify(execFile)(process.execPath, [bin], {
+async function invokeCli(
+  bin: string,
+  args: string[] = [],
+  options: { cwd?: string; timeout?: number } = {},
+): Promise<{ stdout: string; status: number }> {
+  return promisify(execFile)(process.execPath, [bin, ...args], {
     encoding: "utf8",
+    cwd: options.cwd,
+    timeout: options.timeout,
   }).then(
     (ok) => ({ stdout: ok.stdout, status: 0 }),
-    (error: { stdout?: string; code?: number }) => ({
+    (error: { stdout?: string; code?: number; killed?: boolean }) => ({
       stdout: error.stdout ?? "",
-      status: error.code ?? 1,
+      status: error.killed ? 124 : error.code ?? 1,
     }),
   );
 }
@@ -399,6 +405,108 @@ test("init writes the stub without loading a config file", async () => {
       assert.deepEqual(
         [...await readdir(cwd)].sort(),
         [".gitignore", "readyrun.config.ts"],
+      );
+    },
+  );
+});
+
+test("init with no flags leaves answers unset so Clack still runs", async () => {
+  const received: InitOptions[] = [];
+  const exitCode = await cli({
+    argv: ["init"],
+    cwd: "/consumer",
+    stdout: silent,
+    init: async (options) => {
+      received.push(options);
+      return 0;
+    },
+  });
+  assert.equal(exitCode, 0);
+  assert.equal(received[0]?.answers, undefined);
+});
+
+test("init with an unknown flag refuses instead of prompting", async () => {
+  const chunks: string[] = [];
+  let inited = false;
+  const exitCode = await cli({
+    argv: ["init", "--tracker", "github"],
+    stdout: {
+      write(chunk: string) {
+        chunks.push(chunk);
+        return true;
+      },
+    },
+    init: async () => {
+      inited = true;
+      return 0;
+    },
+  });
+  assert.equal(exitCode, 1);
+  assert.equal(inited, false);
+  assert.match(chunks.join(""), /init accepts --answers <file>/);
+});
+
+const githubCursorStub = `import { defineConfig, github, cursor } from "@readyrun/readyrun";
+
+export default defineConfig({
+  tracker: github({
+    repo: "acme/widgets",
+    ready: "unblocked",
+    labels: ["ready-for-agent"],
+  }),
+  worker: cursor(),
+  model: "composer-2",
+});
+`;
+
+test("init --answers writes the same stub as Clack without a TTY", async () => {
+  await withConsumerRoot(
+    async (cwd) => {
+      await writeFile(
+        join(cwd, "answers.json"),
+        `${JSON.stringify(initAnswers, null, 2)}\n`,
+      );
+    },
+    async (cwd) => {
+      const bin = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
+      const result = await invokeCli(bin, ["init", "--answers", "answers.json"], {
+        cwd,
+        timeout: 5000,
+      });
+      assert.equal(result.status, 0, result.stdout);
+      assert.equal(
+        await readFile(join(cwd, "readyrun.config.ts"), "utf8"),
+        githubCursorStub,
+      );
+    },
+  );
+});
+
+test("init --answers refuses a file that is not InitAnswers", async () => {
+  await withConsumerRoot(
+    async (cwd) => {
+      await writeFile(
+        join(cwd, "answers.json"),
+        `${JSON.stringify({ worker: { kind: "cursor" }, model: "composer-2" })}\n`,
+      );
+    },
+    async (cwd) => {
+      const chunks: string[] = [];
+      const exitCode = await cli({
+        argv: ["init", "--answers", "answers.json"],
+        cwd,
+        stdout: {
+          write(chunk: string) {
+            chunks.push(chunk);
+            return true;
+          },
+        },
+      });
+      assert.equal(exitCode, 1);
+      assert.match(chunks.join(""), /tracker/i);
+      assert.equal(
+        (await readdir(cwd)).includes("readyrun.config.ts"),
+        false,
       );
     },
   );
