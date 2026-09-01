@@ -15,6 +15,7 @@ const knownGitHubKeys = new Set([
   "labels",
   "parent",
   "ids",
+  "account",
 ]);
 
 export type GitHubTrackerOptions = {
@@ -23,13 +24,15 @@ export type GitHubTrackerOptions = {
   labels: string[];
   parent?: string;
   ids?: string[];
+  account?: string;
 };
 
 export type GitHubRuntime = {
   fetch?: typeof fetch;
   token?: string;
   env?: Record<string, string | undefined>;
-  ghAuthToken?: () => Promise<string | undefined>;
+  cwd?: string;
+  ghAuthToken?: (account?: string) => Promise<string | undefined>;
 };
 
 type PageInfo = {
@@ -121,6 +124,15 @@ export function github(
     if (runtime.token !== undefined && runtime.token.length > 0) {
       return runtime.token;
     }
+    const account = firstNonEmpty(options.account) ??
+      await gitConfigGitHubAccount(runtime);
+    if (account !== undefined) {
+      const fromGh = await (runtime.ghAuthToken ?? ghAuthToken)(account);
+      if (fromGh !== undefined && fromGh.length > 0) {
+        return fromGh;
+      }
+      throw new Error("ReadyRun could not authenticate to GitHub");
+    }
     const env = runtime.env ?? process.env;
     const fromEnv = firstNonEmpty(env.GH_TOKEN, env.GITHUB_TOKEN);
     if (fromEnv !== undefined) {
@@ -138,7 +150,25 @@ export function github(
     query: string,
     variables: Record<string, unknown> = {},
   ): Promise<T> {
-    return githubGraphql<T>(http, await token(), operationName, query, variables);
+    try {
+      return await githubGraphql<T>(
+        http,
+        await token(),
+        operationName,
+        query,
+        variables,
+      );
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        /could not resolve to a repository/i.test(error.message)
+      ) {
+        throw new Error(
+          `this token cannot see GitHub repository ${options.repo}`,
+        );
+      }
+      throw error;
+    }
   }
 
   async function rest(
@@ -368,9 +398,31 @@ async function githubRest(
   }
 }
 
-async function ghAuthToken(): Promise<string | undefined> {
+async function gitConfigGitHubAccount(
+  runtime: GitHubRuntime,
+): Promise<string | undefined> {
   try {
-    const { stdout } = await exec("gh", ["auth", "token"], { encoding: "utf8" });
+    const { stdout } = await exec(
+      "git",
+      ["-C", runtime.cwd ?? process.cwd(), "config", "github.account"],
+      {
+        encoding: "utf8",
+        env: { ...process.env, ...runtime.env },
+      },
+    );
+    const account = stdout.trim();
+    return account.length === 0 ? undefined : account;
+  } catch {
+    return undefined;
+  }
+}
+
+async function ghAuthToken(account?: string): Promise<string | undefined> {
+  try {
+    const args = account === undefined
+      ? ["auth", "token"]
+      : ["auth", "token", "--hostname", "github.com", "--user", account];
+    const { stdout } = await exec("gh", args, { encoding: "utf8" });
     const token = stdout.trim();
     return token.length === 0 ? undefined : token;
   } catch {
