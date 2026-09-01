@@ -15,7 +15,6 @@ export type JsrMeta = {
 };
 
 export type PublishPreview = {
-  ok: boolean;
   willPublish: boolean;
   headline: string;
   detail: string;
@@ -89,41 +88,40 @@ export function previewPublish(input: {
   const fileList = formatFiles(packageFiles);
 
   if (!alreadyPublished) {
-    const headline = `Will publish ${input.localVersion}`;
-    const detail = `This merge will publish ${pkg} to JSR.`;
+    const headline = `Ready to ship ${input.localVersion}`;
+    const detail = `${pkg} is not on JSR yet; merging this PR will publish it.`;
     return {
-      ok: true,
       willPublish: true,
       headline,
       detail,
-      markdown: `**This merge will publish** \`${pkg}\` to JSR.`,
+      markdown: `**Ready to ship.** \`${pkg}\` is not on JSR yet; merging this PR will publish it.`,
     };
   }
 
   if (packageFiles.length === 0) {
-    const headline = "Will not publish (no package changes)";
-    const detail = `${pkg} is already on JSR, and this PR does not change published files. That is expected.`;
+    const headline = "No package changes";
+    const detail = `${pkg} is already on JSR, and this PR does not change published files.`;
     return {
-      ok: true,
       willPublish: false,
       headline,
       detail,
-      markdown: `**This merge will not publish.** \`${pkg}\` is already on JSR, and this PR does not change published files. That is expected.`,
+      markdown: `**No package changes.** \`${pkg}\` is already on JSR, and this PR does not change published files.
+
+(FYI: comment \`/bump\` (patch, the default), \`/bump minor\`, or \`/bump major\` on any PR to bump the version and ship its published-file changes.)`,
     };
   }
 
-  const headline = "Will not publish — run npm run bump";
-  const detail = `${pkg} is already on JSR, so merge will skip publishing. Published files changed (${fileList}). Run npm run bump.`;
+  const headline = "Will not publish until bumped";
+  const detail = `${pkg} is already on JSR. Published files changed (${fileList}); merging as-is will not publish them.`;
   return {
-    ok: false,
     willPublish: false,
     headline,
     detail,
-    markdown: `**This merge will not publish.** \`${pkg}\` is already on JSR, so \`jsr publish\` will skip.
+    markdown: `**Will not publish until bumped.** \`${pkg}\` is already on JSR.
 
 Published files in this PR: ${fileList}.
 
-Run \`npm run bump\` (default patch) so merge actually ships a new version.`,
+No pressure — this is just informational, merging will not fail. Comment \`/bump\` (patch, the default), \`/bump minor\`, or \`/bump major\` on this PR whenever you want these changes to ship, and it will push the version bump to this branch.`,
   };
 }
 
@@ -162,7 +160,6 @@ async function writeGithubOutput(result: PublishPreview): Promise<void> {
   }
   const block = [
     `headline=${result.headline}`,
-    `ok=${result.ok}`,
     `willPublish=${result.willPublish}`,
     "detail<<EOF",
     result.detail,
@@ -181,7 +178,7 @@ export async function publishPreviewCli(argv: readonly string[]): Promise<number
   const changedPath = flag(argv, "--changed-files");
   if (metaPath === undefined || changedPath === undefined) {
     process.stderr.write(
-      "Usage: node scripts/publish-preview.ts --jsr jsr.json --meta meta.json --changed-files changed.txt [--ci]\n",
+      "Usage: node scripts/publish-preview.ts --jsr jsr.json --meta meta.json --changed-files changed.txt\n",
     );
     return 1;
   }
@@ -204,10 +201,7 @@ export async function publishPreviewCli(argv: readonly string[]): Promise<number
   });
   await writeGithubOutput(result);
   process.stdout.write(`${result.markdown}\n`);
-  if (argv.includes("--ci")) {
-    return 0;
-  }
-  return result.ok ? 0 : 1;
+  return 0;
 }
 
 if (isCliEntry()) {

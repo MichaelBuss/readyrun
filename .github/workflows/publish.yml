@@ -1,0 +1,30 @@
+name: Publish
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - id: check
+        run: |
+          set -euo pipefail
+          curl -fsSL https://jsr.io/@readyrun/readyrun/meta.json -o /tmp/jsr-meta.json || echo '{}' > /tmp/jsr-meta.json
+          node scripts/should-publish.ts --jsr jsr.json --meta /tmp/jsr-meta.json
+      - run: npx jsr publish
+        if: steps.check.outputs.shouldPublish == 'true'
