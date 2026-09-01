@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { access, mkdir } from "node:fs/promises";
+import { access, mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
@@ -18,6 +18,18 @@ export class WorktreeExistsError extends Error {
       `ReadyRun already has a Worktree for branch ${branch} at ${worktreePath}`,
     );
     this.name = "WorktreeExistsError";
+  }
+}
+
+export class WorktreeInstallError extends Error {
+  constructor(command: string, output: string) {
+    const detail = output.trim();
+    super(
+      detail === ""
+        ? `ReadyRun failed to install Worktree dependencies with ${command}`
+        : `ReadyRun failed to install Worktree dependencies with ${command}:\n${detail}`,
+    );
+    this.name = "WorktreeInstallError";
   }
 }
 
@@ -119,5 +131,93 @@ export async function createTicketWorktree(
 
   await mkdir(join(cwd, ".readyrun", "worktrees"), { recursive: true });
   await exec("git", ["-C", cwd, "worktree", "add", "-b", branch, worktreePath]);
+  await installWorktreeDependencies(worktreePath);
   return worktreePath;
+}
+
+async function installWorktreeDependencies(worktreePath: string): Promise<void> {
+  const command = await detectInstallCommand(worktreePath);
+  if (command === undefined) {
+    return;
+  }
+  const invocation = [command.bin, ...command.args].join(" ");
+  try {
+    await exec(command.bin, command.args, { cwd: worktreePath, encoding: "utf8" });
+  } catch (error) {
+    throw new WorktreeInstallError(invocation, execErrorOutput(error));
+  }
+}
+
+function execErrorOutput(error: unknown): string {
+  if (error !== null && typeof error === "object") {
+    const stdout = "stdout" in error && typeof error.stdout === "string"
+      ? error.stdout
+      : "";
+    const stderr = "stderr" in error && typeof error.stderr === "string"
+      ? error.stderr
+      : "";
+    const combined = `${stdout}${stderr}`.trim();
+    if (combined !== "") {
+      return combined;
+    }
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
+type PackageManager = "pnpm" | "npm" | "yarn";
+
+const installCommands: Record<PackageManager, { bin: string; args: string[] }> = {
+  pnpm: { bin: "pnpm", args: ["install", "--frozen-lockfile"] },
+  npm: { bin: "npm", args: ["ci"] },
+  yarn: { bin: "yarn", args: ["--frozen-lockfile"] },
+};
+
+async function detectInstallCommand(
+  worktreePath: string,
+): Promise<{ bin: string; args: string[] } | undefined> {
+  const packageJsonPath = join(worktreePath, "package.json");
+  if (!await pathExists(packageJsonPath)) {
+    return undefined;
+  }
+  const fromLockfile = await lockfilePackageManager(worktreePath);
+  if (fromLockfile === undefined) {
+    return undefined;
+  }
+  const fromField = await packageManagerField(packageJsonPath);
+  return installCommands[fromField ?? fromLockfile];
+}
+
+async function packageManagerField(
+  packageJsonPath: string,
+): Promise<PackageManager | undefined> {
+  try {
+    const manifest = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
+      packageManager?: unknown;
+    };
+    if (typeof manifest.packageManager !== "string") {
+      return undefined;
+    }
+    const name = manifest.packageManager.split("@")[0];
+    if (name === "pnpm" || name === "npm" || name === "yarn") {
+      return name;
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function lockfilePackageManager(
+  worktreePath: string,
+): Promise<PackageManager | undefined> {
+  if (await pathExists(join(worktreePath, "pnpm-lock.yaml"))) {
+    return "pnpm";
+  }
+  if (await pathExists(join(worktreePath, "yarn.lock"))) {
+    return "yarn";
+  }
+  if (await pathExists(join(worktreePath, "package-lock.json"))) {
+    return "npm";
+  }
+  return undefined;
 }

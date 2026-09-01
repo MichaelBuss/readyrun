@@ -37,3 +37,59 @@ export async function throwawayRepo(options: {
     },
   };
 }
+
+export async function commitRepoFiles(
+  cwd: string,
+  files: Record<string, string>,
+): Promise<void> {
+  for (const [name, contents] of Object.entries(files)) {
+    await mkdir(join(cwd, name, ".."), { recursive: true });
+    await writeFile(join(cwd, name), contents);
+  }
+  await exec("git", ["add", "--", ...Object.keys(files)], { cwd });
+  await exec("git", ["commit", "-m", "consumer manifest"], { cwd });
+}
+
+export async function commitNpmConsumer(cwd: string): Promise<void> {
+  await mkdir(join(cwd, "vendor", "local-dep"), { recursive: true });
+  await writeFile(
+    join(cwd, "vendor", "local-dep", "package.json"),
+    `${JSON.stringify({ name: "local-dep", version: "1.0.0" }, null, 2)}\n`,
+  );
+  await writeFile(
+    join(cwd, "package.json"),
+    `${JSON.stringify({
+      name: "fixture-consumer",
+      version: "1.0.0",
+      dependencies: { "local-dep": "file:vendor/local-dep" },
+    }, null, 2)}\n`,
+  );
+  await exec("npm", ["install", "--package-lock-only"], { cwd });
+  await exec("git", [
+    "add",
+    "package.json",
+    "package-lock.json",
+    "vendor",
+  ], { cwd });
+  await exec("git", ["commit", "-m", "consumer manifest"], { cwd });
+}
+
+export async function commitMismatchedNpmLockfile(cwd: string): Promise<void> {
+  await commitRepoFiles(cwd, {
+    "package.json": `${JSON.stringify({
+      name: "fixture-consumer",
+      version: "1.0.0",
+      dependencies: { "left-pad": "1.3.0" },
+    }, null, 2)}\n`,
+    "package-lock.json": `${JSON.stringify({
+      name: "fixture-consumer",
+      version: "1.0.0",
+      lockfileVersion: 3,
+      requires: true,
+      packages: {
+        "": { name: "fixture-consumer", version: "1.0.0" },
+      },
+    }, null, 2)}\n`,
+  });
+}
+
