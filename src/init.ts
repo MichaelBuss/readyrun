@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { readFile, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
@@ -12,6 +12,7 @@ import {
   select,
   text,
 } from "@clack/prompts";
+import { ensureReadyrunGitignored } from "./gitignore.ts";
 import { originRepository } from "./git.ts";
 import { isEffort, type Effort } from "./worker-adapter.ts";
 
@@ -433,58 +434,6 @@ async function collectEffort(
   return picked;
 }
 
-const gitignoreEntry = ".readyrun/";
-
-async function readGitignore(path: string): Promise<string | undefined> {
-  try {
-    return await readFile(path, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return undefined;
-    }
-    throw error;
-  }
-}
-
-function globToRegExp(pattern: string): RegExp {
-  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&");
-  const wildcarded = escaped.replace(/\*/g, ".*").replace(/\?/g, ".");
-  return new RegExp(`^${wildcarded}$`);
-}
-
-/**
- * Whether a single .gitignore line already covers the .readyrun/ directory,
- * either as the exact line or a broader pattern (e.g. `.ready*`, `.*`) that
- * would match it too. Patterns anchored to a nested path (containing a `/`
- * other than a trailing one) are conservatively treated as not covering it.
- */
-function coversReadyrunDir(line: string): boolean {
-  const trimmed = line.trim();
-  if (trimmed.length === 0 || trimmed.startsWith("#") || trimmed.startsWith("!")) {
-    return false;
-  }
-  const unanchored = trimmed.startsWith("/") ? trimmed.slice(1) : trimmed;
-  const dirless = unanchored.endsWith("/") ? unanchored.slice(0, -1) : unanchored;
-  if (dirless.length === 0 || dirless.includes("/")) {
-    return false;
-  }
-  return globToRegExp(dirless).test(".readyrun");
-}
-
-async function ensureGitignored(cwd: string): Promise<void> {
-  const path = resolve(cwd, ".gitignore");
-  const existing = await readGitignore(path);
-  if (existing === undefined) {
-    await writeFile(path, `${gitignoreEntry}\n`);
-    return;
-  }
-  if (existing.split(/\r?\n/).some(coversReadyrunDir)) {
-    return;
-  }
-  const needsNewline = existing.length > 0 && !existing.endsWith("\n");
-  await writeFile(path, `${existing}${needsNewline ? "\n" : ""}${gitignoreEntry}\n`);
-}
-
 export async function init(options: InitOptions): Promise<number> {
   const prompted = options.answers === undefined;
   const answers = options.answers ?? await collectInitAnswers(options.cwd);
@@ -493,7 +442,7 @@ export async function init(options: InitOptions): Promise<number> {
   }
   const path = resolve(options.cwd, "readyrun.config.ts");
   await writeFile(path, configStub(answers));
-  await ensureGitignored(options.cwd);
+  await ensureReadyrunGitignored(options.cwd);
   if (prompted) {
     outro(configWrittenMessage(path));
   }
