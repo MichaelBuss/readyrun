@@ -435,9 +435,26 @@ async function collectEffort(
 
 const gitignoreEntry = ".readyrun/";
 
+async function readGitignore(path: string): Promise<string | undefined> {
+  try {
+    return await readFile(path, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
 async function ensureGitignored(cwd: string): Promise<void> {
   const path = resolve(cwd, ".gitignore");
-  await writeFile(path, `${gitignoreEntry}\n`);
+  const existing = await readGitignore(path);
+  if (existing === undefined) {
+    await writeFile(path, `${gitignoreEntry}\n`);
+    return;
+  }
+  const needsNewline = existing.length > 0 && !existing.endsWith("\n");
+  await writeFile(path, `${existing}${needsNewline ? "\n" : ""}${gitignoreEntry}\n`);
 }
 
 export async function init(options: InitOptions): Promise<number> {
