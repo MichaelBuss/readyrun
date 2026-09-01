@@ -9,10 +9,8 @@ export type ClaudeWorkerOptions = {
 
 export function claude(options: ClaudeWorkerOptions = {}): WorkerAdapter {
   assertKnownKeys(options, knownClaudeKeys);
-  return printModeWorker(
-    "claude",
-    "--dangerously-skip-permissions",
-    "--effort",
-    options.extraArgs,
-  );
+  return printModeWorker("claude", "--dangerously-skip-permissions", {
+    effortFlag: "--effort",
+    extraArgs: options.extraArgs,
+  });
 }

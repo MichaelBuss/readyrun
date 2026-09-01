@@ -55,12 +55,17 @@ export function spawnWorkerBinary(
   });
 }
 
+export type PrintModeWorkerOptions = {
+  effortFlag?: string;
+  extraArgs?: string[];
+};
+
 export function printModeWorker(
   bin: string,
   unattendedFlag: string,
-  effortFlag?: string,
-  extraArgs?: string[],
+  options: PrintModeWorkerOptions = {},
 ): WorkerAdapter {
+  const { effortFlag, extraArgs } = options;
   return createWorkerAdapter({
     bin,
     effortFlag,
