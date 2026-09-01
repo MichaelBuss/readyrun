@@ -113,7 +113,12 @@ export async function run(options: RunOptions): Promise<number> {
       return hardStop(stdout, "spawn", ticket.id);
     }
     if (result.exitCode !== 0) {
-      return hardStop(stdout, "worker", ticket.id);
+      return hardStop(
+        stdout,
+        "worker",
+        ticket.id,
+        `exit code ${result.exitCode}`,
+      );
     }
     try {
       if (config.leaveFrontier) {

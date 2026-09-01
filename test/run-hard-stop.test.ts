@@ -62,7 +62,7 @@ test("hitting the cap is a clean finish distinguished by exit code 0", async () 
 
 test("a Worker exiting non-zero hard-stops the Run without skip or retry", async () => {
   const repo = await throwawayRepo();
-  const worker = recordingWorker({ exitCode: 1 });
+  const worker = recordingWorker({ exitCode: 42 });
   const tracker = memoryTracker({
     tickets: [ticket({ id: "52" }), ticket({ id: "57" })],
     ready: "unblocked",
@@ -93,7 +93,7 @@ test("a Worker exiting non-zero hard-stops the Run without skip or retry", async
       ["52", "57"],
     );
     const output = chunks.join("");
-    assert.match(output, /Hard stop: Ticket 52 failed at worker/);
+    assert.match(output, /Hard stop: Ticket 52 failed at worker: exit code 42/);
   } finally {
     await repo.cleanup();
   }
