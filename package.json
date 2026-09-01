@@ -1,6 +1,6 @@
 {
   "name": "@readyrun/readyrun",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Walk a tracker Frontier and run one coding Worker per Ticket.",
   "license": "MIT",
   "type": "module",
@@ -19,7 +19,8 @@
   "scripts": {
     "test": "node --test --experimental-strip-types test/**/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "readyrun": "node --experimental-strip-types src/cli.ts"
+    "readyrun": "node --experimental-strip-types src/cli.ts",
+    "bump": "node --experimental-strip-types scripts/bump.ts"
   },
   "engines": {
     "node": ">=24"
