@@ -105,7 +105,9 @@ export function previewPublish(input: {
       willPublish: false,
       headline,
       detail,
-      markdown: `**No package changes.** \`${pkg}\` is already on JSR, and this PR does not change published files.`,
+      markdown: `**No package changes.** \`${pkg}\` is already on JSR, and this PR does not change published files.
+
+(FYI: comment \`/bump\` on any PR to bump the version and ship its published-file changes.)`,
     };
   }
 
@@ -119,7 +121,7 @@ export function previewPublish(input: {
 
 Published files in this PR: ${fileList}.
 
-No pressure — this is just informational, merging will not fail. Whenever you want these changes to ship: comment \`/bump\` (or \`/bump minor\` / \`/bump major\`) on this PR, or run the "CI" workflow manually from the Actions tab against this branch. Either pushes a version bump straight here.`,
+No pressure — this is just informational, merging will not fail. Comment \`/bump\` (or \`/bump minor\` / \`/bump major\`) on this PR whenever you want these changes to ship, and it will push a version bump to this branch.`,
   };
 }
 
