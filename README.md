@@ -38,6 +38,8 @@ claude({ extraArgs: ["--verbose"] });
 
 `cursor()` shells out to `agent`, `claude()` shells out to `claude`; both must already be installed and authenticated before `run` — ReadyRun does not manage CLI auth.
 
+`readyrun doctor` can tell "not installed" from "installed but not logged in": `cursor()` and `claude()` each define a cheap probe (`agent status`, `claude auth status`) that Doctor runs once it has confirmed the binary exists, reporting a probe failure distinctly from a missing binary. `custom()` Worker Adapters have no probe and keep today's existence-only check.
+
 ```sh
 readyrun init
 readyrun doctor

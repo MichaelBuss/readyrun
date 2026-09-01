@@ -19,7 +19,7 @@ The **Tracker**-specific implementation that maps that tracker’s issue onto a 
 _Avoid_: plugin, SDK (the harness is not a vendor agent SDK), Adapter (unqualified)
 
 **Worker Adapter**:
-The coding-CLI-specific way to spawn a **Worker** (prompt, model, cwd; later, usage). v0: `cursor`, `claude`, and `custom`. Codex later. `cursor` and `claude` both take an optional `extraArgs: string[]` for a static vendor flag beyond model/effort, landing next to `--model` the same way `custom`'s `args` do.
+The coding-CLI-specific way to spawn a **Worker** (prompt, model, cwd; later, usage). v0: `cursor`, `claude`, and `custom`. Codex later. `cursor` and `claude` both take an optional `extraArgs: string[]` for a static vendor flag beyond model/effort, landing next to `--model` the same way `custom`'s `args` do. `cursor` and `claude` also expose an optional health probe **Doctor** can run cheaply (`agent status`, `claude auth status`); `custom` has none.
 _Avoid_: plugin, SDK, recipe (as the noun)
 
 **Ticket**:
@@ -80,6 +80,7 @@ _Avoid_: max mode (Cursor's interactive slash command), ultracode (a Claude Code
 - When a **Worker** starts, the harness creates a **Branch** for that **Ticket**. It does not start on main. The **Ticket** body does not name the **Branch**.
 - Each **Worker** runs in a **Worktree** on that **Branch**, even when a **Run** is serial. There is no cwd-isolation mode and no clone-per-**Ticket**.
 - A **Run** (and **Doctor**) refuse to start if config lies about the **Frontier**: missing labels, repo ≠ remote, `unblocked` claimed but the **Tracker** cannot say so, unknown keys. Unused knobs (a label map with no matching **Tickets**) warn. The check is once at **Run** start, not every iteration.
+- When a **Worker Adapter** defines a probe, **Doctor** runs it once the binary is confirmed to exist, and a probe failure is reported distinctly from a missing binary. A **Worker Adapter** with no probe (`custom` today) keeps the existence-only check unchanged.
 - **ReadyRun** loads one `readyrun.config.ts` (same basename, JS/MJS allowed) at the **Consumer** root. **Init** writes that stub. There is no generated scripts folder and no search through other config filenames.
 - **Init** is the only Clack UI. `run` and `doctor` are flags plus stdout. There is no wizard that assembles a `run` command. Bare `readyrun` is usage, not a menu. An unattended **Run** must not prompt.
 - A **Run** cannot start without a cap: a maximum number of **Tickets** it may start. Hitting the cap stops the **Run**; it does not prompt. A single-**Ticket** invocation is a **Run** with cap 1. There is no unlimited **Run**.

@@ -39,6 +39,7 @@ A Run cannot start without a cap on how many Tickets it may start, so an unatten
 12. As a repo maintainer, I want **Doctor** to fail when the repo in config is not the repo my git remote points at, so that I do not drive the wrong project's issues.
 13. As a repo maintainer, I want **Doctor** to fail when I ask for unblocked ordering but the **Tracker** cannot express blocking, so that dependency order is never silently ignored.
 14. As a repo maintainer, I want **Doctor** to fail when the configured **Worker** binary is missing, so that I find out before a Ticket is claimed rather than after.
+14a. As a repo maintainer, I want **Doctor** to tell "not installed" from "installed but not logged in" when my **Worker Adapter** supports it, so that I find out about a stale login before a Ticket is claimed rather than after.
 15. As a repo maintainer, I want a warning — not a failure — when a by-label model override matches no **Tickets**, so that unused configuration does not block real work.
 16. As a repo maintainer, I want the same checks to run automatically at the start of a **Run**, so that a stale config cannot burn the cap.
 17. As a repo maintainer, I want those checks to run once at start rather than on every iteration, so that a long **Run** is not dominated by API chatter.
@@ -181,6 +182,7 @@ A Run cannot start without a cap on how many Tickets it may start, so an unatten
 ### Doctor and Init
 
 - Doctor and the start of a Run share one check. Anything that makes the Frontier a lie is fatal: unknown keys, a missing label, a configured repository that is not the git remote, unblocked ordering the Tracker cannot express, a missing Worker binary, a missing model default, effort set on an adapter that does not map it. Unused routing warns. The check runs once at start rather than per iteration (ADR 0009).
+- A Worker Adapter may optionally define a cheap probe. When the binary exists and a probe is defined, Doctor runs it and reports a failure distinct from "binary missing" — `cursor()` runs `agent status`, `claude()` runs `claude auth status`. An adapter with no probe (`custom()` today) keeps the existence-only check (ADR 0023).
 - Doctor also reports the Ticket that would be picked next.
 - Init is the single interactive surface: it asks for tracker, worker and frontier selector, then writes the config stub (ADR 0019).
 

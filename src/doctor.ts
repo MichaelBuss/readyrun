@@ -66,6 +66,11 @@ async function check(
   }
   if (config.worker.bin !== undefined && !workerBinaryExists(config.worker.bin)) {
     failures.push(`Worker binary "${config.worker.bin}" is missing`);
+  } else if (config.worker.probe !== undefined) {
+    const probeResult = await config.worker.probe();
+    if (!probeResult.ok) {
+      failures.push(`Worker Adapter probe failed: ${probeResult.detail}`);
+    }
   }
   if (effort !== undefined && config.worker.effortFlag === undefined) {
     failures.push("effort is set but this Worker Adapter does not map it");
