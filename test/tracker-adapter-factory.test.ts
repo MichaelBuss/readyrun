@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createTrackerAdapter, defineConfig, run } from "../src/mod.ts";
+import {
+  createTrackerAdapter,
+  defineConfig,
+  run,
+  UnknownConfigKeyError,
+} from "../src/mod.ts";
 import type { Ticket } from "../src/mod.ts";
 import { recordingWorker } from "../src/testing/mod.ts";
 import { ticket } from "./tracker-adapter-contract.ts";
@@ -73,4 +78,24 @@ test("createTrackerAdapter defaults branchName, leaveFrontier, promptCopy, and i
   assert.match(tracker.promptCopy(ticket({ id: "52" })), /52/);
   const inspected = await tracker.inspect();
   assert.equal(inspected.canExpressBlocking, true);
+});
+
+test("unknown keys on createTrackerAdapter are an error, not a silently ignored typo", () => {
+  const methods = {
+    frontier() {
+      return Promise.resolve([]);
+    },
+    leaveFroniter() {
+      return Promise.resolve();
+    },
+  };
+
+  assert.throws(
+    () => createTrackerAdapter(methods),
+    (error: unknown) => {
+      assert.ok(error instanceof UnknownConfigKeyError);
+      assert.deepEqual([...error.keys], ["leaveFroniter"]);
+      return true;
+    },
+  );
 });
