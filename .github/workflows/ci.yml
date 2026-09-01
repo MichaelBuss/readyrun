@@ -2,9 +2,17 @@ name: CI
 
 on:
   pull_request:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump for this release
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
 
 permissions:
   contents: read
@@ -27,11 +35,9 @@ jobs:
   publish-preview:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    outputs:
-      headline: ${{ steps.preview.outputs.headline }}
-      ok: ${{ steps.preview.outputs.ok }}
-      detail: ${{ steps.preview.outputs.detail }}
-      markdown: ${{ steps.preview.outputs.markdown }}
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -47,9 +53,6 @@ jobs:
           git diff --name-only "$BASE_SHA" HEAD > /tmp/changed.txt
           if ! curl -fsSL https://jsr.io/@readyrun/readyrun/meta.json -o /tmp/jsr-meta.json; then
             {
-              echo "headline=Could not reach JSR"
-              echo "ok=true"
-              echo "willPublish=false"
               echo "detail<<EOF"
               echo "Could not fetch jsr.io metadata; skipping publish preview."
               echo "EOF"
@@ -62,23 +65,11 @@ jobs:
           node scripts/publish-preview.ts \
             --jsr jsr.json \
             --meta /tmp/jsr-meta.json \
-            --changed-files /tmp/changed.txt \
-            --ci
-
-  publish-on-merge:
-    if: github.event_name == 'pull_request'
-    needs: publish-preview
-    name: ${{ needs.publish-preview.outputs.headline }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
-    steps:
-      - name: Comment and fail if merge would skip a needed publish
+            --changed-files /tmp/changed.txt
+      - name: Post publish preview as an informational PR comment
         env:
-          DETAIL: ${{ needs.publish-preview.outputs.detail }}
-          OK: ${{ needs.publish-preview.outputs.ok }}
-          MARKDOWN: ${{ needs.publish-preview.outputs.markdown }}
+          DETAIL: ${{ steps.preview.outputs.detail }}
+          MARKDOWN: ${{ steps.preview.outputs.markdown }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
@@ -96,23 +87,40 @@ jobs:
           else
             gh api --method POST "repos/${REPO}/issues/${PR_NUMBER}/comments" -F body=@/tmp/comment.md
           fi
-          if [ "$OK" != "true" ]; then
-            echo "::error::${DETAIL}"
-            exit 1
-          fi
           echo "::notice::${DETAIL}"
 
-  publish:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  release:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       id-token: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
       - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - id: bump
+        run: |
+          set -euo pipefail
+          OUTPUT="$(node scripts/bump.ts "${{ inputs.bump }}")"
+          echo "$OUTPUT"
+          VERSION="${OUTPUT##* → }"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Commit and tag the release
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json jsr.json
+          git commit -m "chore: release v${{ steps.bump.outputs.version }}"
+          git tag "v${{ steps.bump.outputs.version }}"
+          git push origin "HEAD:${{ github.ref_name }}"
+          git push origin "v${{ steps.bump.outputs.version }}"
       - run: npx jsr publish
