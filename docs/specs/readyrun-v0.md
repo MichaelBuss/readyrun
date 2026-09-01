@@ -128,6 +128,7 @@ A Run cannot start without a cap on how many Tickets it may start, so an unatten
 
 - ReadyRun is its own repo and its own JSR package. It does not live inside a **Consumer**, and SpeechDeck is a consumer of it rather than its home (ADR 0001). It is not published to npmjs.com; a **Consumer** still installs with npm/pnpm/yarn through JSR’s compatibility layer. The CLI is the `cli` export, run as a program — JSR does not put `readyrun` on PATH (ADR 0020).
 - The public surface is a `defineConfig` function plus adapter factory functions. A **Consumer** selects one **Tracker Adapter** and one **Worker Adapter** by calling the corresponding factory. Unknown keys are rejected rather than ignored (ADR 0009, 0018).
+- A **Consumer** whose Tracker this package doesn't ship (Jira, GitLab, ...) builds a **Tracker Adapter** with the public `createTrackerAdapter`, the same factory `github()` and `linear()` build on internally, rather than reaching into package internals or being limited to a fallback (ADR 0025).
 - Config lives in one `readyrun.config.ts` at the Consumer root, with JS and MJS accepted under the same basename. There is no search across candidate filenames and no generated scripts directory (ADR 0018).
 - The product name is ReadyRun and the binary is `readyrun`. Spur was rejected after a collision check found two existing agent harnesses shipping a `spur` binary (ADR 0015).
 

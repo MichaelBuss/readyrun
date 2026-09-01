@@ -3,10 +3,16 @@ import { execFile } from "node:child_process";
 import { test } from "node:test";
 import { promisify } from "node:util";
 import { cli } from "../src/cli.ts";
-import { defineConfig, custom, doctor, run, UnknownConfigKeyError } from "../src/mod.ts";
+import {
+  createTrackerAdapter,
+  custom,
+  defineConfig,
+  doctor,
+  run,
+  UnknownConfigKeyError,
+} from "../src/mod.ts";
 import type { ReadyRunConfig } from "../src/mod.ts";
 import { memoryTracker, recordingWorker } from "../src/testing/mod.ts";
-import { createTrackerAdapter } from "../src/tracker-adapter.ts";
 import { createWorkerAdapter } from "../src/worker-adapter.ts";
 import { githubFromWorld } from "./github-http-fixture.ts";
 import { ticket } from "./tracker-adapter-contract.ts";
