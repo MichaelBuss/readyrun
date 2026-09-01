@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir } from "node:fs/promises";
+import { access, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
@@ -9,6 +9,15 @@ export class DefaultBranchError extends Error {
   constructor(branch: string) {
     super(`ReadyRun refuses to start a Worker on the default branch (${branch})`);
     this.name = "DefaultBranchError";
+  }
+}
+
+export class WorktreeExistsError extends Error {
+  constructor(branch: string, worktreePath: string) {
+    super(
+      `ReadyRun already has a Worktree for branch ${branch} at ${worktreePath}`,
+    );
+    this.name = "WorktreeExistsError";
   }
 }
 
@@ -70,6 +79,24 @@ function parseOwnerRepo(url: string): string | undefined {
   return path?.[1];
 }
 
+async function branchExists(cwd: string, branch: string): Promise<boolean> {
+  try {
+    await git(cwd, ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function createTicketWorktree(
   cwd: string,
   branch: string,
@@ -85,6 +112,11 @@ export async function createTicketWorktree(
     "worktrees",
     branch.replaceAll("/", "-"),
   );
+
+  if (await branchExists(cwd, branch) || await pathExists(worktreePath)) {
+    throw new WorktreeExistsError(branch, worktreePath);
+  }
+
   await mkdir(join(cwd, ".readyrun", "worktrees"), { recursive: true });
   await exec("git", ["-C", cwd, "worktree", "add", "-b", branch, worktreePath]);
   return worktreePath;
