@@ -1,0 +1,83 @@
+name: Bump version
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+jobs:
+  bump:
+    if: >
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/bump')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Require a maintainer to trigger /bump
+        env:
+          ASSOCIATION: ${{ github.event.comment.author_association }}
+        run: |
+          case "$ASSOCIATION" in
+            OWNER|MEMBER|COLLABORATOR) ;;
+            *)
+              echo "::error::Only maintainers can trigger /bump (got: $ASSOCIATION)."
+              exit 1
+              ;;
+          esac
+      - name: Resolve the PR's head branch
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          REF="$(gh pr view "$PR_NUMBER" --repo "$REPO" --json headRefName -q .headRefName)"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.pr.outputs.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Read origin/main's version as a bump baseline
+        id: baseline
+        run: |
+          set -euo pipefail
+          git fetch origin main --depth=1
+          VERSION="$(git show origin/main:jsr.json | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version")"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - id: bump
+        env:
+          COMMENT: ${{ github.event.comment.body }}
+          BASELINE: ${{ steps.baseline.outputs.version }}
+        run: |
+          set -euo pipefail
+          SPEC="$(echo "$COMMENT" | awk '{print $2}')"
+          OUTPUT="$(node scripts/bump.ts ${SPEC:+"$SPEC"} --baseline "$BASELINE")"
+          echo "$OUTPUT"
+          VERSION="${OUTPUT##* → }"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Commit and push the bump to the PR branch
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json jsr.json
+          git commit -m "chore: bump version to v${{ steps.bump.outputs.version }}"
+          git push origin "HEAD:${{ steps.pr.outputs.ref }}"
+      - name: Confirm on the PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          gh pr comment "$PR_NUMBER" --repo "$REPO" \
+            --body "Bumped to \`v${{ steps.bump.outputs.version }}\`. Merging this PR will publish it."

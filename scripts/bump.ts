@@ -4,9 +4,11 @@ import { readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-export const bumpUsage = `Usage: npm run bump -- [patch | minor | major | <x.y.z>]
+export const bumpUsage = `Usage: npm run bump -- [patch | minor | major | <x.y.z>] [--baseline <x.y.z>]
 
 Updates package.json, package-lock.json, and jsr.json together.
+--baseline bumps from whichever is higher: the local version, or the
+given one (e.g. origin/main's, in case this branch is behind).
 Does not commit or tag. Default is patch.
 `;
 
@@ -30,6 +32,17 @@ function parseSemver(version: string): [number, number, number] {
     throw new BumpError(`Not a semver x.y.z: ${version}`);
   }
   return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+export function higherVersion(a: string, b: string): string {
+  const pa = parseSemver(a);
+  const pb = parseSemver(b);
+  for (let i = 0; i < 3; i++) {
+    if (pa[i] !== pb[i]) {
+      return pa[i]! > pb[i]! ? a : b;
+    }
+  }
+  return a;
 }
 
 export function parseBumpSpec(argv: readonly string[]): string {
@@ -89,6 +102,7 @@ async function writeJson(path: string, value: unknown): Promise<void> {
 export async function bump(
   root: string,
   spec = "patch",
+  baseline?: string,
 ): Promise<{ from: string; to: string }> {
   const pkgPath = join(root, "package.json");
   const jsrPath = join(root, "jsr.json");
@@ -101,7 +115,11 @@ export async function bump(
     );
   }
   const from = pkg.version;
-  const to = nextVersion(from, spec);
+  // A branch's own version can be stale relative to origin/main (e.g. another
+  // PR bumped and merged after this branch was cut), so bump from whichever
+  // is higher rather than trusting the checked-out files blindly.
+  const base = baseline === undefined ? from : higherVersion(from, baseline);
+  const to = nextVersion(base, spec);
   pkg.version = to;
   jsr.version = to;
   await writeJson(pkgPath, pkg);
@@ -129,6 +147,18 @@ function isCliEntry(): boolean {
   }
 }
 
+export function extractBaseline(argv: readonly string[]): { rest: string[]; baseline?: string } {
+  const index = argv.indexOf("--baseline");
+  if (index === -1) {
+    return { rest: [...argv] };
+  }
+  const baseline = argv[index + 1];
+  if (baseline === undefined) {
+    throw new BumpError("--baseline requires a version argument");
+  }
+  return { rest: [...argv.slice(0, index), ...argv.slice(index + 2)], baseline };
+}
+
 export async function bumpCli(argv: readonly string[]): Promise<number> {
   const [arg] = argv;
   if (arg === "-h" || arg === "--help") {
@@ -136,10 +166,12 @@ export async function bumpCli(argv: readonly string[]): Promise<number> {
     return 0;
   }
   try {
-    const spec = parseBumpSpec(argv);
+    const { rest, baseline } = extractBaseline(argv);
+    const spec = parseBumpSpec(rest);
     const { from, to } = await bump(
       join(dirname(fileURLToPath(import.meta.url)), ".."),
       spec,
+      baseline,
     );
     process.stdout.write(`${from} → ${to}\n`);
     return 0;
