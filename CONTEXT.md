@@ -19,7 +19,7 @@ The **Tracker**-specific implementation that maps that tracker’s issue onto a 
 _Avoid_: plugin, SDK (the harness is not a vendor agent SDK), Adapter (unqualified)
 
 **Worker Adapter**:
-The coding-CLI-specific way to spawn a **Worker** (prompt, model, cwd; later, usage). v0: `cursor`, `claude`, and `custom`. Codex later.
+The coding-CLI-specific way to spawn a **Worker** (prompt, model, cwd; later, usage). v0: `cursor`, `claude`, and `custom`. Codex later. `cursor` and `claude` both take an optional `extraArgs: string[]` for a static vendor flag beyond model/effort, landing next to `--model` the same way `custom`'s `args` do.
 _Avoid_: plugin, SDK, recipe (as the noun)
 
 **Ticket**:
