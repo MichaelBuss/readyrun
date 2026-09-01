@@ -15,7 +15,7 @@ The system that owns the queue of work. v0: GitHub or Linear. A later local **Tr
 _Avoid_: ticket database, ralphctl store, fallback queue, Ralph
 
 **Tracker Adapter**:
-The **Tracker**-specific implementation that maps that tracker’s issue onto a **Ticket**.
+The **Tracker**-specific implementation that maps that tracker’s issue onto a **Ticket**. v0 ships `github` and `linear`; a Consumer building one for a Tracker this package doesn't ship (Jira, GitLab) calls the public `createTrackerAdapter` directly — the same building block `github()` and `linear()` use internally.
 _Avoid_: plugin, SDK (the harness is not a vendor agent SDK), Adapter (unqualified)
 
 **Worker Adapter**:
