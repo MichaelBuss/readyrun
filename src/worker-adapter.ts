@@ -22,15 +22,18 @@ export type SpawnRequest = {
   prompt: string;
 };
 
+export type ProbeResult = { ok: true } | { ok: false; detail: string };
+
 export type WorkerAdapter = {
   readonly [brand]: true;
   readonly bin?: string;
   readonly effortFlag?: string;
+  readonly probe?: () => Promise<ProbeResult>;
   spawn(request: SpawnRequest): Promise<{ exitCode: number }>;
 };
 
 export function createWorkerAdapter(
-  methods: Partial<Pick<WorkerAdapter, "spawn" | "bin" | "effortFlag">> = {},
+  methods: Partial<Pick<WorkerAdapter, "spawn" | "bin" | "effortFlag" | "probe">> = {},
 ): WorkerAdapter {
   return {
     [brand]: true,

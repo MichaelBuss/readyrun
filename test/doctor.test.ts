@@ -547,6 +547,111 @@ test("unknown keys fail Doctor", async () => {
   );
 });
 
+test("a Worker Adapter probe that reports not ok fails Doctor with a message distinct from a missing binary", async () => {
+  const repo = await throwawayRepo();
+  const chunks: string[] = [];
+  const config = defineConfig({
+    tracker: memoryTracker({
+      tickets: [ticket({ id: "52" })],
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+    }),
+    worker: createWorkerAdapter({
+      probe: () => Promise.resolve({ ok: false, detail: "not logged in" }),
+    }),
+    model: "composer-2",
+  });
+  try {
+    const doctorExit = await doctor({
+      config,
+      cwd: repo.cwd,
+      stdout: {
+        write(chunk: string) {
+          chunks.push(chunk);
+          return true;
+        },
+      },
+    });
+    assert.equal(doctorExit, 1);
+    assert.match(
+      chunks.join(""),
+      /Doctor: Worker Adapter probe failed: not logged in/,
+    );
+    assert.doesNotMatch(chunks.join(""), /is missing/);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("a Worker Adapter probe that reports ok does not fail Doctor", async () => {
+  const repo = await throwawayRepo();
+  const chunks: string[] = [];
+  let probed = false;
+  const config = defineConfig({
+    tracker: memoryTracker({
+      tickets: [ticket({ id: "52" })],
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+    }),
+    worker: createWorkerAdapter({
+      probe: () => {
+        probed = true;
+        return Promise.resolve({ ok: true });
+      },
+    }),
+    model: "composer-2",
+  });
+  try {
+    const doctorExit = await doctor({
+      config,
+      cwd: repo.cwd,
+      stdout: {
+        write(chunk: string) {
+          chunks.push(chunk);
+          return true;
+        },
+      },
+    });
+    assert.equal(doctorExit, 0);
+    assert.ok(probed);
+    assert.match(chunks.join(""), /Next Ticket: 52/);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("a Worker Adapter with no probe defined keeps today's existence-only check", async () => {
+  const repo = await throwawayRepo();
+  const worker = recordingWorker({ exitCode: 0 });
+  const chunks: string[] = [];
+  const config = defineConfig({
+    tracker: memoryTracker({
+      tickets: [ticket({ id: "52" })],
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+    }),
+    worker,
+    model: "composer-2",
+  });
+  assert.equal(worker.probe, undefined);
+  try {
+    const doctorExit = await doctor({
+      config,
+      cwd: repo.cwd,
+      stdout: {
+        write(chunk: string) {
+          chunks.push(chunk);
+          return true;
+        },
+      },
+    });
+    assert.equal(doctorExit, 0);
+    assert.doesNotMatch(chunks.join(""), /probe/);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
 test("the check runs once at Run start, not on every iteration", async () => {
   const repo = await throwawayRepo();
   const worker = recordingWorker({ exitCode: 0 });
