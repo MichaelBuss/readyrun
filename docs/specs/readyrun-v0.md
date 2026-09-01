@@ -186,6 +186,7 @@ A Run cannot start without a cap on how many Tickets it may start, so an unatten
 - A Worker Adapter may optionally define a cheap probe. When the binary exists and a probe is defined, Doctor runs it and reports a failure distinct from "binary missing" — `cursor()` runs `agent status`, `claude()` runs `claude auth status`. An adapter with no probe (`custom()` today) keeps the existence-only check (ADR 0023).
 - Doctor also reports the Ticket that would be picked next.
 - Init is the single interactive surface: it asks for tracker, worker and frontier selector, then writes the config stub (ADR 0019).
+- Init also ensures the Consumer's `.gitignore` covers `.readyrun/`, creating the file if absent and appending the line if absent from an existing one, without duplicating it when an exact or broader existing pattern already covers the directory (ADR 0026).
 
 ## Testing Decisions
 
