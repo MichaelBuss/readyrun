@@ -40,6 +40,21 @@ claude({ extraArgs: ["--verbose"] });
 
 `readyrun doctor` can tell "not installed" from "installed but not logged in": `cursor()` and `claude()` each define a cheap probe (`agent status`, `claude auth status`) that Doctor runs once it has confirmed the binary exists, reporting a probe failure distinctly from a missing binary. `custom()` Worker Adapters have no probe and keep today's existence-only check.
 
+For a Tracker this package doesn't ship (Jira, GitLab, ...), build one with `createTrackerAdapter`, the same building block `github()` and `linear()` use internally:
+
+```ts
+import { createTrackerAdapter, defineConfig } from "@readyrun/readyrun";
+
+const jira = createTrackerAdapter({
+  frontier() { /* return this Tracker's ready Tickets */ },
+  leaveFrontier(ticket) { /* move the Ticket off the Frontier */ },
+});
+
+defineConfig({ tracker: jira, worker: cursor(), model: "composer-2" });
+```
+
+`branchName`, `promptCopy`, and `inspect` fall back to sane defaults if omitted.
+
 ```sh
 readyrun init
 readyrun doctor
