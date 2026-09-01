@@ -10,6 +10,10 @@ import { throwawayRepo } from "./throwaway-repo.ts";
 
 const exec = promisify(execFile);
 const silent = { write(_chunk?: string) { return true; } };
+const withoutGitHubAccount = {
+  GIT_CONFIG_GLOBAL: "/dev/null",
+  GIT_CONFIG_SYSTEM: "/dev/null",
+};
 
 const world = {
   tickets: [ticket({ id: "52" })],
@@ -135,6 +139,72 @@ test("Doctor fails when GitHub cannot express blocking", async () => {
   }
 });
 
+test("an explicit runtime token is used even when an account is configured", async () => {
+  const fixture = githubHttpFixture({ repo: "acme/widgets", ...world });
+  const adapter = github(
+    {
+      repo: "acme/widgets",
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+      account: "personal",
+    },
+    {
+      token: "test-token",
+      env: { GH_TOKEN: "ambient-token" },
+      ghAuthToken: () => Promise.reject(new Error("gh should not be called")),
+      fetch: fixture.fetch,
+    },
+  );
+  const frontier = await adapter.frontier();
+  assert.deepEqual(frontier.map((item) => item.id), ["52"]);
+});
+
+test("github({ account }) uses that user's gh token even when GH_TOKEN is set", async () => {
+  const fixture = githubHttpFixture({ repo: "acme/widgets", ...world });
+  const adapter = github(
+    {
+      repo: "acme/widgets",
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+      account: "personal",
+    },
+    {
+      env: { GH_TOKEN: "ambient-token", GITHUB_TOKEN: "also-ambient" },
+      ghAuthToken: (account) =>
+        Promise.resolve(account === "personal" ? "test-token" : "wrong-token"),
+      fetch: fixture.fetch,
+    },
+  );
+  const frontier = await adapter.frontier();
+  assert.deepEqual(frontier.map((item) => item.id), ["52"]);
+});
+
+test("git config github.account uses that user's gh token even when GH_TOKEN is set", async () => {
+  const repo = await throwawayRepo();
+  const fixture = githubHttpFixture({ repo: "acme/widgets", ...world });
+  try {
+    await exec("git", ["-C", repo.cwd, "config", "github.account", "personal"]);
+    const adapter = github(
+      {
+        repo: "acme/widgets",
+        ready: "unblocked",
+        labels: ["ready-for-agent"],
+      },
+      {
+        env: { GH_TOKEN: "ambient-token" },
+        cwd: repo.cwd,
+        ghAuthToken: (account) =>
+          Promise.resolve(account === "personal" ? "test-token" : "wrong-token"),
+        fetch: fixture.fetch,
+      },
+    );
+    const frontier = await adapter.frontier();
+    assert.deepEqual(frontier.map((item) => item.id), ["52"]);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
 test("ReadyRun authenticates to GitHub via GH_TOKEN; the Worker is not given the token", async () => {
   const repo = await repoWithOrigin();
   const fixture = githubHttpFixture({ repo: "acme/widgets", ...world });
@@ -145,7 +215,8 @@ test("ReadyRun authenticates to GitHub via GH_TOKEN; the Worker is not given the
       labels: ["ready-for-agent"],
     },
     {
-      env: { GH_TOKEN: "test-token" },
+      env: { GH_TOKEN: "test-token", ...withoutGitHubAccount },
+      cwd: repo.cwd,
       ghAuthToken: () => Promise.reject(new Error("gh should not be called")),
       fetch: fixture.fetch,
     },
@@ -171,6 +242,7 @@ test("ReadyRun authenticates to GitHub via GH_TOKEN; the Worker is not given the
 });
 
 test("ReadyRun authenticates to GitHub via gh when no token is in the environment", async () => {
+  const repo = await throwawayRepo();
   const fixture = githubHttpFixture({ repo: "acme/widgets", ...world });
   const adapter = github(
     {
@@ -179,13 +251,19 @@ test("ReadyRun authenticates to GitHub via gh when no token is in the environmen
       labels: ["ready-for-agent"],
     },
     {
-      env: {},
-      ghAuthToken: () => Promise.resolve("test-token"),
+      env: { ...withoutGitHubAccount },
+      cwd: repo.cwd,
+      ghAuthToken: (account) =>
+        Promise.resolve(account === undefined ? "test-token" : "wrong-token"),
       fetch: fixture.fetch,
     },
   );
-  const frontier = await adapter.frontier();
-  assert.deepEqual(frontier.map((item) => item.id), ["52"]);
+  try {
+    const frontier = await adapter.frontier();
+    assert.deepEqual(frontier.map((item) => item.id), ["52"]);
+  } finally {
+    await repo.cleanup();
+  }
 });
 
 test("Doctor fails when ReadyRun cannot authenticate to GitHub", async () => {
@@ -197,7 +275,8 @@ test("Doctor fails when ReadyRun cannot authenticate to GitHub", async () => {
       labels: ["ready-for-agent"],
     },
     {
-      env: {},
+      env: { ...withoutGitHubAccount },
+      cwd: repo.cwd,
       ghAuthToken: () => Promise.resolve(undefined),
     },
   );
@@ -222,6 +301,58 @@ test("Doctor fails when ReadyRun cannot authenticate to GitHub", async () => {
       chunks.join(""),
       /Doctor: ReadyRun could not authenticate to GitHub/,
     );
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("Doctor names a token that cannot see the repository, not a wrong repo string", async () => {
+  const repo = await repoWithOrigin();
+  const adapter = github(
+    {
+      repo: "acme/widgets",
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+    },
+    {
+      token: "test-token",
+      fetch: async () =>
+        new Response(
+          JSON.stringify({
+            data: { repository: null },
+            errors: [{
+              message:
+                "Could not resolve to a Repository with the name 'acme/widgets'.",
+            }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    },
+  );
+  const chunks: string[] = [];
+  try {
+    const exit = await doctor({
+      config: defineConfig({
+        tracker: adapter,
+        worker: recordingWorker({ exitCode: 0 }),
+        model: "composer-2",
+      }),
+      cwd: repo.cwd,
+      stdout: {
+        write(chunk: string) {
+          chunks.push(chunk);
+          return true;
+        },
+      },
+    });
+    assert.equal(exit, 1);
+    const output = chunks.join("");
+    assert.match(
+      output,
+      /Doctor: this token cannot see GitHub repository acme\/widgets/,
+    );
+    assert.doesNotMatch(output, /Could not resolve/);
+    assert.doesNotMatch(output, /was not found/);
   } finally {
     await repo.cleanup();
   }
