@@ -11,13 +11,8 @@ const silent = { write(_chunk?: string) { return true; } };
 // Stands in for a Tracker this package does not ship (Jira, GitLab, ...).
 // Built only from createTrackerAdapter, the same public export a Consumer
 // would import — no reach into tracker-adapter.ts, no src/testing/ fixture.
-function jiraLikeTracker(tickets: Parameters<typeof ticket>[0][]) {
-  const open = new Map(
-    tickets.map((overrides) => {
-      const item = ticket(overrides);
-      return [item.id, item] as const;
-    }),
-  );
+function jiraLikeTracker(tickets: Ticket[]) {
+  const open = new Map(tickets.map((item) => [item.id, item] as const));
   return createTrackerAdapter({
     frontier() {
       return Promise.resolve(
@@ -42,7 +37,7 @@ function jiraLikeTracker(tickets: Parameters<typeof ticket>[0][]) {
 test("a Consumer can build a Tracker Adapter from the public entrypoint alone and run a Ticket through it", async () => {
   const repo = await throwawayRepo();
   const worker = recordingWorker({ exitCode: 0 });
-  const tracker = jiraLikeTracker([{ id: "52" }]);
+  const tracker = jiraLikeTracker([ticket({ id: "52" })]);
   try {
     const exitCode = await run({
       config: defineConfig({
