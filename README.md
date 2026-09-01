@@ -18,6 +18,24 @@ npx jsr add @readyrun/readyrun
 import { defineConfig, github, cursor } from "@readyrun/readyrun";
 ```
 
+`claude()` and `custom()` map an optional `effort` config default (`"low" | "medium" | "high" | "xhigh" | "max"`) onto `--effort`:
+
+```ts
+defineConfig({
+  worker: claude(),
+  model: "opus",
+  effort: "high",
+});
+```
+
+`cursor()` has no such flag — Cursor's equivalent is a model variant (e.g. `composer-2.5-fast`), not a flag; Doctor fails a Run that sets `effort` on `cursor()`.
+
+`cursor()` and `claude()` also accept an optional `extraArgs: string[]` for any other static vendor flag beyond model/effort, landing in the same position `custom()`'s own `args` occupy relative to `--model`, without dropping to `custom()`:
+
+```ts
+claude({ extraArgs: ["--verbose"] });
+```
+
 ```sh
 readyrun init
 readyrun doctor

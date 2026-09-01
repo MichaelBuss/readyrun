@@ -520,6 +520,71 @@ describe("Worker Adapters", { concurrency: false }, () => {
     }
   });
 
+  test("a Cursor Worker Adapter includes the Consumer's extra args between -p and --model", async () => {
+    await withRecordingPath(["agent"], async ({ receiptPath }) => {
+      const repo = await throwawayRepo();
+      try {
+        await run({
+          config: defineConfig({
+            tracker: memoryTracker({
+              tickets: [ticket({ id: "52" })],
+              ready: "unblocked",
+              labels: ["ready-for-agent"],
+            }),
+            worker: cursor({ extraArgs: ["--reasoning-effort", "high"] }),
+            model: "composer-2",
+          }),
+          cap: 1,
+          cwd: repo.cwd,
+          stdout: silent,
+        });
+
+        const receipt = await readReceipt(receiptPath);
+        assert.deepEqual(receipt.argv.slice(0, 5), [
+          "-p",
+          "--reasoning-effort",
+          "high",
+          "--model",
+          "composer-2",
+        ]);
+      } finally {
+        await repo.cleanup();
+      }
+    });
+  });
+
+  test("a Claude Worker Adapter includes the Consumer's extra args between -p and --model", async () => {
+    await withRecordingPath(["claude"], async ({ receiptPath }) => {
+      const repo = await throwawayRepo();
+      try {
+        await run({
+          config: defineConfig({
+            tracker: memoryTracker({
+              tickets: [ticket({ id: "52" })],
+              ready: "unblocked",
+              labels: ["ready-for-agent"],
+            }),
+            worker: claude({ extraArgs: ["--verbose"] }),
+            model: "opus",
+          }),
+          cap: 1,
+          cwd: repo.cwd,
+          stdout: silent,
+        });
+
+        const receipt = await readReceipt(receiptPath);
+        assert.deepEqual(receipt.argv.slice(0, 4), [
+          "-p",
+          "--verbose",
+          "--model",
+          "opus",
+        ]);
+      } finally {
+        await repo.cleanup();
+      }
+    });
+  });
+
   test("Doctor does not spawn the Worker or log it in when the binary is present", async () => {
     const repo = await throwawayRepo();
     try {

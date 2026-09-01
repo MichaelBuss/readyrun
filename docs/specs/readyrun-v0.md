@@ -95,6 +95,7 @@ A Run cannot start without a cap on how many Tickets it may start, so an unatten
 50. As an operator, I want looping never to imply unattended, so that a long **Run** does not silently grant the **Worker** free rein.
 51. As an operator, I want each **Worker Adapter** to know its own auto-approve flag, so that unattended means the same thing whichever coding CLI I picked.
 52. As a repo maintainer using a custom binary, I want to declare that flag myself, so that an unsupported CLI still honours the same setting.
+52a. As a repo maintainer, I want `cursor()` and `claude()` to accept extra static flags for the Worker binary, so that a vendor-specific setting does not force me to drop to `custom()`.
 
 ### Finishing a Ticket
 
@@ -163,6 +164,7 @@ A Run cannot start without a cap on how many Tickets it may start, so an unatten
 - **Permissions** is a Run-level value of `ask` or `unattended`, defaulting to `ask`. Looping never implies unattended. Each Worker Adapter maps `unattended` onto its own auto-approve flag; the custom adapter is told which flag to use. Sandbox bypass is not a third value in v0 (ADR 0011).
 - Model resolution is: a required config default, overridden by a command-line model for the whole Run, overridden by a by-label map for an individual Ticket. Doctor fails when the default is missing. The Ticket body never names a model (ADR 0012).
 - **Effort** is an optional config default (`low` | `medium` | `high` | `xhigh` | `max`), overridden by `--effort` for the Run. The Worker Adapter maps it onto `--effort`. Cursor does not take that flag; Doctor fails if effort is set on an adapter that does not map it (ADR 0021).
+- `cursor()` and `claude()` accept an optional `extraArgs: string[]`, landing between `-p` and `--model` — the same position `custom()`'s own `args` already occupy relative to `--model`. `custom()`'s `args` behaviour is unchanged (ADR 0022).
 
 ### The Worker prompt
 

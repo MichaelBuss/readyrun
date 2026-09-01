@@ -95,6 +95,32 @@ test("unknown config keys are an error, not ignored", () => {
   );
 });
 
+test("unknown keys on the Cursor Worker Adapter factory are an error", () => {
+  const options = { extraArgs: ["--reasoning-effort", "high"], model: "composer-2" };
+
+  assert.throws(
+    () => cursor(options),
+    (error: unknown) => {
+      assert.ok(error instanceof UnknownConfigKeyError);
+      assert.deepEqual([...error.keys], ["model"]);
+      return true;
+    },
+  );
+});
+
+test("unknown keys on the Claude Worker Adapter factory are an error", () => {
+  const options = { extraArgs: ["--verbose"], model: "opus" };
+
+  assert.throws(
+    () => claude(options),
+    (error: unknown) => {
+      assert.ok(error instanceof UnknownConfigKeyError);
+      assert.deepEqual([...error.keys], ["model"]);
+      return true;
+    },
+  );
+});
+
 test("unknown keys on a Tracker Adapter factory are an error", () => {
   const options = {
     repo: "acme/widgets",

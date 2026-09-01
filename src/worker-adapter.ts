@@ -55,16 +55,22 @@ export function spawnWorkerBinary(
   });
 }
 
+export type PrintModeWorkerOptions = {
+  effortFlag?: string;
+  extraArgs?: string[];
+};
+
 export function printModeWorker(
   bin: string,
   unattendedFlag: string,
-  effortFlag?: string,
+  options: PrintModeWorkerOptions = {},
 ): WorkerAdapter {
+  const { effortFlag, extraArgs } = options;
   return createWorkerAdapter({
     bin,
     effortFlag,
     spawn(request: SpawnRequest) {
-      const args = ["-p", "--model", request.model];
+      const args = ["-p", ...(extraArgs ?? []), "--model", request.model];
       if (request.effort !== undefined && effortFlag !== undefined) {
         args.push(effortFlag, request.effort);
       }
