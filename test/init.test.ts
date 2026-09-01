@@ -227,6 +227,15 @@ test("init does not duplicate .readyrun/ when a broader pattern already covers i
   });
 });
 
+test("init does not duplicate .readyrun/ when the existing line is root-anchored or dir-only", async () => {
+  await withConsumerRoot(async (cwd) => {
+    await writeFile(join(cwd, ".gitignore"), "/.readyrun\n");
+    const exitCode = await init({ cwd, answers: githubCursorAnswers });
+    assert.equal(exitCode, 0);
+    assert.equal(await readFile(join(cwd, ".gitignore"), "utf8"), "/.readyrun\n");
+  });
+});
+
 test("the Init outro links the written stub", () => {
   assert.equal(
     configWrittenMessage("/tmp/readyrun.config.ts"),
