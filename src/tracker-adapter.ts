@@ -1,6 +1,15 @@
 import type { Ticket } from "./ticket.ts";
+import { assertKnownKeys } from "./unknown-keys.ts";
 
 const brand = Symbol("TrackerAdapter");
+
+const knownTrackerAdapterKeys = new Set([
+  "frontier",
+  "branchName",
+  "leaveFrontier",
+  "promptCopy",
+  "inspect",
+]);
 
 export type TrackerInspect = {
   readonly existingLabels: readonly string[];
@@ -55,5 +64,6 @@ export function createTrackerAdapter(
     >
   > = {},
 ): TrackerAdapter {
+  assertKnownKeys(methods, knownTrackerAdapterKeys);
   return { [brand]: true, ...defaults, ...methods };
 }
