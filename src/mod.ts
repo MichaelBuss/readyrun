@@ -6,7 +6,7 @@ export { init } from "./init.ts";
 export type { InitAnswers, InitOptions } from "./init.ts";
 export { run, RunCapRequiredError } from "./run.ts";
 export type { RunOptions } from "./run.ts";
-export { DefaultBranchError } from "./git.ts";
+export { DefaultBranchError, WorktreeExistsError } from "./git.ts";
 export type { Ticket } from "./ticket.ts";
 export { createTrackerAdapter } from "./tracker-adapter.ts";
 export type { TrackerAdapter, TrackerInspect } from "./tracker-adapter.ts";
