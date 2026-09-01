@@ -26,6 +26,9 @@ writeFileSync(process.env.READYRUN_SPAWN_RECEIPT, JSON.stringify({
   argv: process.argv.slice(2),
   cwd: process.cwd(),
 }));
+if (process.env.READYRUN_STUB_STDOUT !== undefined) {
+  process.stdout.write(process.env.READYRUN_STUB_STDOUT);
+}
 process.exitCode = Number(process.env.READYRUN_STUB_EXIT_CODE ?? "0");
 `;
 
@@ -647,6 +650,44 @@ describe("Worker Adapters", { concurrency: false }, () => {
         delete process.env.READYRUN_STUB_EXIT_CODE;
       } else {
         process.env.READYRUN_STUB_EXIT_CODE = previousExitCode;
+      }
+      await repo.cleanup();
+    }
+  });
+
+  test("Doctor fails the Cursor probe on auth-failure text even when the CLI exits 0", async () => {
+    const repo = await throwawayRepo();
+    const previousStdout = process.env.READYRUN_STUB_STDOUT;
+    process.env.READYRUN_STUB_STDOUT = "Not authenticated. Run agent login.";
+    try {
+      await withRecordingPath(["agent"], async () => {
+        const chunks: string[] = [];
+        const doctorExit = await doctor({
+          config: defineConfig({
+            tracker: memoryTracker({
+              tickets: [ticket({ id: "52" })],
+              ready: "unblocked",
+              labels: ["ready-for-agent"],
+            }),
+            worker: cursor(),
+            model: "composer-2",
+          }),
+          cwd: repo.cwd,
+          stdout: {
+            write(chunk: string) {
+              chunks.push(chunk);
+              return true;
+            },
+          },
+        });
+        assert.equal(doctorExit, 1);
+        assert.match(chunks.join(""), /Doctor: Worker Adapter probe failed/);
+      });
+    } finally {
+      if (previousStdout === undefined) {
+        delete process.env.READYRUN_STUB_STDOUT;
+      } else {
+        process.env.READYRUN_STUB_STDOUT = previousStdout;
       }
       await repo.cleanup();
     }
