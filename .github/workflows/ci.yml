@@ -59,7 +59,7 @@ jobs:
             } >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          node --experimental-strip-types scripts/publish-preview.ts \
+          node scripts/publish-preview.ts \
             --jsr jsr.json \
             --meta /tmp/jsr-meta.json \
             --changed-files /tmp/changed.txt \
