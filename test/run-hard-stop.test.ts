@@ -6,7 +6,7 @@ import { createTrackerAdapter, defineConfig, run } from "../src/mod.ts";
 import { memoryTracker, recordingWorker } from "../src/testing/mod.ts";
 import { createWorkerAdapter } from "../src/worker-adapter.ts";
 import { ticket } from "./tracker-adapter-contract.ts";
-import { throwawayRepo } from "./throwaway-repo.ts";
+import { commitMismatchedNpmLockfile, throwawayRepo } from "./throwaway-repo.ts";
 
 const exec = promisify(execFile);
 const silent = { write(_chunk?: string) { return true; } };
@@ -166,6 +166,43 @@ test("a git failure creating the Branch or Worktree hard-stops the Run; a Worker
     assert.equal(exitCode, 1);
     assert.equal(worker.spawns.length, 0);
     assert.match(chunks.join(""), /Hard stop: Ticket 52 failed at git/);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("a failed Worktree install hard-stops the Run at git with the install output; a Worker never starts", async () => {
+  const repo = await throwawayRepo();
+  const worker = recordingWorker({ exitCode: 0 });
+  const chunks: string[] = [];
+  try {
+    await commitMismatchedNpmLockfile(repo.cwd);
+    const exitCode = await run({
+      config: defineConfig({
+        tracker: memoryTracker({
+          tickets: [ticket({ id: "52" }), ticket({ id: "57" })],
+          ready: "unblocked",
+          labels: ["ready-for-agent"],
+        }),
+        worker,
+        model: "composer-2",
+      }),
+      cap: 2,
+      cwd: repo.cwd,
+      stdout: {
+        write(chunk: string) {
+          chunks.push(chunk);
+          return true;
+        },
+      },
+    });
+
+    assert.equal(exitCode, 1);
+    assert.equal(worker.spawns.length, 0);
+    const output = chunks.join("");
+    assert.match(output, /Hard stop: Ticket 52 failed at git/);
+    assert.match(output, /npm ci/);
+    assert.match(output, /in sync|lock file/i);
   } finally {
     await repo.cleanup();
   }
