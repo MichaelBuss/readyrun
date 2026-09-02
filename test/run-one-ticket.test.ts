@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { access } from "node:fs/promises";
+import { join } from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
 import { defineConfig, run } from "../src/mod.ts";
 import { memoryTracker, recordingWorker } from "../src/testing/mod.ts";
 import type { Ticket } from "../src/mod.ts";
-import { throwawayRepo } from "./throwaway-repo.ts";
+import { createWorkerAdapter } from "../src/worker-adapter.ts";
+import { commitNpmConsumer, throwawayRepo } from "./throwaway-repo.ts";
 
 const exec = promisify(execFile);
 const silent = { write(_chunk?: string) { return true; } };
@@ -149,6 +152,42 @@ test("the Worker runs in a git Worktree on that Branch, not in the Consumer's pr
     assert.notEqual(spawn.cwd, repo.cwd);
     assert.equal(await git(spawn.cwd, ["rev-parse", "--abbrev-ref", "HEAD"]), "readyrun/52");
     assert.equal(await git(repo.cwd, ["rev-parse", "--abbrev-ref", "HEAD"]), "main");
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("the Worktree has installed deps before the Worker is spawned", async () => {
+  const repo = await throwawayRepo();
+  let nodeModulesAtSpawn = false;
+  const worker = createWorkerAdapter({
+    spawn(request) {
+      return access(join(request.cwd, "node_modules")).then(
+        () => {
+          nodeModulesAtSpawn = true;
+          return { exitCode: 0 };
+        },
+      );
+    },
+  });
+  try {
+    await commitNpmConsumer(repo.cwd);
+    await run({
+      config: defineConfig({
+        tracker: memoryTracker({
+          tickets: [ticket],
+          ready: "unblocked",
+          labels: ["ready-for-agent"],
+        }),
+        worker,
+        model: "composer-2",
+      }),
+      cap: 1,
+      cwd: repo.cwd,
+      stdout: silent,
+    });
+
+    assert.equal(nodeModulesAtSpawn, true);
   } finally {
     await repo.cleanup();
   }
