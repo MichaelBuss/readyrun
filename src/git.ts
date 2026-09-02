@@ -113,6 +113,25 @@ export async function headCommit(cwd: string): Promise<string> {
   return await git(cwd, ["rev-parse", "HEAD"]);
 }
 
+export async function worktreeIsClean(worktreePath: string): Promise<boolean> {
+  return await git(worktreePath, ["status", "--porcelain"]) === "";
+}
+
+// Read the Branch ref, not the Worktree's HEAD: a Worker that committed
+// somewhere else left the Ticket's Branch as empty as one that did nothing.
+export async function branchHasCommitsSince(
+  cwd: string,
+  branch: string,
+  base: string,
+): Promise<boolean> {
+  const count = await git(cwd, [
+    "rev-list",
+    "--count",
+    `${base}..refs/heads/${branch}`,
+  ]);
+  return count !== "0";
+}
+
 export async function createTicketWorktree(
   cwd: string,
   branch: string,

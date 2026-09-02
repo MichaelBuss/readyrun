@@ -99,7 +99,7 @@ _Avoid_: max mode (Cursor's interactive slash command), ultracode (a Claude Code
 - A **Worker**’s model: config default is required (**Doctor** fail if missing). CLI `--model` overrides that default for the **Run**. A label map may override per **Ticket**. The **Ticket** body does not name a model.
 - The **Worker** prompt is owned by the package: loop rules plus **Tracker Adapter** copy (this **Ticket**’s id, title, body, URL). Loop rules tell the **Worker** it will not get a reply and must not ask the **Consumer**; a blocking question is a failed **Ticket**, not a pause. A **Consumer** may append a repo context file from config. That file does not replace tracker instructions. There is no repo `prompt.md` that owns the loop.
 - When a **Worker** succeeds, the **Ticket** must leave the **Frontier**. The **Tracker Adapter** has a default for that (Linear: In Review, not Done; GitHub: drop the frontier label, comment, do not close). A **Consumer** may override; they do not have to write a hook.
-- A **Run** hard-stops (no skip, no retry-forever) on **Tracker** API or auth failure, **Branch**/**Worktree** failure, **Worker** missing or not logged in at spawn, or **Worker** non-zero exit. Empty **Frontier** and cap are clean stops. The harness owns **Tracker** auth; the coding CLI owns its own login.
+- A **Run** hard-stops (no skip, no retry-forever) on **Tracker** API or auth failure, **Branch**/**Worktree** failure, **Worker** missing or not logged in at spawn, **Worker** non-zero exit, or a **Worker** that exits 0 leaving its **Worktree** dirty or its **Branch** unchanged. Empty **Frontier** and cap are clean stops. The harness owns **Tracker** auth; the coding CLI owns its own login.
 
 ## Example dialogue
 

@@ -440,6 +440,34 @@ test("the Worker prompt tells the Worker not to invent a Tracker, fabricate Tick
   }
 });
 
+test("the Worker prompt tells the Worker to commit its work, because ReadyRun checks that it did", async () => {
+  const repo = await throwawayRepo();
+  const worker = recordingWorker({ exitCode: 0 });
+  try {
+    await run({
+      config: defineConfig({
+        tracker: memoryTracker({
+          tickets: [ticket],
+          ready: "unblocked",
+          labels: ["ready-for-agent"],
+        }),
+        worker,
+        model: "composer-2",
+      }),
+      cap: 1,
+      cwd: repo.cwd,
+      stdout: silent,
+    });
+
+    const prompt = worker.spawns[0]?.prompt;
+    assert.ok(prompt);
+    assert.match(prompt, /Commit your work on the Branch/);
+    assert.match(prompt, /uncommitted changes|nothing committed/);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
 test("the Worker prompt tells the Worker it will not get a reply and must not ask the Consumer", async () => {
   const repo = await throwawayRepo();
   const worker = recordingWorker({ exitCode: 0 });
