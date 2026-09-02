@@ -91,12 +91,14 @@ function parseOwnerRepo(url: string): string | undefined {
   return path?.[1];
 }
 
-async function branchExists(cwd: string, branch: string): Promise<boolean> {
+async function branchTip(
+  cwd: string,
+  branch: string,
+): Promise<string | undefined> {
   try {
-    await git(cwd, ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`]);
-    return true;
+    return await git(cwd, ["rev-parse", "--verify", `refs/heads/${branch}`]);
   } catch {
-    return false;
+    return undefined;
   }
 }
 
@@ -149,7 +151,9 @@ export async function createTicketWorktree(
     branch.replaceAll("/", "-"),
   );
 
-  if (await branchExists(cwd, branch) || await pathExists(worktreePath)) {
+  if (
+    await branchTip(cwd, branch) !== undefined || await pathExists(worktreePath)
+  ) {
     throw new WorktreeExistsError(branch, worktreePath);
   }
 
@@ -169,6 +173,51 @@ export async function createTicketWorktree(
   ]);
   await installWorktreeDependencies(worktreePath);
   return worktreePath;
+}
+
+export type CollectOntoRunBranchOptions = {
+  runBranch: string;
+  branch: string;
+  base: string;
+  message: string;
+};
+
+// Merges with plumbing rather than `git merge`, because the Run Branch never
+// needs a working tree of its own and the Consumer's checkout is theirs to
+// stand on: a Run collects Tickets without moving anyone (ADR 0028).
+export async function collectOntoRunBranch(
+  cwd: string,
+  options: CollectOntoRunBranchOptions,
+): Promise<string> {
+  const runRef = `refs/heads/${options.runBranch}`;
+  const existing = await branchTip(cwd, options.runBranch);
+  const tip = existing ?? options.base;
+  const collected = await git(cwd, [
+    "rev-parse",
+    "--verify",
+    `refs/heads/${options.branch}`,
+  ]);
+  const tree = await git(cwd, ["merge-tree", "--write-tree", tip, collected]);
+  // Two parents and no fast-forward: one Ticket is one entry in the Run
+  // Branch's first-parent history, with the Worker's own commits underneath.
+  const merge = await git(cwd, [
+    "commit-tree",
+    tree,
+    "-p",
+    tip,
+    "-p",
+    collected,
+    "-m",
+    options.message,
+  ]);
+  // The merge that lands is what writes the ref — an empty old value where the
+  // Run Branch does not exist yet, so a Run that never lands a Ticket, or whose
+  // first merge fails, leaves no Run Branch behind.
+  await git(cwd, ["update-ref", runRef, merge, existing ?? ""]);
+  // `--force` because the Branch is merged into the Run Branch, which is not
+  // the branch the Consumer's checkout is on, so git cannot see that itself.
+  await git(cwd, ["branch", "--delete", "--force", options.branch]);
+  return merge;
 }
 
 // Plain `remove`, not `--force`: a Worktree still holding work is a hard stop

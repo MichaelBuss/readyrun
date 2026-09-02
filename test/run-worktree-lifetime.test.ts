@@ -1,12 +1,17 @@
 import assert from "node:assert/strict";
-import { access } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createTrackerAdapter, defineConfig, run } from "../src/mod.ts";
 import { memoryTracker, recordingWorker } from "../src/testing/mod.ts";
 import { createWorkerAdapter } from "../src/worker-adapter.ts";
 import { ticket } from "./tracker-adapter-contract.ts";
-import { commitWorkerWork, git, throwawayRepo } from "./throwaway-repo.ts";
+import {
+  commitWorkerWork,
+  git,
+  onDisk,
+  runBranchMerges,
+  throwawayRepo,
+} from "./throwaway-repo.ts";
 
 const silent = { write(_chunk?: string) { return true; } };
 
@@ -22,16 +27,7 @@ function worktreeOf(cwd: string, ticketId: string): string {
   return join(cwd, ".readyrun", "worktrees", `readyrun-${ticketId}`);
 }
 
-async function onDisk(path: string): Promise<boolean> {
-  try {
-    await access(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-test("a verified-successful Ticket's Worktree is gone before the next Ticket starts, and its Branch still carries the work", async () => {
+test("a verified-successful Ticket's Worktree is gone before the next Ticket starts, and the Run Branch carries the work", async () => {
   const repo = await throwawayRepo();
   const ticket52WorktreeAtSpawnOf: Record<string, boolean> = {};
   const worker = createWorkerAdapter({
@@ -56,14 +52,7 @@ test("a verified-successful Ticket's Worktree is gone before the next Ticket sta
     assert.equal(exitCode, 0);
     assert.deepEqual(ticket52WorktreeAtSpawnOf, { 52: true, 57: false });
     assert.equal(await onDisk(worktreeOf(repo.cwd, "57")), false);
-    assert.equal(
-      await git(repo.cwd, ["rev-list", "--count", `${base}..readyrun/52`]),
-      "1",
-    );
-    assert.equal(
-      await git(repo.cwd, ["rev-list", "--count", `${base}..readyrun/57`]),
-      "1",
-    );
+    assert.equal((await runBranchMerges(repo.cwd, base)).length, 2);
   } finally {
     await repo.cleanup();
   }

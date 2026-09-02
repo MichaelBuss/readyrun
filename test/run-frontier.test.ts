@@ -239,8 +239,6 @@ test("a v0 Run starts one Worker at a time; each Ticket still gets its own Branc
     });
 
     assert.equal(maxInFlight, 1);
-    await git(repo.cwd, ["rev-parse", "--verify", "refs/heads/readyrun/52"]);
-    await git(repo.cwd, ["rev-parse", "--verify", "refs/heads/readyrun/57"]);
     assert.match(worktreesAtSpawn["52"] ?? "", /readyrun\/52/);
     assert.match(worktreesAtSpawn["57"] ?? "", /readyrun\/57/);
     assert.equal(await git(repo.cwd, ["rev-parse", "--abbrev-ref", "HEAD"]), "main");
