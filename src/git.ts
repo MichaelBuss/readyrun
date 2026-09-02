@@ -171,6 +171,15 @@ export async function createTicketWorktree(
   return worktreePath;
 }
 
+// Plain `remove`, not `--force`: a Worktree still holding work is a hard stop
+// the Run has already refused to reach, so failing loudly here is right.
+export async function removeTicketWorktree(
+  cwd: string,
+  worktreePath: string,
+): Promise<void> {
+  await git(cwd, ["worktree", "remove", worktreePath]);
+}
+
 async function installWorktreeDependencies(worktreePath: string): Promise<void> {
   const command = await detectInstallCommand(worktreePath);
   if (command === undefined) {
