@@ -1,7 +1,12 @@
 import { existsSync } from "node:fs";
 import { delimiter, isAbsolute, join } from "node:path";
 import { defineConfig, type ReadyRunConfig } from "./config.ts";
-import { originRepository, normalizeRepository } from "./git.ts";
+import {
+  normalizeRepository,
+  originRepository,
+  resolveRunBase,
+  type RunBase,
+} from "./git.ts";
 import type { Ticket } from "./ticket.ts";
 import type { Effort, Permissions } from "./worker-adapter.ts";
 
@@ -92,6 +97,31 @@ function workerBinaryExists(bin: string): boolean {
   return path.split(delimiter).some((dir) => existsSync(join(dir, bin)));
 }
 
+function baseLine(base: RunBase): string {
+  const commit = base.commit.slice(0, 7);
+  // A detached checkout is on no branch, so it is named the default branch
+  // rather than told it differs from one: the base may well be that branch's
+  // own tip.
+  if (base.branch === undefined) {
+    return `Base: ${commit} (detached HEAD); the default branch is ${base.defaultBranch}`;
+  }
+  const callout = base.branch === base.defaultBranch
+    ? ""
+    : `; not the default branch (${base.defaultBranch})`;
+  return `Base: ${commit} on ${base.branch}${callout}`;
+}
+
+// Disclosure, not a gate: a base off the default branch and a dirty checkout
+// are both things a Consumer may have meant, so neither stops a Run.
+export function discloseBase(stdout: DoctorStdout, base: RunBase): void {
+  stdout.write(`${baseLine(base)}\n`);
+  if (base.dirty) {
+    stdout.write(
+      "Warning: uncommitted changes in the primary checkout reach no Worktree\n",
+    );
+  }
+}
+
 export function warnUnusedModelsByLabel(
   stdout: DoctorStdout,
   modelsByLabel: Record<string, string> | undefined,
@@ -133,6 +163,13 @@ export async function doctor(options: DoctorOptions): Promise<number> {
   const stdout = options.stdout ?? process.stdout;
   if (await doctorCheck(config, cwd, stdout) === 1) {
     return 1;
+  }
+  try {
+    discloseBase(stdout, await resolveRunBase(cwd));
+  } catch {
+    // A checkout git cannot answer for — no commit yet, or no repository — has
+    // no base to disclose. A Run hard-stops at git there, which is where that
+    // gets reported.
   }
   const frontier = await config.tracker.frontier();
   warnUnusedModelsByLabel(stdout, config.modelsByLabel, frontier);
