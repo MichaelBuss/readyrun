@@ -28,12 +28,13 @@ export type WorkerAdapter = {
   readonly [brand]: true;
   readonly bin?: string;
   readonly effortFlag?: string;
+  readonly printMode?: true;
   readonly probe?: () => Promise<ProbeResult>;
   spawn(request: SpawnRequest): Promise<{ exitCode: number }>;
 };
 
 export function createWorkerAdapter(
-  methods: Partial<Pick<WorkerAdapter, "spawn" | "bin" | "effortFlag" | "probe">> = {},
+  methods: Partial<Pick<WorkerAdapter, "spawn" | "bin" | "effortFlag" | "printMode" | "probe">> = {},
 ): WorkerAdapter {
   return {
     [brand]: true,
@@ -104,6 +105,7 @@ export function printModeWorker(
   return createWorkerAdapter({
     bin,
     effortFlag,
+    printMode: true,
     probe: probeArgs === undefined ? undefined : () => execProbe(bin, probeArgs),
     spawn(request: SpawnRequest) {
       const args = ["-p", ...(extraArgs ?? []), "--model", request.model];

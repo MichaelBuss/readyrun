@@ -38,6 +38,8 @@ claude({ extraArgs: ["--verbose"] });
 
 `cursor()` shells out to `agent`, `claude()` shells out to `claude`; both must already be installed and authenticated before `run` — ReadyRun does not manage CLI auth.
 
+Both spawn print-mode (`-p`). `permissions: "ask"` (the default) is a Doctor failure — print-mode is not a chat. Pass `--permissions unattended`, or set `permissions: "unattended"` in config. `custom()` does not force print-mode, so ask remains valid there.
+
 `readyrun doctor` can tell "not installed" from "installed but not logged in": `cursor()` and `claude()` each define a cheap probe (`agent status`, `claude auth status`) that Doctor runs once it has confirmed the binary exists, reporting a probe failure distinctly from a missing binary. `custom()` Worker Adapters have no probe and keep today's existence-only check.
 
 For a Tracker this package doesn't ship (Jira, GitLab, ...), build one with `createTrackerAdapter`, the same building block `github()` and `linear()` use internally:

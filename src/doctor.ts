@@ -3,7 +3,7 @@ import { delimiter, isAbsolute, join } from "node:path";
 import { defineConfig, type ReadyRunConfig } from "./config.ts";
 import { originRepository, normalizeRepository } from "./git.ts";
 import type { Ticket } from "./ticket.ts";
-import type { Effort } from "./worker-adapter.ts";
+import type { Effort, Permissions } from "./worker-adapter.ts";
 
 type DoctorStdout = { write(chunk: string): unknown };
 
@@ -17,6 +17,7 @@ async function check(
   config: ReadyRunConfig,
   cwd: string,
   effort: Effort | undefined,
+  permissions: Permissions,
 ): Promise<string[]> {
   const failures: string[] = [];
   if (typeof config.model !== "string" || config.model.length === 0) {
@@ -75,6 +76,11 @@ async function check(
   if (effort !== undefined && config.worker.effortFlag === undefined) {
     failures.push("effort is set but this Worker Adapter does not map it");
   }
+  if (config.worker.printMode === true && permissions === "ask") {
+    failures.push(
+      "print-mode spawn cannot use permissions ask; pass --permissions unattended",
+    );
+  }
   return failures;
 }
 
@@ -109,8 +115,9 @@ export async function doctorCheck(
   cwd: string,
   stdout: DoctorStdout,
   effort: Effort | undefined = config.effort,
+  permissions: Permissions = config.permissions ?? "ask",
 ): Promise<0 | 1> {
-  const failures = await check(config, cwd, effort);
+  const failures = await check(config, cwd, effort, permissions);
   if (failures.length === 0) {
     return 0;
   }
