@@ -173,7 +173,7 @@ export async function run(options: RunOptions): Promise<number> {
       );
     }
     // Exit 0 is not success on its own: a Worker that did nothing also exits 0
-    // and also leaves a clean tree (ADR 0027).
+    // and also leaves a clean tree (ADR 0029).
     let clean;
     let committed;
     try {
@@ -213,7 +213,7 @@ export async function run(options: RunOptions): Promise<number> {
       return hardStop(stdout, "tracker", ticket.id);
     }
     // After the Worktree, so that a hard stop at any earlier stage leaves it on
-    // disk for the Consumer to look at (ADR 0027) — and because a Branch cannot
+    // disk for the Consumer to look at (ADR 0029) — and because a Branch cannot
     // be deleted while a Worktree still has it checked out.
     try {
       await removeTicketWorktree(cwd, worktree);
