@@ -74,6 +74,14 @@ test("a Run with cap 1 against one unblocked Ticket starts exactly one Worker wi
 
 test("ReadyRun creates a Branch derived from the Ticket's identity; the Ticket body does not name the Branch", async () => {
   const repo = await throwawayRepo();
+  let branchAtSpawn: string | undefined;
+  const worker = createWorkerAdapter({
+    async spawn(request) {
+      branchAtSpawn = await git(request.cwd, ["branch", "--show-current"]);
+      await commitWorkerWork(request);
+      return { exitCode: 0 };
+    },
+  });
   try {
     await run({
       config: defineConfig({
@@ -82,7 +90,7 @@ test("ReadyRun creates a Branch derived from the Ticket's identity; the Ticket b
           ready: "unblocked",
           labels: ["ready-for-agent"],
         }),
-        worker: recordingWorker({ exitCode: 0 }),
+        worker,
         model: "composer-2",
       }),
       cap: 1,
@@ -90,7 +98,7 @@ test("ReadyRun creates a Branch derived from the Ticket's identity; the Ticket b
       stdout: silent,
     });
 
-    await git(repo.cwd, ["rev-parse", "--verify", "refs/heads/readyrun/52"]);
+    assert.equal(branchAtSpawn, "readyrun/52");
     await assert.rejects(() =>
       git(repo.cwd, ["rev-parse", "--verify", "refs/heads/evil-from-body"]),
     );

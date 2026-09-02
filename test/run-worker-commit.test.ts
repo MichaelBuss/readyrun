@@ -6,7 +6,7 @@ import { defineConfig, run } from "../src/mod.ts";
 import { memoryTracker, recordingWorker } from "../src/testing/mod.ts";
 import { createWorkerAdapter } from "../src/worker-adapter.ts";
 import { ticket } from "./tracker-adapter-contract.ts";
-import { git, throwawayRepo } from "./throwaway-repo.ts";
+import { git, runBranches, throwawayRepo } from "./throwaway-repo.ts";
 
 const silent = { write(_chunk?: string) { return true; } };
 
@@ -104,9 +104,15 @@ test("a Worker exiting 0 with a clean Worktree and a commit on its Branch takes 
     assert.equal(exitCode, 0);
     assert.deepEqual(worker.spawns.map((spawn) => spawn.ticket.id), ["52", "57"]);
     assert.deepEqual(await frontier.frontier(), []);
+    const runBranch = (await runBranches(repo.cwd))[0] ?? "";
     assert.equal(
-      await git(repo.cwd, ["rev-list", "--count", `${base}..readyrun/52`]),
-      "1",
+      await git(repo.cwd, [
+        "rev-list",
+        "--first-parent",
+        "--count",
+        `${base}..${runBranch}`,
+      ]),
+      "2",
     );
   } finally {
     await repo.cleanup();

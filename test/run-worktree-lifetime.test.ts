@@ -6,7 +6,12 @@ import { createTrackerAdapter, defineConfig, run } from "../src/mod.ts";
 import { memoryTracker, recordingWorker } from "../src/testing/mod.ts";
 import { createWorkerAdapter } from "../src/worker-adapter.ts";
 import { ticket } from "./tracker-adapter-contract.ts";
-import { commitWorkerWork, git, throwawayRepo } from "./throwaway-repo.ts";
+import {
+  commitWorkerWork,
+  git,
+  runBranches,
+  throwawayRepo,
+} from "./throwaway-repo.ts";
 
 const silent = { write(_chunk?: string) { return true; } };
 
@@ -31,7 +36,7 @@ async function onDisk(path: string): Promise<boolean> {
   }
 }
 
-test("a verified-successful Ticket's Worktree is gone before the next Ticket starts, and its Branch still carries the work", async () => {
+test("a verified-successful Ticket's Worktree is gone before the next Ticket starts, and the Run Branch carries the work", async () => {
   const repo = await throwawayRepo();
   const ticket52WorktreeAtSpawnOf: Record<string, boolean> = {};
   const worker = createWorkerAdapter({
@@ -56,13 +61,15 @@ test("a verified-successful Ticket's Worktree is gone before the next Ticket sta
     assert.equal(exitCode, 0);
     assert.deepEqual(ticket52WorktreeAtSpawnOf, { 52: true, 57: false });
     assert.equal(await onDisk(worktreeOf(repo.cwd, "57")), false);
+    const runBranch = (await runBranches(repo.cwd))[0] ?? "";
     assert.equal(
-      await git(repo.cwd, ["rev-list", "--count", `${base}..readyrun/52`]),
-      "1",
-    );
-    assert.equal(
-      await git(repo.cwd, ["rev-list", "--count", `${base}..readyrun/57`]),
-      "1",
+      await git(repo.cwd, [
+        "rev-list",
+        "--first-parent",
+        "--count",
+        `${base}..${runBranch}`,
+      ]),
+      "2",
     );
   } finally {
     await repo.cleanup();

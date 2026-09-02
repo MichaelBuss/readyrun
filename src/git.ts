@@ -171,6 +171,50 @@ export async function createTicketWorktree(
   return worktreePath;
 }
 
+export type CollectOntoRunBranchOptions = {
+  runBranch: string;
+  branch: string;
+  base: string;
+  message: string;
+};
+
+// Merges with plumbing rather than `git merge`, because the Run Branch never
+// needs a working tree of its own and the Consumer's checkout is theirs to
+// stand on: a Run collects Tickets without moving anyone (ADR 0028).
+export async function collectOntoRunBranch(
+  cwd: string,
+  options: CollectOntoRunBranchOptions,
+): Promise<string> {
+  const runRef = `refs/heads/${options.runBranch}`;
+  // Created at the first merge, so a Run that lands nothing leaves no ref.
+  if (!await branchExists(cwd, options.runBranch)) {
+    await git(cwd, ["branch", options.runBranch, options.base]);
+  }
+  const tip = await git(cwd, ["rev-parse", runRef]);
+  const collected = await git(cwd, [
+    "rev-parse",
+    `refs/heads/${options.branch}`,
+  ]);
+  const tree = await git(cwd, ["merge-tree", "--write-tree", tip, collected]);
+  // Two parents and no fast-forward: one Ticket is one entry in the Run
+  // Branch's first-parent history, with the Worker's own commits underneath.
+  const merge = await git(cwd, [
+    "commit-tree",
+    tree,
+    "-p",
+    tip,
+    "-p",
+    collected,
+    "-m",
+    options.message,
+  ]);
+  await git(cwd, ["update-ref", runRef, merge, tip]);
+  // `--force` because the Branch is merged into the Run Branch, which is not
+  // the branch the Consumer's checkout is on, so git cannot see that itself.
+  await git(cwd, ["branch", "--delete", "--force", options.branch]);
+  return merge;
+}
+
 // Plain `remove`, not `--force`: a Worktree still holding work is a hard stop
 // the Run has already refused to reach, so failing loudly here is right.
 export async function removeTicketWorktree(

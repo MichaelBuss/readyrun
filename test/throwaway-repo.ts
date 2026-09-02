@@ -49,6 +49,15 @@ export async function throwawayRepo(options: {
   };
 }
 
+export async function runBranches(cwd: string): Promise<string[]> {
+  const refs = await git(cwd, [
+    "for-each-ref",
+    "--format=%(refname:short)",
+    "refs/heads/readyrun/run-*",
+  ]);
+  return refs.split("\n").filter(Boolean);
+}
+
 export async function commitRepoFiles(
   cwd: string,
   files: Record<string, string>,
