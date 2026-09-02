@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { defineConfig, type ReadyRunConfig } from "./config.ts";
 import { doctorCheck, warnUnusedModelsByLabel } from "./doctor.ts";
-import { createTicketWorktree } from "./git.ts";
+import { createTicketWorktree, headCommit } from "./git.ts";
 import { composeWorkerPrompt } from "./prompt.ts";
 import type { Ticket } from "./ticket.ts";
 import type { Effort, Permissions } from "./worker-adapter.ts";
@@ -71,6 +71,17 @@ export async function run(options: RunOptions): Promise<number> {
   ) {
     return 1;
   }
+  let base;
+  try {
+    base = await headCommit(cwd);
+  } catch (error) {
+    return hardStop(
+      stdout,
+      "git",
+      undefined,
+      error instanceof Error ? error.message : undefined,
+    );
+  }
   const context = config.contextFile === undefined
     ? undefined
     : await readFile(join(cwd, config.contextFile), "utf8");
@@ -96,7 +107,7 @@ export async function run(options: RunOptions): Promise<number> {
     const branch = config.tracker.branchName(ticket);
     let worktree;
     try {
-      worktree = await createTicketWorktree(cwd, branch);
+      worktree = await createTicketWorktree(cwd, branch, base);
     } catch (error) {
       return hardStop(
         stdout,
