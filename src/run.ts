@@ -4,6 +4,7 @@ import { defineConfig, type ReadyRunConfig } from "./config.ts";
 import { doctorCheck, warnUnusedModelsByLabel } from "./doctor.ts";
 import {
   branchHasCommitsSince,
+  collectOntoRunBranch,
   createTicketWorktree,
   headCommit,
   removeTicketWorktree,
@@ -43,6 +44,26 @@ function resolveModel(
   return mapped ?? runModel ?? config.model;
 }
 
+function runBranchName(startedAt: Date): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const stamp = [
+    startedAt.getFullYear(),
+    pad(startedAt.getMonth() + 1),
+    pad(startedAt.getDate()),
+    "-",
+    pad(startedAt.getHours()),
+    pad(startedAt.getMinutes()),
+    pad(startedAt.getSeconds()),
+  ].join("");
+  return `readyrun/run-${stamp}`;
+}
+
+// The merge is the only commit ReadyRun writes, so its message is derived from
+// the Ticket the way the Branch name is rather than authored about the code.
+function mergeMessage(ticket: Ticket): string {
+  return `Ticket ${ticket.id}: ${ticket.title}`;
+}
+
 type HardStopStage = "tracker" | "git" | "spawn" | "worker";
 
 function hardStop(
@@ -77,6 +98,7 @@ export async function run(options: RunOptions): Promise<number> {
   ) {
     return 1;
   }
+  const runBranch = runBranchName(new Date());
   let base;
   try {
     base = await headCommit(cwd);
@@ -88,6 +110,9 @@ export async function run(options: RunOptions): Promise<number> {
       error instanceof Error ? error.message : undefined,
     );
   }
+  // A Ticket's Branch is cut from the Run Branch's tip, which until the first
+  // Ticket lands is the base the Run resolved at start (ADR 0028).
+  let runBranchTip = base;
   const context = config.contextFile === undefined
     ? undefined
     : await readFile(join(cwd, config.contextFile), "utf8");
@@ -113,7 +138,7 @@ export async function run(options: RunOptions): Promise<number> {
     const branch = config.tracker.branchName(ticket);
     let worktree;
     try {
-      worktree = await createTicketWorktree(cwd, branch, base);
+      worktree = await createTicketWorktree(cwd, branch, runBranchTip);
     } catch (error) {
       return hardStop(
         stdout,
@@ -151,7 +176,7 @@ export async function run(options: RunOptions): Promise<number> {
     let committed;
     try {
       clean = await worktreeIsClean(worktree);
-      committed = await branchHasCommitsSince(cwd, branch, base);
+      committed = await branchHasCommitsSince(cwd, branch, runBranchTip);
     } catch (error) {
       return hardStop(
         stdout,
@@ -185,10 +210,17 @@ export async function run(options: RunOptions): Promise<number> {
     } catch {
       return hardStop(stdout, "tracker", ticket.id);
     }
-    // Last, so that a hard stop at any earlier stage leaves the Worktree on
-    // disk for the Consumer to look at (ADR 0027).
+    // After the Worktree, so that a hard stop at any earlier stage leaves it on
+    // disk for the Consumer to look at (ADR 0027) — and because a Branch cannot
+    // be deleted while a Worktree still has it checked out.
     try {
       await removeTicketWorktree(cwd, worktree);
+      runBranchTip = await collectOntoRunBranch(cwd, {
+        runBranch,
+        branch,
+        base,
+        message: mergeMessage(ticket),
+      });
     } catch (error) {
       return hardStop(
         stdout,
