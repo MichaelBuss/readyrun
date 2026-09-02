@@ -440,6 +440,35 @@ test("the Worker prompt tells the Worker not to invent a Tracker, fabricate Tick
   }
 });
 
+test("the Worker prompt tells the Worker it will not get a reply and must not ask the Consumer", async () => {
+  const repo = await throwawayRepo();
+  const worker = recordingWorker({ exitCode: 0 });
+  try {
+    await run({
+      config: defineConfig({
+        tracker: memoryTracker({
+          tickets: [ticket],
+          ready: "unblocked",
+          labels: ["ready-for-agent"],
+        }),
+        worker,
+        model: "composer-2",
+      }),
+      cap: 1,
+      cwd: repo.cwd,
+      stdout: silent,
+    });
+
+    const prompt = worker.spawns[0]?.prompt;
+    assert.ok(prompt);
+    assert.match(prompt, /You will not get a reply/);
+    assert.match(prompt, /Do not ask the Consumer/);
+    assert.match(prompt, /A blocking question is a failed Ticket, not a pause/);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
 test("Tracker-specific wording in the Worker prompt comes from the selected Tracker Adapter", async () => {
   const repo = await throwawayRepo();
   const worker = recordingWorker({ exitCode: 0 });
