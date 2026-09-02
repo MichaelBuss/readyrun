@@ -8,7 +8,11 @@ import { defineConfig, run } from "../src/mod.ts";
 import { memoryTracker, recordingWorker } from "../src/testing/mod.ts";
 import type { Ticket } from "../src/mod.ts";
 import { createWorkerAdapter } from "../src/worker-adapter.ts";
-import { commitNpmConsumer, throwawayRepo } from "./throwaway-repo.ts";
+import {
+  commitNpmConsumer,
+  commitWorkerWork,
+  throwawayRepo,
+} from "./throwaway-repo.ts";
 
 const exec = promisify(execFile);
 const silent = { write(_chunk?: string) { return true; } };
@@ -130,7 +134,16 @@ test("ReadyRun refuses to start a Worker on the default branch", async () => {
 
 test("the Worker runs in a git Worktree on that Branch, not in the Consumer's primary checkout", async () => {
   const repo = await throwawayRepo();
-  const worker = recordingWorker({ exitCode: 0 });
+  let cwdAtSpawn: string | undefined;
+  let branchAtSpawn: string | undefined;
+  const worker = createWorkerAdapter({
+    async spawn(request) {
+      cwdAtSpawn = request.cwd;
+      branchAtSpawn = await git(request.cwd, ["rev-parse", "--abbrev-ref", "HEAD"]);
+      await commitWorkerWork(request);
+      return { exitCode: 0 };
+    },
+  });
   try {
     await run({
       config: defineConfig({
@@ -147,10 +160,9 @@ test("the Worker runs in a git Worktree on that Branch, not in the Consumer's pr
       stdout: silent,
     });
 
-    const spawn = worker.spawns[0];
-    assert.ok(spawn?.cwd);
-    assert.notEqual(spawn.cwd, repo.cwd);
-    assert.equal(await git(spawn.cwd, ["rev-parse", "--abbrev-ref", "HEAD"]), "readyrun/52");
+    assert.ok(cwdAtSpawn);
+    assert.notEqual(cwdAtSpawn, repo.cwd);
+    assert.equal(branchAtSpawn, "readyrun/52");
     assert.equal(await git(repo.cwd, ["rev-parse", "--abbrev-ref", "HEAD"]), "main");
   } finally {
     await repo.cleanup();
