@@ -206,11 +206,17 @@ test("a v0 Run starts one Worker at a time; each Ticket still gets its own Branc
   const repo = await throwawayRepo();
   let inFlight = 0;
   let maxInFlight = 0;
+  const worktreesAtSpawn: Record<string, string> = {};
   const worker = createWorkerAdapter({
     async spawn(request) {
       inFlight += 1;
       maxInFlight = Math.max(maxInFlight, inFlight);
       await new Promise((resolve) => setTimeout(resolve, 25));
+      worktreesAtSpawn[request.ticket.id] = await git(repo.cwd, [
+        "worktree",
+        "list",
+        "--porcelain",
+      ]);
       inFlight -= 1;
       await commitWorkerWork(request);
       return { exitCode: 0 };
@@ -235,9 +241,8 @@ test("a v0 Run starts one Worker at a time; each Ticket still gets its own Branc
     assert.equal(maxInFlight, 1);
     await git(repo.cwd, ["rev-parse", "--verify", "refs/heads/readyrun/52"]);
     await git(repo.cwd, ["rev-parse", "--verify", "refs/heads/readyrun/57"]);
-    const worktrees = await git(repo.cwd, ["worktree", "list", "--porcelain"]);
-    assert.match(worktrees, /readyrun\/52/);
-    assert.match(worktrees, /readyrun\/57/);
+    assert.match(worktreesAtSpawn["52"] ?? "", /readyrun\/52/);
+    assert.match(worktreesAtSpawn["57"] ?? "", /readyrun\/57/);
     assert.equal(await git(repo.cwd, ["rev-parse", "--abbrev-ref", "HEAD"]), "main");
   } finally {
     await repo.cleanup();

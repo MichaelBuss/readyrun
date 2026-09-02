@@ -6,6 +6,7 @@ import {
   branchHasCommitsSince,
   createTicketWorktree,
   headCommit,
+  removeTicketWorktree,
   worktreeIsClean,
 } from "./git.ts";
 import { composeWorkerPrompt } from "./prompt.ts";
@@ -183,6 +184,18 @@ export async function run(options: RunOptions): Promise<number> {
       }
     } catch {
       return hardStop(stdout, "tracker", ticket.id);
+    }
+    // Last, so that a hard stop at any earlier stage leaves the Worktree on
+    // disk for the Consumer to look at (ADR 0027).
+    try {
+      await removeTicketWorktree(cwd, worktree);
+    } catch (error) {
+      return hardStop(
+        stdout,
+        "git",
+        ticket.id,
+        error instanceof Error ? error.message : undefined,
+      );
     }
   }
   return 0;
