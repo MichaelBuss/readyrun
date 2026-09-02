@@ -14,6 +14,7 @@ export type ThrowawayRepo = {
 
 export async function throwawayRepo(options: {
   defaultBranch?: string;
+  commits?: boolean;
 } = {}): Promise<ThrowawayRepo> {
   const defaultBranch = options.defaultBranch ?? "main";
   await mkdir(tmpRoot, { recursive: true });
@@ -27,9 +28,11 @@ export async function throwawayRepo(options: {
   await exec("git", ["config", "user.name", "ReadyRun"], { cwd });
   await exec("git", ["config", "commit.gpgsign", "false"], { cwd });
   await exec("git", ["config", "init.defaultBranch", defaultBranch], { cwd });
-  await writeFile(join(cwd, "README"), "throwaway\n");
-  await exec("git", ["add", "README"], { cwd });
-  await exec("git", ["commit", "-m", "init"], { cwd });
+  if (options.commits ?? true) {
+    await writeFile(join(cwd, "README"), "throwaway\n");
+    await exec("git", ["add", "README"], { cwd });
+    await exec("git", ["commit", "-m", "init"], { cwd });
+  }
   return {
     cwd,
     async cleanup() {
