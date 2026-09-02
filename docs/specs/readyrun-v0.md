@@ -80,6 +80,7 @@ A Run cannot start without a cap on how many Tickets it may start, so an unatten
 40. As a repo maintainer, I want the **Worker** to be told this **Ticket**'s identifier, title, body and URL, so that it can read the full issue itself.
 41. As a repo maintainer, I want my optional repo context appended rather than substituted, so that local facts are added without losing the loop's own rules.
 42. As a repo maintainer, I want the **Worker** told never to invent a tracker or fabricate ticket state, so that a failed lookup surfaces instead of being imagined.
+42a. As a repo maintainer, I want the **Worker** told it will not get a reply, so that a blocking question is a failed **Ticket** rather than a pause.
 43. As a repo maintainer, I want the instructions to reflect the adapters I selected, so that a Linear repo is never told about issue numbers.
 
 ### Models and permissions
@@ -92,6 +93,7 @@ A Run cannot start without a cap on how many Tickets it may start, so an unatten
 47b. As an operator, I want a command-line effort override for one **Run**, so that I can try a cheaper or deeper pass without editing config.
 47c. As a repo maintainer on Cursor, I want effort to stay a model variant rather than a flag the **Worker** would reject.
 48. As an operator, I want **Permissions** to be a named choice between asking and unattended, so that the setting reads as intent rather than as a vendor flag.
+48a. As an operator, I want **Doctor** to refuse print-mode spawn with ask, so that I find out before a **Worker** blocks on a question I will never see.
 49. As an operator, I want asking to be the default, so that the first time I run ReadyRun I see what it wants to do.
 50. As an operator, I want looping never to imply unattended, so that a long **Run** does not silently grant the **Worker** free rein.
 51. As an operator, I want each **Worker Adapter** to know its own auto-approve flag, so that unattended means the same thing whichever coding CLI I picked.
@@ -163,7 +165,7 @@ A Run cannot start without a cap on how many Tickets it may start, so an unatten
 
 ### Permissions and models
 
-- **Permissions** is a Run-level value of `ask` or `unattended`, defaulting to `ask`. Looping never implies unattended. Each Worker Adapter maps `unattended` onto its own auto-approve flag; the custom adapter is told which flag to use. Sandbox bypass is not a third value in v0 (ADR 0011).
+- **Permissions** is a Run-level value of `ask` or `unattended`, defaulting to `ask`. Looping never implies unattended. Each Worker Adapter maps `unattended` onto its own auto-approve flag; the custom adapter is told which flag to use. `cursor()` and `claude()` always spawn `-p`; ask has nowhere to go, so Doctor (and a Run) refuse that pairing and name `--permissions unattended`. `custom()` does not force print-mode, so ask remains valid there. Sandbox bypass is not a third value in v0 (ADR 0011, ADR 0027).
 - Model resolution is: a required config default, overridden by a command-line model for the whole Run, overridden by a by-label map for an individual Ticket. Doctor fails when the default is missing. The Ticket body never names a model (ADR 0012).
 - **Effort** is an optional config default (`low` | `medium` | `high` | `xhigh` | `max`), overridden by `--effort` for the Run. The Worker Adapter maps it onto `--effort`. Cursor does not take that flag; Doctor fails if effort is set on an adapter that does not map it (ADR 0021).
 - `cursor()` and `claude()` accept an optional `extraArgs: string[]`, landing between `-p` and `--model` — the same position `custom()`'s own `args` already occupy relative to `--model`. `custom()`'s `args` behaviour is unchanged (ADR 0022).
@@ -173,6 +175,7 @@ A Run cannot start without a cap on how many Tickets it may start, so an unatten
 - Loop rules and tracker-specific instructions ship in the package and are populated by the selected Tracker Adapter with the Ticket's identifier, title, body and URL (ADR 0014).
 - A Consumer may name a repo context file whose contents are appended. It cannot replace the loop or tracker instructions — that was the Ralph prompt file this product exists to remove.
 - The instructions include hard stops: do not invent a tracker, do not fabricate Ticket state, and do not retry a failed tracker call in a loop.
+- The instructions also tell the Worker it will not get a reply and must not ask the Consumer; a blocking question is a failed Ticket, not a pause (ADR 0027).
 
 ### Finishing and failing
 
@@ -182,7 +185,7 @@ A Run cannot start without a cap on how many Tickets it may start, so an unatten
 
 ### Doctor and Init
 
-- Doctor and the start of a Run share one check. Anything that makes the Frontier a lie is fatal: unknown keys, a missing label, a configured repository that is not the git remote, unblocked ordering the Tracker cannot express, a missing Worker binary, a missing model default, effort set on an adapter that does not map it. Unused routing warns. The check runs once at start rather than per iteration (ADR 0009).
+- Doctor and the start of a Run share one check. Anything that makes the Frontier a lie is fatal: unknown keys, a missing label, a configured repository that is not the git remote, unblocked ordering the Tracker cannot express, a missing Worker binary, a missing model default, effort set on an adapter that does not map it, print-mode spawn with permissions ask. Unused routing warns. The check runs once at start rather than per iteration (ADR 0009, ADR 0027).
 - A Worker Adapter may optionally define a cheap probe. When the binary exists and a probe is defined, Doctor runs it and reports a failure distinct from "binary missing" — `cursor()` runs `agent status`, `claude()` runs `claude auth status`. An adapter with no probe (`custom()` today) keeps the existence-only check (ADR 0023).
 - Doctor also reports the Ticket that would be picked next.
 - Init is the single interactive surface: it asks for tracker, worker and frontier selector, then writes the config stub (ADR 0019).
