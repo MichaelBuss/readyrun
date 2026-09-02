@@ -1,0 +1,3 @@
+# Print-mode spawn cannot use permissions ask
+
+`cursor()` and `claude()` always spawn `-p`. Ask has nowhere to go: a sandbox approval never reaches the Consumer, and a Worker question is a pause with no reply. Doctor and Run start fail unless permissions is unattended, and the failure names `--permissions unattended`. Relaying a vanished approval as Worker stdout was rejected — that is not ask. Checking TTY alone was rejected: print-mode is the trap even on a TTY, because `-p` is not a chat. `custom()` is unchanged; it does not force print-mode, so ask remains the absence of its unattended flag. The Worker prompt states the same contract: you will not get a reply; do not ask the Consumer; a blocking question is a failed Ticket, not a pause.
