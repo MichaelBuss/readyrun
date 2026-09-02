@@ -38,9 +38,13 @@ _Avoid_: queue, backlog, sprint
 The git ref created for a **Ticket** when its **Worker** starts. The name is derived by the harness / **Tracker Adapter**, not authored on the **Ticket**.
 _Avoid_: main
 
+**Run Branch**:
+The one **Branch** a **Run** collects its finished **Tickets** onto, so a **Run** leaves one thing to review instead of one per **Ticket**.
+_Avoid_: integration branch, trunk, main
+
 **Worktree**:
-The directory a **Worker** runs in; one per **Ticket**, on that **Ticket**’s **Branch**. The **Consumer**’s primary checkout is not the **Worker**’s cwd.
-_Avoid_: clone, cwd mode
+The directory a **Worker** runs in; one per **Ticket**, on that **Ticket**’s **Branch**. Disposable: the **Branch** carries the work forward, not the directory.
+_Avoid_: clone, cwd mode, workspace (somewhere the **Consumer** continues by hand)
 
 **Doctor**:
 The check that config matches the **Tracker**. A **Run** will not start if it fails.
@@ -79,6 +83,11 @@ _Avoid_: max mode (Cursor's interactive slash command), ultracode (a Claude Code
 - When more than one **Ticket** is on the **Frontier**, pick order is the **Tracker Adapter**’s stable order (GitHub: issue number ascending). There is no priority field on the **Ticket**.
 - When a **Worker** starts, the harness creates a **Branch** for that **Ticket**. It does not start on main. The **Ticket** body does not name the **Branch**.
 - Each **Worker** runs in a **Worktree** on that **Branch**, even when a **Run** is serial. There is no cwd-isolation mode and no clone-per-**Ticket**.
+- A **Run** has exactly one **Run Branch**, starting from whatever the **Consumer**'s checkout was on when the **Run** started. Each **Ticket**'s **Branch** starts from the **Run Branch**'s tip as at the moment that **Ticket** was picked — never from another **Ticket**'s **Branch**.
+- When a **Worker** succeeds, its **Ticket**'s **Branch** is merged into the **Run Branch** as exactly one merge commit — never fast-forwarded, never squashed — and is then deleted. One **Ticket** is therefore one entry in the **Run Branch**'s first-parent history, with the **Worker**'s own commits kept underneath it. The next **Ticket** starts from a tree containing every **Ticket** the **Run** has already finished.
+- ReadyRun never merges a **Run Branch** anywhere. What happens to it is the **Consumer**'s.
+- A **Worker** commits its own work; ReadyRun never writes a commit that describes code. The only commit it makes is the merge of a **Ticket**'s **Branch** into the **Run Branch**, and that message is derived from the **Ticket** exactly as the **Branch** name is. A **Worker** that exits 0 leaving its **Worktree** dirty, or its **Branch** unchanged, has failed.
+- A **Worktree** is removed once its **Worker** succeeds and kept when the **Run** hard-stops, so a failure is still there to look at. The **Run Branch** outlives both.
 - A **Run** (and **Doctor**) refuse to start if config lies about the **Frontier**: missing labels, repo ≠ remote, `unblocked` claimed but the **Tracker** cannot say so, unknown keys. Unused knobs (a label map with no matching **Tickets**) warn. The check is once at **Run** start, not every iteration.
 - When a **Worker Adapter** defines a probe, **Doctor** runs it once the binary is confirmed to exist, and a probe failure is reported distinctly from a missing binary. A **Worker Adapter** with no probe (`custom` today) keeps the existence-only check unchanged.
 - **ReadyRun** loads one `readyrun.config.ts` (same basename, JS/MJS allowed) at the **Consumer** root. **Init** writes that stub. There is no generated scripts folder and no search through other config filenames.
@@ -150,6 +159,18 @@ _Avoid_: max mode (Cursor's interactive slash command), ultracode (a Claude Code
 >
 > **Dev:** "Do I copy prompt.md and change Linear to GitHub?"
 > **Domain expert:** "No. The package tells the **Worker** it's GitHub #52 because you picked that **Tracker Adapter**. You may append a repo context file for how to test. You don't author the loop."
+>
+> **Dev:** "A **Run** of ten **Tickets** leaves me ten **Branches** to merge by hand?"
+> **Domain expert:** "No, one. Each **Ticket** still gets its own **Branch** to work on, because two **Workers** can't share one, but a finished **Branch** is merged into the **Run Branch** and deleted. You review the **Run Branch**."
+>
+> **Dev:** "So #57 sees what #52 built earlier in the same **Run**?"
+> **Domain expert:** "Yes — #57's **Branch** is cut from the **Run Branch** tip, and #52 is already merged into it. Across two **Runs** is a different story, because the second **Run** starts from your checkout."
+>
+> **Dev:** "The **Worker** finished and its directory is gone. Where's my work?"
+> **Domain expert:** "On the **Run Branch**. The **Worktree** was only where the **Worker** ran. If it had failed we'd have left the directory for you."
+>
+> **Dev:** "The **Worker** exited 0 without changing anything. Clean finish?"
+> **Domain expert:** "No, that's a hard stop. Exit 0 on an unchanged **Branch** means it did nothing, and we're not taking the **Ticket** off the **Frontier** for that."
 
 ## Flagged ambiguities
 
@@ -158,7 +179,8 @@ _Avoid_: max mode (Cursor's interactive slash command), ultracode (a Claude Code
 - **Adapter** — resolved: unqualified “Adapter” is not a glossary noun. **Tracker Adapter** and **Worker Adapter** are different jobs.
 - **Local Adapter** — resolved: not v0; later it is a first-class **Tracker** option, never a fallback when GitHub or Linear fail.
 - **Beads** — not in scope unless someone wants a git-native **Tracker**.
-- **Worktree** — resolved: v0 uses a git **Worktree** per **Ticket**, even while serial. Not a clone. Not the **Consumer** cwd.
+- **Worktree** — resolved: v0 uses a git **Worktree** per **Ticket**, even while serial. Not a clone. Not the **Consumer** cwd. Lifetime resolved: disposable — removed once its **Worker** succeeds, kept when the **Run** hard-stops, and never a place the **Consumer** continues the **Ticket** by hand.
+- **Branch** vs **Run Branch** — resolved: unqualified **Branch** is the **Ticket**'s. The **Run Branch** is always named in full.
 - **Parallelism** — resolved for v0 behaviour: serial. Not resolved as “forever serial.” The shape must make raising concurrency later easy.
 - **How a Ticket lands** — unresolved. Push-for-review vs stay local, auto-review, integrate later are Policy, not the definition of **Branch**.
 - **Run stats** — unresolved. Token usage, context-window % across **Workers**, printed at the end of a **Run**. Wanted; not v0-blocking.
