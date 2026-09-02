@@ -3,9 +3,17 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import type { SpawnRequest } from "../src/worker-adapter.ts";
 
 const exec = promisify(execFile);
 const tmpRoot = join(fileURLToPath(new URL(".", import.meta.url)), ".tmp");
+
+export async function git(cwd: string, args: string[]): Promise<string> {
+  const { stdout } = await exec("git", ["-C", cwd, ...args], {
+    encoding: "utf8",
+  });
+  return stdout.trim();
+}
 
 export type ThrowawayRepo = {
   cwd: string;
@@ -44,13 +52,23 @@ export async function throwawayRepo(options: {
 export async function commitRepoFiles(
   cwd: string,
   files: Record<string, string>,
+  message = "consumer manifest",
 ): Promise<void> {
   for (const [name, contents] of Object.entries(files)) {
     await mkdir(join(cwd, name, ".."), { recursive: true });
     await writeFile(join(cwd, name), contents);
   }
   await exec("git", ["add", "--", ...Object.keys(files)], { cwd });
-  await exec("git", ["commit", "-m", "consumer manifest"], { cwd });
+  await exec("git", ["commit", "-m", message], { cwd });
+}
+
+// A Worker doing what the prompt tells it: committing its work on its Branch.
+export async function commitWorkerWork(request: SpawnRequest): Promise<void> {
+  await commitRepoFiles(
+    request.cwd,
+    { [`ticket-${request.ticket.id}.txt`]: "the Worker's work\n" },
+    `Ticket ${request.ticket.id}`,
+  );
 }
 
 export async function commitNpmConsumer(cwd: string): Promise<void> {
