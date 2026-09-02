@@ -91,12 +91,14 @@ function parseOwnerRepo(url: string): string | undefined {
   return path?.[1];
 }
 
-async function branchExists(cwd: string, branch: string): Promise<boolean> {
+async function branchTip(
+  cwd: string,
+  branch: string,
+): Promise<string | undefined> {
   try {
-    await git(cwd, ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`]);
-    return true;
+    return await git(cwd, ["rev-parse", "--verify", `refs/heads/${branch}`]);
   } catch {
-    return false;
+    return undefined;
   }
 }
 
@@ -149,7 +151,9 @@ export async function createTicketWorktree(
     branch.replaceAll("/", "-"),
   );
 
-  if (await branchExists(cwd, branch) || await pathExists(worktreePath)) {
+  if (
+    await branchTip(cwd, branch) !== undefined || await pathExists(worktreePath)
+  ) {
     throw new WorktreeExistsError(branch, worktreePath);
   }
 
@@ -186,13 +190,11 @@ export async function collectOntoRunBranch(
   options: CollectOntoRunBranchOptions,
 ): Promise<string> {
   const runRef = `refs/heads/${options.runBranch}`;
-  // Created at the first merge, so a Run that lands nothing leaves no ref.
-  if (!await branchExists(cwd, options.runBranch)) {
-    await git(cwd, ["branch", options.runBranch, options.base]);
-  }
-  const tip = await git(cwd, ["rev-parse", runRef]);
+  const existing = await branchTip(cwd, options.runBranch);
+  const tip = existing ?? options.base;
   const collected = await git(cwd, [
     "rev-parse",
+    "--verify",
     `refs/heads/${options.branch}`,
   ]);
   const tree = await git(cwd, ["merge-tree", "--write-tree", tip, collected]);
@@ -208,7 +210,10 @@ export async function collectOntoRunBranch(
     "-m",
     options.message,
   ]);
-  await git(cwd, ["update-ref", runRef, merge, tip]);
+  // The merge that lands is what writes the ref — an empty old value where the
+  // Run Branch does not exist yet, so a Run that never lands a Ticket, or whose
+  // first merge fails, leaves no Run Branch behind.
+  await git(cwd, ["update-ref", runRef, merge, existing ?? ""]);
   // `--force` because the Branch is merged into the Run Branch, which is not
   // the branch the Consumer's checkout is on, so git cannot see that itself.
   await git(cwd, ["branch", "--delete", "--force", options.branch]);

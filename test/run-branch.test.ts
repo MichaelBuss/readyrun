@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { access } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { defineConfig, run } from "../src/mod.ts";
@@ -7,25 +6,27 @@ import { memoryTracker, recordingWorker } from "../src/testing/mod.ts";
 import { createWorkerAdapter } from "../src/worker-adapter.ts";
 import { ticket } from "./tracker-adapter-contract.ts";
 import {
+  commitRepoFiles,
   commitWorkerWork,
   git,
+  onDisk,
+  runBranch,
+  runBranchMerges,
   runBranches,
   throwawayRepo,
 } from "./throwaway-repo.ts";
 
 const silent = { write(_chunk?: string) { return true; } };
 
-async function onDisk(path: string): Promise<boolean> {
-  try {
-    await access(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-test("a Run that lands a Ticket collects it onto one Run Branch cut from the base, and deletes the Ticket's Branch", async () => {
+test("a Run that lands a Ticket collects it onto one Run Branch cut from the base, keeping the Worker's own commits under one merge", async () => {
   const repo = await throwawayRepo();
+  const worker = createWorkerAdapter({
+    async spawn(request) {
+      await commitRepoFiles(request.cwd, { "first.txt": "one\n" }, "First");
+      await commitRepoFiles(request.cwd, { "second.txt": "two\n" }, "Second");
+      return { exitCode: 0 };
+    },
+  });
   try {
     const base = await git(repo.cwd, ["rev-parse", "HEAD"]);
 
@@ -36,7 +37,7 @@ test("a Run that lands a Ticket collects it onto one Run Branch cut from the bas
           ready: "unblocked",
           labels: ["ready-for-agent"],
         }),
-        worker: recordingWorker({ exitCode: 0 }),
+        worker,
         model: "composer-2",
       }),
       cap: 1,
@@ -45,27 +46,16 @@ test("a Run that lands a Ticket collects it onto one Run Branch cut from the bas
     });
 
     assert.equal(exitCode, 0);
-    const branches = await runBranches(repo.cwd);
-    assert.equal(branches.length, 1);
-    const runBranch = branches[0] ?? "";
-    assert.match(runBranch, /^readyrun\/run-\d{8}-\d{6}$/);
-    assert.equal(
-      await git(repo.cwd, [
-        "rev-list",
-        "--first-parent",
-        "--count",
-        `${base}..${runBranch}`,
-      ]),
-      "1",
-    );
-    assert.equal(await git(repo.cwd, ["rev-parse", `${runBranch}^1`]), base);
-    assert.equal(
-      await git(repo.cwd, ["log", "-1", "--format=%s", runBranch]),
+    const collected = await runBranch(repo.cwd);
+    assert.match(collected, /^readyrun\/run-\d{8}-\d{6}$/);
+    assert.deepEqual(await runBranchMerges(repo.cwd, base), [
       "Ticket 52: Fix the thing",
-    );
-    assert.equal(
-      await git(repo.cwd, ["log", "-1", "--format=%s", `${runBranch}^2`]),
-      "Ticket 52",
+    ]);
+    assert.equal(await git(repo.cwd, ["rev-parse", `${collected}^1`]), base);
+    assert.deepEqual(
+      (await git(repo.cwd, ["log", "--format=%s", `${base}..${collected}^2`]))
+        .split("\n"),
+      ["Second", "First"],
     );
     await assert.rejects(
       git(repo.cwd, ["rev-parse", "--verify", "refs/heads/readyrun/52"]),
@@ -110,16 +100,10 @@ test("each Ticket of a Run is one entry on the Run Branch, and the next Ticket s
 
     assert.equal(exitCode, 0);
     assert.deepEqual(sawTicket52WorkAtSpawn, { 52: false, 57: true });
-    const runBranch = (await runBranches(repo.cwd))[0] ?? "";
-    assert.deepEqual(
-      (await git(repo.cwd, [
-        "log",
-        "--first-parent",
-        "--format=%s",
-        `${base}..${runBranch}`,
-      ])).split("\n"),
-      ["Ticket 57: Fix the other thing", "Ticket 52: Fix the thing"],
-    );
+    assert.deepEqual(await runBranchMerges(repo.cwd, base), [
+      "Ticket 57: Fix the other thing",
+      "Ticket 52: Fix the thing",
+    ]);
     for (const id of ["52", "57"]) {
       await assert.rejects(
         git(repo.cwd, ["rev-parse", "--verify", `refs/heads/readyrun/${id}`]),
@@ -213,16 +197,9 @@ test("a Run that hard-stops on a later Ticket leaves the Run Branch holding the 
     });
 
     assert.equal(exitCode, 1);
-    const runBranch = (await runBranches(repo.cwd))[0] ?? "";
-    assert.deepEqual(
-      (await git(repo.cwd, [
-        "log",
-        "--first-parent",
-        "--format=%s",
-        `${base}..${runBranch}`,
-      ])).split("\n"),
-      ["Ticket 52: Fix the thing"],
-    );
+    assert.deepEqual(await runBranchMerges(repo.cwd, base), [
+      "Ticket 52: Fix the thing",
+    ]);
     await git(repo.cwd, ["rev-parse", "--verify", "refs/heads/readyrun/57"]);
   } finally {
     await repo.cleanup();

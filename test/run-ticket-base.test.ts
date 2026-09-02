@@ -8,7 +8,8 @@ import {
   commitRepoFiles,
   commitWorkerWork,
   git,
-  runBranches,
+  runBranch,
+  runBranchMerges,
   throwawayRepo,
 } from "./throwaway-repo.ts";
 
@@ -45,20 +46,12 @@ test("a Run builds on the base it resolved at start, and not on the Consumer's c
 
     const moved = await git(repo.cwd, ["rev-parse", "HEAD"]);
     assert.notEqual(moved, base);
-    const runBranch = (await runBranches(repo.cwd))[0] ?? "";
-    await git(repo.cwd, ["merge-base", "--is-ancestor", base, runBranch]);
+    const collected = await runBranch(repo.cwd);
+    await git(repo.cwd, ["merge-base", "--is-ancestor", base, collected]);
     await assert.rejects(
-      git(repo.cwd, ["merge-base", "--is-ancestor", moved, runBranch]),
+      git(repo.cwd, ["merge-base", "--is-ancestor", moved, collected]),
     );
-    assert.equal(
-      await git(repo.cwd, [
-        "rev-list",
-        "--first-parent",
-        "--count",
-        `${base}..${runBranch}`,
-      ]),
-      "2",
-    );
+    assert.equal((await runBranchMerges(repo.cwd, base)).length, 2);
   } finally {
     await repo.cleanup();
   }
