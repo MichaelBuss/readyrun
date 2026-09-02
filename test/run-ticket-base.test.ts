@@ -8,12 +8,13 @@ import {
   commitRepoFiles,
   commitWorkerWork,
   git,
+  runBranches,
   throwawayRepo,
 } from "./throwaway-repo.ts";
 
 const silent = { write(_chunk?: string) { return true; } };
 
-test("every Ticket in a Run branches from the base the Run resolved at start, even when the Consumer's checkout moves mid-Run", async () => {
+test("a Run builds on the base it resolved at start, and not on the Consumer's checkout as that moves mid-Run", async () => {
   const repo = await throwawayRepo();
   const worker = createWorkerAdapter({
     async spawn(request) {
@@ -42,9 +43,22 @@ test("every Ticket in a Run branches from the base the Run resolved at start, ev
       stdout: silent,
     });
 
-    assert.notEqual(await git(repo.cwd, ["rev-parse", "HEAD"]), base);
-    assert.equal(await git(repo.cwd, ["rev-parse", "readyrun/52^"]), base);
-    assert.equal(await git(repo.cwd, ["rev-parse", "readyrun/57^"]), base);
+    const moved = await git(repo.cwd, ["rev-parse", "HEAD"]);
+    assert.notEqual(moved, base);
+    const runBranch = (await runBranches(repo.cwd))[0] ?? "";
+    await git(repo.cwd, ["merge-base", "--is-ancestor", base, runBranch]);
+    await assert.rejects(
+      git(repo.cwd, ["merge-base", "--is-ancestor", moved, runBranch]),
+    );
+    assert.equal(
+      await git(repo.cwd, [
+        "rev-list",
+        "--first-parent",
+        "--count",
+        `${base}..${runBranch}`,
+      ]),
+      "2",
+    );
   } finally {
     await repo.cleanup();
   }
