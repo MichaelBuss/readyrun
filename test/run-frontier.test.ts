@@ -1,22 +1,12 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
 import { test } from "node:test";
-import { promisify } from "node:util";
 import { defineConfig, run } from "../src/mod.ts";
 import { memoryTracker, recordingWorker } from "../src/testing/mod.ts";
 import { createWorkerAdapter } from "../src/worker-adapter.ts";
 import { ticket } from "./tracker-adapter-contract.ts";
-import { throwawayRepo } from "./throwaway-repo.ts";
+import { commitWorkerWork, git, throwawayRepo } from "./throwaway-repo.ts";
 
-const exec = promisify(execFile);
 const silent = { write(_chunk?: string) { return true; } };
-
-async function git(cwd: string, args: string[]): Promise<string> {
-  const { stdout } = await exec("git", ["-C", cwd, ...args], {
-    encoding: "utf8",
-  });
-  return stdout.trim();
-}
 
 test("a blocked Ticket is never picked, even if it matches the selector", async () => {
   const repo = await throwawayRepo();
@@ -217,11 +207,12 @@ test("a v0 Run starts one Worker at a time; each Ticket still gets its own Branc
   let inFlight = 0;
   let maxInFlight = 0;
   const worker = createWorkerAdapter({
-    async spawn() {
+    async spawn(request) {
       inFlight += 1;
       maxInFlight = Math.max(maxInFlight, inFlight);
       await new Promise((resolve) => setTimeout(resolve, 25));
       inFlight -= 1;
+      await commitWorkerWork(request);
       return { exitCode: 0 };
     },
   });

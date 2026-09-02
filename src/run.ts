@@ -2,7 +2,12 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { defineConfig, type ReadyRunConfig } from "./config.ts";
 import { doctorCheck, warnUnusedModelsByLabel } from "./doctor.ts";
-import { createTicketWorktree, headCommit } from "./git.ts";
+import {
+  branchHasCommitsSince,
+  createTicketWorktree,
+  headCommit,
+  worktreeIsClean,
+} from "./git.ts";
 import { composeWorkerPrompt } from "./prompt.ts";
 import type { Ticket } from "./ticket.ts";
 import type { Effort, Permissions } from "./worker-adapter.ts";
@@ -137,6 +142,37 @@ export async function run(options: RunOptions): Promise<number> {
         "worker",
         ticket.id,
         `exit code ${result.exitCode}`,
+      );
+    }
+    // Exit 0 is not success on its own: a Worker that did nothing also exits 0
+    // and also leaves a clean tree (ADR 0027).
+    let clean;
+    let committed;
+    try {
+      clean = await worktreeIsClean(worktree);
+      committed = await branchHasCommitsSince(cwd, branch, base);
+    } catch (error) {
+      return hardStop(
+        stdout,
+        "git",
+        ticket.id,
+        error instanceof Error ? error.message : undefined,
+      );
+    }
+    if (!clean) {
+      return hardStop(
+        stdout,
+        "worker",
+        ticket.id,
+        `left work uncommitted in ${worktree}`,
+      );
+    }
+    if (!committed) {
+      return hardStop(
+        stdout,
+        "worker",
+        ticket.id,
+        `committed nothing on ${branch}`,
       );
     }
     try {

@@ -1,27 +1,23 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
 import { test } from "node:test";
-import { promisify } from "node:util";
 import { defineConfig, run } from "../src/mod.ts";
 import { memoryTracker, recordingWorker } from "../src/testing/mod.ts";
 import { createWorkerAdapter } from "../src/worker-adapter.ts";
 import { ticket } from "./tracker-adapter-contract.ts";
-import { commitRepoFiles, throwawayRepo } from "./throwaway-repo.ts";
+import {
+  commitRepoFiles,
+  commitWorkerWork,
+  git,
+  throwawayRepo,
+} from "./throwaway-repo.ts";
 
-const exec = promisify(execFile);
 const silent = { write(_chunk?: string) { return true; } };
-
-async function git(cwd: string, args: string[]): Promise<string> {
-  const { stdout } = await exec("git", ["-C", cwd, ...args], {
-    encoding: "utf8",
-  });
-  return stdout.trim();
-}
 
 test("every Ticket in a Run branches from the base the Run resolved at start, even when the Consumer's checkout moves mid-Run", async () => {
   const repo = await throwawayRepo();
   const worker = createWorkerAdapter({
     async spawn(request) {
+      await commitWorkerWork(request);
       await commitRepoFiles(repo.cwd, {
         [`moved-${request.ticket.id}.txt`]: "the Consumer's checkout moved on\n",
       });
@@ -47,8 +43,8 @@ test("every Ticket in a Run branches from the base the Run resolved at start, ev
     });
 
     assert.notEqual(await git(repo.cwd, ["rev-parse", "HEAD"]), base);
-    assert.equal(await git(repo.cwd, ["rev-parse", "readyrun/52"]), base);
-    assert.equal(await git(repo.cwd, ["rev-parse", "readyrun/57"]), base);
+    assert.equal(await git(repo.cwd, ["rev-parse", "readyrun/52^"]), base);
+    assert.equal(await git(repo.cwd, ["rev-parse", "readyrun/57^"]), base);
   } finally {
     await repo.cleanup();
   }
