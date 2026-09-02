@@ -109,9 +109,14 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
+export async function headCommit(cwd: string): Promise<string> {
+  return await git(cwd, ["rev-parse", "HEAD"]);
+}
+
 export async function createTicketWorktree(
   cwd: string,
   branch: string,
+  base: string,
 ): Promise<string> {
   const currentDefault = await defaultBranch(cwd);
   if (branch === currentDefault) {
@@ -130,7 +135,19 @@ export async function createTicketWorktree(
   }
 
   await mkdir(join(cwd, ".readyrun", "worktrees"), { recursive: true });
-  await exec("git", ["-C", cwd, "worktree", "add", "-b", branch, worktreePath]);
+  // A Worktree kept on failure and then deleted by hand rather than with
+  // `git worktree remove` leaves admin state that fails the next add.
+  await git(cwd, ["worktree", "prune"]);
+  await exec("git", [
+    "-C",
+    cwd,
+    "worktree",
+    "add",
+    "-b",
+    branch,
+    worktreePath,
+    base,
+  ]);
   await installWorktreeDependencies(worktreePath);
   return worktreePath;
 }
