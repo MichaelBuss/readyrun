@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -242,16 +243,24 @@ function workerCall(worker: InitWorker): string {
   return `${worker.kind}()`;
 }
 
-function configStub(answers: InitAnswers): string {
-  const effortLine = answers.effort === undefined
-    ? ""
-    : `\n  effort: ${JSON.stringify(answers.effort)},`;
+function configStub(answers: InitAnswers, contextFile: string | undefined): string {
+  const settings = [
+    `  tracker: ${trackerCall(answers.tracker)},`,
+    `  worker: ${workerCall(answers.worker)},`,
+    `  model: ${JSON.stringify(answers.model)},`,
+    // A Run spawns print-mode, where ask cannot reach the Consumer (ADR 0027).
+    `  permissions: "unattended",`,
+  ];
+  if (answers.effort !== undefined) {
+    settings.push(`  effort: ${JSON.stringify(answers.effort)},`);
+  }
+  if (contextFile !== undefined) {
+    settings.push(`  contextFile: ${JSON.stringify(contextFile)},`);
+  }
   return `import { defineConfig, ${answers.tracker.kind}, ${answers.worker.kind} } from "@readyrun/readyrun";
 
 export default defineConfig({
-  tracker: ${trackerCall(answers.tracker)},
-  worker: ${workerCall(answers.worker)},
-  model: ${JSON.stringify(answers.model)},${effortLine}
+${settings.join("\n")}
 });
 `;
 }
@@ -574,6 +583,14 @@ async function collectEffort(
   return picked;
 }
 
+const consumerContextFile = "CONTEXT.md";
+
+// Not a prompt: the file is either already at the Consumer root or it is not,
+// the same shape as Init's .gitignore step (ADR 0026).
+function contextFileAtRoot(cwd: string): string | undefined {
+  return existsSync(resolve(cwd, consumerContextFile)) ? consumerContextFile : undefined;
+}
+
 export async function init(options: InitOptions): Promise<number> {
   const prompted = options.answers === undefined;
   const answers = options.answers ?? await collectInitAnswers(options.cwd);
@@ -581,7 +598,7 @@ export async function init(options: InitOptions): Promise<number> {
     return 1;
   }
   const path = resolve(options.cwd, "readyrun.config.ts");
-  await writeFile(path, configStub(answers));
+  await writeFile(path, configStub(answers, contextFileAtRoot(options.cwd)));
   await ensureReadyrunGitignored(options.cwd);
   if (prompted) {
     outro(configWrittenMessage(path));
