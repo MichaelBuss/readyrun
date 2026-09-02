@@ -1,13 +1,13 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { defineConfig, type ReadyRunConfig } from "./config.ts";
-import { doctorCheck, warnUnusedModelsByLabel } from "./doctor.ts";
+import { discloseBase, doctorCheck, warnUnusedModelsByLabel } from "./doctor.ts";
 import {
   branchHasCommitsSince,
   collectOntoRunBranch,
   createTicketWorktree,
-  headCommit,
   removeTicketWorktree,
+  resolveRunBase,
   worktreeIsClean,
 } from "./git.ts";
 import { composeWorkerPrompt } from "./prompt.ts";
@@ -101,7 +101,7 @@ export async function run(options: RunOptions): Promise<number> {
   const runBranch = runBranchName(new Date());
   let base;
   try {
-    base = await headCommit(cwd);
+    base = await resolveRunBase(cwd);
   } catch (error) {
     return hardStop(
       stdout,
@@ -110,9 +110,11 @@ export async function run(options: RunOptions): Promise<number> {
       error instanceof Error ? error.message : undefined,
     );
   }
+  discloseBase(stdout, base);
+  stdout.write(`Run Branch: ${runBranch}\n`);
   // A Ticket's Branch is cut from the Run Branch's tip, which until the first
   // Ticket lands is the base the Run resolved at start (ADR 0028).
-  let runBranchTip = base;
+  let runBranchTip = base.commit;
   const context = config.contextFile === undefined
     ? undefined
     : await readFile(join(cwd, config.contextFile), "utf8");
@@ -218,7 +220,7 @@ export async function run(options: RunOptions): Promise<number> {
       runBranchTip = await collectOntoRunBranch(cwd, {
         runBranch,
         branch,
-        base,
+        base: base.commit,
         message: mergeMessage(ticket),
       });
     } catch (error) {
