@@ -99,11 +99,9 @@ export async function run(options: RunOptions): Promise<number> {
     return 1;
   }
   const runBranch = runBranchName(new Date());
-  // Where the next Ticket's Branch is cut from: the base the Run resolved at
-  // start until a Ticket lands, then the Run Branch's tip (ADR 0028).
-  let tip;
+  let base;
   try {
-    tip = await headCommit(cwd);
+    base = await headCommit(cwd);
   } catch (error) {
     return hardStop(
       stdout,
@@ -112,6 +110,9 @@ export async function run(options: RunOptions): Promise<number> {
       error instanceof Error ? error.message : undefined,
     );
   }
+  // A Ticket's Branch is cut from the Run Branch's tip, which until the first
+  // Ticket lands is the base the Run resolved at start (ADR 0028).
+  let runBranchTip = base;
   const context = config.contextFile === undefined
     ? undefined
     : await readFile(join(cwd, config.contextFile), "utf8");
@@ -137,7 +138,7 @@ export async function run(options: RunOptions): Promise<number> {
     const branch = config.tracker.branchName(ticket);
     let worktree;
     try {
-      worktree = await createTicketWorktree(cwd, branch, tip);
+      worktree = await createTicketWorktree(cwd, branch, runBranchTip);
     } catch (error) {
       return hardStop(
         stdout,
@@ -175,7 +176,7 @@ export async function run(options: RunOptions): Promise<number> {
     let committed;
     try {
       clean = await worktreeIsClean(worktree);
-      committed = await branchHasCommitsSince(cwd, branch, tip);
+      committed = await branchHasCommitsSince(cwd, branch, runBranchTip);
     } catch (error) {
       return hardStop(
         stdout,
@@ -214,10 +215,10 @@ export async function run(options: RunOptions): Promise<number> {
     // be deleted while a Worktree still has it checked out.
     try {
       await removeTicketWorktree(cwd, worktree);
-      tip = await collectOntoRunBranch(cwd, {
+      runBranchTip = await collectOntoRunBranch(cwd, {
         runBranch,
         branch,
-        base: tip,
+        base,
         message: mergeMessage(ticket),
       });
     } catch (error) {

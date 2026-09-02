@@ -4,7 +4,7 @@ import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
-import { createTicketWorktree, headCommit, originRepository, WorktreeExistsError, WorktreeInstallError } from "../src/git.ts";
+import { collectOntoRunBranch, createTicketWorktree, headCommit, originRepository, WorktreeExistsError, WorktreeInstallError } from "../src/git.ts";
 import { commitMismatchedNpmLockfile, commitNpmConsumer, commitRepoFiles, throwawayRepo } from "./throwaway-repo.ts";
 
 const exec = promisify(execFile);
@@ -248,6 +248,28 @@ test("createTicketWorktree fails with the install command's output when install 
         return true;
       },
     );
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("collectOntoRunBranch leaves no Run Branch behind when it cannot merge the Ticket's Branch", async () => {
+  const repo = await throwawayRepo();
+  try {
+    await assert.rejects(collectOntoRunBranch(repo.cwd, {
+      runBranch: "readyrun/run-20260902-193300",
+      branch: "readyrun/52",
+      base: await headCommit(repo.cwd),
+      message: "Ticket 52: Fix the thing",
+    }));
+
+    await assert.rejects(exec("git", [
+      "-C",
+      repo.cwd,
+      "rev-parse",
+      "--verify",
+      "refs/heads/readyrun/run-20260902-193300",
+    ]));
   } finally {
     await repo.cleanup();
   }
