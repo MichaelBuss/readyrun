@@ -119,6 +119,31 @@ export async function worktreeIsClean(worktreePath: string): Promise<boolean> {
   return await git(worktreePath, ["status", "--porcelain"]) === "";
 }
 
+export type RunBase = {
+  commit: string;
+  // Undefined on a detached checkout, which is a base without a branch rather
+  // than a branch named HEAD.
+  branch: string | undefined;
+  defaultBranch: string;
+  dirty: boolean;
+};
+
+// One read of the checkout a Run starts from: the commit every Worktree is cut
+// from, plus what a Consumer cannot see from that commit alone — that the base
+// is not the default branch, and that uncommitted work here reaches no
+// Worktree. The commit is read first, so a checkout with nothing to branch from
+// fails before anything else is read.
+export async function resolveRunBase(cwd: string): Promise<RunBase> {
+  const commit = await headCommit(cwd);
+  const branch = await git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]);
+  return {
+    commit,
+    branch: branch === "HEAD" ? undefined : branch,
+    defaultBranch: await defaultBranch(cwd),
+    dirty: !await worktreeIsClean(cwd),
+  };
+}
+
 // Read the Branch ref, not the Worktree's HEAD: a Worker that committed
 // somewhere else left the Ticket's Branch as empty as one that did nothing.
 export async function branchHasCommitsSince(
