@@ -195,7 +195,7 @@ describe("Worker Adapters", { concurrency: false }, () => {
 
   test("a Cursor Worker Adapter Run spawns the Worker with the prompt, model, Worktree cwd, and Cursor's unattended flag", async () => {
     await withRecordingPath(["agent"], async ({ receiptPath }) => {
-      const unattendedRepo = await throwawayRepo();
+      const repo = await throwawayRepo();
       try {
         await run({
           config: defineConfig({
@@ -209,7 +209,7 @@ describe("Worker Adapters", { concurrency: false }, () => {
             permissions: "unattended",
           }),
           cap: 1,
-          cwd: unattendedRepo.cwd,
+          cwd: repo.cwd,
           stdout: silent,
         });
 
@@ -220,41 +220,17 @@ describe("Worker Adapters", { concurrency: false }, () => {
         assert.equal(unattended.argv[2], "composer-2");
         assert.ok(unattended.argv.includes("--yolo"));
         assert.match(unattended.argv.at(-1) ?? "", /52/);
-        assert.notEqual(unattended.cwd, unattendedRepo.cwd);
+        assert.notEqual(unattended.cwd, repo.cwd);
         assert.match(unattended.cwd, /worktrees/);
       } finally {
-        await unattendedRepo.cleanup();
-      }
-
-      const askRepo = await throwawayRepo();
-      try {
-        await run({
-          config: defineConfig({
-            tracker: memoryTracker({
-              tickets: [ticket({ id: "52" })],
-              ready: "unblocked",
-              labels: ["ready-for-agent"],
-            }),
-            worker: cursor(),
-            model: "composer-2",
-          }),
-          cap: 1,
-          cwd: askRepo.cwd,
-          stdout: silent,
-        });
-
-        const ask = await readReceipt(receiptPath);
-        assert.ok(!ask.argv.includes("--yolo"));
-        assert.ok(!ask.argv.includes("login"));
-      } finally {
-        await askRepo.cleanup();
+        await repo.cleanup();
       }
     });
   });
 
   test("a Claude Worker Adapter Run spawns the Worker with the prompt, model, Worktree cwd, and Claude's unattended flag", async () => {
     await withRecordingPath(["claude"], async ({ receiptPath }) => {
-      const unattendedRepo = await throwawayRepo();
+      const repo = await throwawayRepo();
       try {
         await run({
           config: defineConfig({
@@ -268,7 +244,7 @@ describe("Worker Adapters", { concurrency: false }, () => {
             permissions: "unattended",
           }),
           cap: 1,
-          cwd: unattendedRepo.cwd,
+          cwd: repo.cwd,
           stdout: silent,
         });
 
@@ -279,34 +255,10 @@ describe("Worker Adapters", { concurrency: false }, () => {
         assert.equal(unattended.argv[2], "opus");
         assert.ok(unattended.argv.includes("--dangerously-skip-permissions"));
         assert.match(unattended.argv.at(-1) ?? "", /52/);
-        assert.notEqual(unattended.cwd, unattendedRepo.cwd);
+        assert.notEqual(unattended.cwd, repo.cwd);
         assert.match(unattended.cwd, /worktrees/);
       } finally {
-        await unattendedRepo.cleanup();
-      }
-
-      const askRepo = await throwawayRepo();
-      try {
-        await run({
-          config: defineConfig({
-            tracker: memoryTracker({
-              tickets: [ticket({ id: "52" })],
-              ready: "unblocked",
-              labels: ["ready-for-agent"],
-            }),
-            worker: claude(),
-            model: "opus",
-          }),
-          cap: 1,
-          cwd: askRepo.cwd,
-          stdout: silent,
-        });
-
-        const ask = await readReceipt(receiptPath);
-        assert.ok(!ask.argv.includes("--dangerously-skip-permissions"));
-        assert.ok(!ask.argv.includes("login"));
-      } finally {
-        await askRepo.cleanup();
+        await repo.cleanup();
       }
     });
   });
@@ -325,6 +277,7 @@ describe("Worker Adapters", { concurrency: false }, () => {
             worker: claude(),
             model: "opus",
             effort: "high",
+            permissions: "unattended",
           }),
           cap: 1,
           cwd: withEffort.cwd,
@@ -353,6 +306,7 @@ describe("Worker Adapters", { concurrency: false }, () => {
             }),
             worker: claude(),
             model: "opus",
+            permissions: "unattended",
           }),
           cap: 1,
           cwd: withoutEffort.cwd,
@@ -380,6 +334,7 @@ describe("Worker Adapters", { concurrency: false }, () => {
         worker: cursor(),
         model: "composer-2.5-fast",
         effort: "high",
+        permissions: "unattended",
       });
       try {
         const doctorExit = await doctor({
@@ -412,6 +367,84 @@ describe("Worker Adapters", { concurrency: false }, () => {
         );
         const receipt = await readReceipt(receiptPath);
         assert.deepEqual(receipt.argv, ["status"]);
+      } finally {
+        await repo.cleanup();
+      }
+    });
+  });
+
+  test("print-mode spawn with ask permissions fails Doctor and a Run will not start", async () => {
+    const askPrintMode = /Doctor: .*--permissions unattended/;
+    for (const { bin, worker, model, probeArgv } of [
+      { bin: "agent", worker: cursor(), model: "composer-2", probeArgv: ["status"] },
+      { bin: "claude", worker: claude(), model: "opus", probeArgv: ["auth", "status"] },
+    ]) {
+      await withRecordingPath([bin], async ({ receiptPath }) => {
+        const repo = await throwawayRepo();
+        const doctorChunks: string[] = [];
+        const runChunks: string[] = [];
+        const config = defineConfig({
+          tracker: memoryTracker({
+            tickets: [ticket({ id: "52" })],
+            ready: "unblocked",
+            labels: ["ready-for-agent"],
+          }),
+          worker,
+          model,
+        });
+        const stdout = (chunks: string[]) => ({
+          write(chunk: string) {
+            chunks.push(chunk);
+            return true;
+          },
+        });
+        try {
+          const doctorExit = await doctor({
+            config,
+            cwd: repo.cwd,
+            stdout: stdout(doctorChunks),
+          });
+          const runExit = await run({
+            config,
+            cap: 1,
+            cwd: repo.cwd,
+            stdout: stdout(runChunks),
+          });
+          assert.equal(doctorExit, 1);
+          assert.equal(runExit, 1);
+          assert.equal(doctorChunks.join(""), runChunks.join(""));
+          assert.match(doctorChunks.join(""), askPrintMode);
+          const receipt = await readReceipt(receiptPath);
+          assert.deepEqual(receipt.argv, probeArgv);
+        } finally {
+          await repo.cleanup();
+        }
+      });
+    }
+  });
+
+  test("a Run-level unattended override lets print-mode spawn with the Worker Adapter's unattended flag", async () => {
+    await withRecordingPath(["claude"], async ({ receiptPath }) => {
+      const repo = await throwawayRepo();
+      try {
+        await run({
+          config: defineConfig({
+            tracker: memoryTracker({
+              tickets: [ticket({ id: "52" })],
+              ready: "unblocked",
+              labels: ["ready-for-agent"],
+            }),
+            worker: claude(),
+            model: "opus",
+          }),
+          cap: 1,
+          cwd: repo.cwd,
+          stdout: silent,
+          permissions: "unattended",
+        });
+        const receipt = await readReceipt(receiptPath);
+        assert.equal(receipt.argv[0], "-p");
+        assert.ok(receipt.argv.includes("--dangerously-skip-permissions"));
       } finally {
         await repo.cleanup();
       }
@@ -538,6 +571,7 @@ describe("Worker Adapters", { concurrency: false }, () => {
             }),
             worker: cursor({ extraArgs: ["--reasoning-effort", "high"] }),
             model: "composer-2",
+            permissions: "unattended",
           }),
           cap: 1,
           cwd: repo.cwd,
@@ -571,6 +605,7 @@ describe("Worker Adapters", { concurrency: false }, () => {
             }),
             worker: claude({ extraArgs: ["--verbose"] }),
             model: "opus",
+            permissions: "unattended",
           }),
           cap: 1,
           cwd: repo.cwd,
@@ -603,6 +638,7 @@ describe("Worker Adapters", { concurrency: false }, () => {
             }),
             worker: cursor(),
             model: "composer-2",
+            permissions: "unattended",
           }),
           cwd: repo.cwd,
           stdout: silent,
@@ -706,6 +742,7 @@ describe("Worker Adapters", { concurrency: false }, () => {
             }),
             worker: claude(),
             model: "opus",
+            permissions: "unattended",
           }),
           cwd: repo.cwd,
           stdout: silent,

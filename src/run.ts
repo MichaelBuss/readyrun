@@ -60,7 +60,15 @@ export async function run(options: RunOptions): Promise<number> {
 
   const cwd = options.cwd ?? process.cwd();
   const stdout = options.stdout ?? process.stdout;
-  if (await doctorCheck(config, cwd, stdout, options.effort ?? config.effort) === 1) {
+  if (
+    await doctorCheck(
+      config,
+      cwd,
+      stdout,
+      options.effort ?? config.effort,
+      options.permissions ?? config.permissions,
+    ) === 1
+  ) {
     return 1;
   }
   const context = config.contextFile === undefined
