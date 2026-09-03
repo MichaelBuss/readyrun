@@ -456,6 +456,8 @@ export default defineConfig({
   }),
   worker: cursor(),
   model: "composer-2",
+  permissions: "unattended",
+  contextFile: "CONTEXT.md",
 });
 `;
 
@@ -466,6 +468,7 @@ test("init --answers writes the same stub as Clack without a TTY", async () => {
         join(cwd, "answers.json"),
         `${JSON.stringify(initAnswers, null, 2)}\n`,
       );
+      await writeFile(join(cwd, "CONTEXT.md"), "# Language\n");
     },
     async (cwd) => {
       const bin = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
