@@ -195,18 +195,23 @@ export async function resolveRunBase(cwd: string): Promise<RunBase> {
 }
 
 // Read the Branch ref, not the Worktree's HEAD: a Worker that committed
-// somewhere else left the Ticket's Branch as empty as one that did nothing.
-export async function branchHasCommitsSince(
+// somewhere else left the Ticket's Branch's tree matching the base, same as
+// one that did nothing. Tree identity, not commit count: an empty commit is
+// that empty Branch wearing a commit (ADR 0029).
+export async function branchTreeDiffersFrom(
   cwd: string,
   branch: string,
   base: string,
 ): Promise<boolean> {
-  const count = await git(cwd, [
-    "rev-list",
-    "--count",
-    `${base}..refs/heads/${branch}`,
-  ]);
-  return count !== "0";
+  try {
+    await git(cwd, ["diff", "--quiet", base, `refs/heads/${branch}`]);
+    return false;
+  } catch (error) {
+    if (execExitCode(error) === 1) {
+      return true;
+    }
+    throw error;
+  }
 }
 
 export async function createTicketWorktree(

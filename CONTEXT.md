@@ -86,7 +86,7 @@ _Avoid_: max mode (Cursor's interactive slash command), ultracode (a Claude Code
 - A **Run** has exactly one **Run Branch**, starting from whatever the **Consumer**'s checkout was on when the **Run** started. Each **Ticket**'s **Branch** starts from the **Run Branch**'s tip as at the moment that **Ticket** was picked — never from another **Ticket**'s **Branch**.
 - When a **Worker** succeeds, its **Ticket**'s **Branch** is merged into the **Run Branch** as exactly one merge commit — never fast-forwarded, never squashed — and is then deleted. One **Ticket** is therefore one entry in the **Run Branch**'s first-parent history, with the **Worker**'s own commits kept underneath it. The next **Ticket** starts from a tree containing every **Ticket** the **Run** has already finished.
 - ReadyRun never merges a **Run Branch** anywhere. What happens to it is the **Consumer**'s.
-- A **Worker** commits its own work; ReadyRun never writes a commit that describes code. The only commit it makes is the merge of a **Ticket**'s **Branch** into the **Run Branch**, and that message is derived from the **Ticket** exactly as the **Branch** name is. A **Worker** that exits 0 leaving its **Worktree** dirty, or its **Branch** unchanged, has failed.
+- A **Worker** commits its own work; ReadyRun never writes a commit that describes code. The only commit it makes is the merge of a **Ticket**'s **Branch** into the **Run Branch**, and that message is derived from the **Ticket** exactly as the **Branch** name is. A **Worker** that exits 0 leaving its **Worktree** dirty, or its **Branch**'s tree matching the base it was cut from, has failed.
 - A **Worktree** is removed once its **Worker** succeeds and kept when the **Run** hard-stops, so a failure is still there to look at. The **Run Branch** outlives both.
 - A **Run** (and **Doctor**) refuse to start if config lies about the **Frontier**: missing labels, repo ≠ remote, `unblocked` claimed but the **Tracker** cannot say so, unknown keys. Unused knobs (a label map with no matching **Tickets**) warn. The check is once at **Run** start, not every iteration.
 - A **Run** (and **Doctor**) also refuse to start if the **Consumer** has a lockfile whose install output is neither tracked nor ignored: ReadyRun would create that dirt itself, and every **Ticket** would then hard-stop as if the **Worker** left work uncommitted. A **Consumer** that already ignores it is unchanged.
@@ -102,7 +102,7 @@ _Avoid_: max mode (Cursor's interactive slash command), ultracode (a Claude Code
 - A **Worker**’s model: config default is required (**Doctor** fail if missing). CLI `--model` overrides that default for the **Run**. A label map may override per **Ticket**. The **Ticket** body does not name a model.
 - The **Worker** prompt is owned by the package: loop rules plus **Tracker Adapter** copy (this **Ticket**’s id, title, body, URL). Loop rules tell the **Worker** it will not get a reply and must not ask the **Consumer**; a blocking question is a failed **Ticket**, not a pause. A **Consumer** may append a repo context file from config. That file does not replace tracker instructions. There is no repo `prompt.md` that owns the loop.
 - When a **Worker** succeeds, the **Ticket** must leave the **Frontier**. The **Tracker Adapter** has a default for that (Linear: In Review, not Done; GitHub: drop the frontier label, comment, do not close). A **Consumer** may override; they do not have to write a hook.
-- A **Run** hard-stops (no skip, no retry-forever) on **Tracker** API or auth failure, **Branch**/**Worktree** failure, **Worker** missing or not logged in at spawn, **Worker** non-zero exit, or a **Worker** that exits 0 leaving its **Worktree** dirty or its **Branch** unchanged. Empty **Frontier** and cap are clean stops. The harness owns **Tracker** auth; the coding CLI owns its own login.
+- A **Run** hard-stops (no skip, no retry-forever) on **Tracker** API or auth failure, **Branch**/**Worktree** failure, **Worker** missing or not logged in at spawn, **Worker** non-zero exit, or a **Worker** that exits 0 leaving its **Worktree** dirty or its **Branch**'s tree matching the base it was cut from. Empty **Frontier** and cap are clean stops. The harness owns **Tracker** auth; the coding CLI owns its own login.
 
 ## Example dialogue
 
@@ -176,7 +176,7 @@ _Avoid_: max mode (Cursor's interactive slash command), ultracode (a Claude Code
 > **Domain expert:** "On the **Run Branch**. The **Worktree** was only where the **Worker** ran. If it had failed we'd have left the directory for you."
 >
 > **Dev:** "The **Worker** exited 0 without changing anything. Clean finish?"
-> **Domain expert:** "No, that's a hard stop. Exit 0 on an unchanged **Branch** means it did nothing, and we're not taking the **Ticket** off the **Frontier** for that."
+> **Domain expert:** "No, that's a hard stop. Exit 0 on a **Branch** whose tree matches the base it was cut from means it produced nothing, and we're not taking the **Ticket** off the **Frontier** for that."
 
 ## Flagged ambiguities
 

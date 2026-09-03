@@ -6,7 +6,13 @@ import { defineConfig, run } from "../src/mod.ts";
 import { memoryTracker, recordingWorker } from "../src/testing/mod.ts";
 import { createWorkerAdapter } from "../src/worker-adapter.ts";
 import { ticket } from "./tracker-adapter-contract.ts";
-import { git, runBranchMerges, throwawayRepo } from "./throwaway-repo.ts";
+import {
+  git,
+  onDisk,
+  runBranchMerges,
+  runBranches,
+  throwawayRepo,
+} from "./throwaway-repo.ts";
 
 const silent = { write(_chunk?: string) { return true; } };
 
@@ -54,7 +60,7 @@ test("a Worker exiting 0 with a dirty Worktree hard-stops the Run and leaves its
   }
 });
 
-test("a Worker exiting 0 having committed nothing hard-stops the Run and leaves its Ticket on the Frontier", async () => {
+test("a Worker exiting 0 whose Branch tree matches the base hard-stops the Run and leaves its Ticket on the Frontier", async () => {
   const repo = await throwawayRepo();
   const worker = recordingWorker({ exitCode: 0, work: "none" });
   const frontier = tracker();
@@ -80,8 +86,46 @@ test("a Worker exiting 0 having committed nothing hard-stops the Run and leaves 
     );
     assert.match(
       chunks.join(""),
-      /Hard stop: Ticket 52 failed at worker: committed nothing on readyrun\/52/,
+      /Hard stop: Ticket 52 failed at worker: produced nothing on readyrun\/52/,
     );
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("a Worker exiting 0 after an empty commit hard-stops the Run and leaves its Ticket on the Frontier", async () => {
+  const repo = await throwawayRepo();
+  const worker = recordingWorker({ exitCode: 0, work: "empty-commit" });
+  const frontier = tracker();
+  const chunks: string[] = [];
+  try {
+    const exitCode = await run({
+      config: defineConfig({ tracker: frontier, worker, model: "composer-2" }),
+      cap: 2,
+      cwd: repo.cwd,
+      stdout: {
+        write(chunk: string) {
+          chunks.push(chunk);
+          return true;
+        },
+      },
+    });
+
+    assert.equal(exitCode, 1);
+    assert.deepEqual(worker.spawns.map((spawn) => spawn.ticket.id), ["52"]);
+    assert.deepEqual(
+      (await frontier.frontier()).map((item) => item.id),
+      ["52", "57"],
+    );
+    assert.match(
+      chunks.join(""),
+      /Hard stop: Ticket 52 failed at worker: produced nothing on readyrun\/52/,
+    );
+    assert.equal(
+      await onDisk(join(repo.cwd, ".readyrun", "worktrees", "readyrun-52")),
+      true,
+    );
+    assert.deepEqual(await runBranches(repo.cwd), []);
   } finally {
     await repo.cleanup();
   }
@@ -110,7 +154,7 @@ test("a Worker exiting 0 with a clean Worktree and a commit on its Branch takes 
   }
 });
 
-test("a Worker that commits on another Branch leaves its own Branch empty and hard-stops the Run", async () => {
+test("a Worker that commits on another Branch leaves its Branch's tree matching the base and hard-stops the Run", async () => {
   const repo = await throwawayRepo();
   const worker = createWorkerAdapter({
     async spawn(request) {
@@ -146,7 +190,7 @@ test("a Worker that commits on another Branch leaves its own Branch empty and ha
     );
     assert.match(
       chunks.join(""),
-      /Hard stop: Ticket 52 failed at worker: committed nothing on readyrun\/52/,
+      /Hard stop: Ticket 52 failed at worker: produced nothing on readyrun\/52/,
     );
   } finally {
     await repo.cleanup();

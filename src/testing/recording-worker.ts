@@ -12,7 +12,9 @@ const exec = promisify(execFile);
 
 // What the double leaves behind in the Worktree it was spawned in. The default
 // is "committed", because that is what the prompt tells a Worker to do.
-export type LeftWork = "committed" | "uncommitted" | "none";
+// "empty-commit" is a commit whose tree matches the base — the empty Branch
+// wearing a commit, which ReadyRun must not treat as success (ADR 0029).
+export type LeftWork = "committed" | "uncommitted" | "none" | "empty-commit";
 
 export type RecordingWorkerOptions = {
   exitCode?: number;
@@ -48,6 +50,17 @@ async function leaveWork(
   request: SpawnRequest,
 ): Promise<void> {
   if (work === "none") {
+    return;
+  }
+  if (work === "empty-commit") {
+    await exec("git", [
+      "-C",
+      request.cwd,
+      "commit",
+      "--allow-empty",
+      "-m",
+      `Ticket ${request.ticket.id}`,
+    ]);
     return;
   }
   const file = `ticket-${request.ticket.id}.txt`;

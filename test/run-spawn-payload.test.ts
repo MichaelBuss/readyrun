@@ -462,7 +462,7 @@ test("the Worker prompt tells the Worker to commit its work, because ReadyRun ch
     const prompt = worker.spawns[0]?.prompt;
     assert.ok(prompt);
     assert.match(prompt, /Commit your work on the Branch/);
-    assert.match(prompt, /uncommitted changes|nothing committed/);
+    assert.match(prompt, /uncommitted changes|tree matching the base/);
   } finally {
     await repo.cleanup();
   }
