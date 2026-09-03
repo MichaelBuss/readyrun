@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
 import { createTrackerAdapter, defineConfig, run } from "../src/mod.ts";
@@ -177,6 +179,7 @@ test("a failed Worktree install hard-stops the Run at git with the install outpu
   const chunks: string[] = [];
   try {
     await commitMismatchedNpmLockfile(repo.cwd);
+    await writeFile(join(repo.cwd, ".gitignore"), "node_modules/\n");
     const exitCode = await run({
       config: defineConfig({
         tracker: memoryTracker({

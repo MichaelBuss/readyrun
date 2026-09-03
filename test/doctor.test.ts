@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
 import { cli } from "../src/cli.ts";
@@ -16,7 +18,7 @@ import { memoryTracker, recordingWorker } from "../src/testing/mod.ts";
 import { createWorkerAdapter } from "../src/worker-adapter.ts";
 import { githubFromWorld } from "./github-http-fixture.ts";
 import { ticket } from "./tracker-adapter-contract.ts";
-import { throwawayRepo } from "./throwaway-repo.ts";
+import { commitNpmConsumer, throwawayRepo } from "./throwaway-repo.ts";
 
 const exec = promisify(execFile);
 const silent = { write(_chunk?: string) { return true; } };
@@ -735,6 +737,83 @@ test("the check runs once at Run start, not on every iteration", async () => {
       worker.spawns.map((spawn) => spawn.ticket.id),
       ["52", "57"],
     );
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("a Consumer whose install output is neither tracked nor ignored fails Doctor and a Run will not start", async () => {
+  const repo = await throwawayRepo();
+  const worker = recordingWorker({ exitCode: 0 });
+  const chunks: string[] = [];
+  const config = defineConfig({
+    tracker: memoryTracker({
+      tickets: [ticket({ id: "52" })],
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+    }),
+    worker,
+    model: "composer-2",
+  });
+  try {
+    await commitNpmConsumer(repo.cwd);
+    const doctorExit = await doctor({
+      config,
+      cwd: repo.cwd,
+      stdout: {
+        write(chunk: string) {
+          chunks.push(chunk);
+          return true;
+        },
+      },
+    });
+    assert.equal(doctorExit, 1);
+    assert.match(
+      chunks.join(""),
+      /Doctor: install output node_modules is neither tracked nor ignored; add it to \.gitignore/,
+    );
+
+    const runExit = await run({
+      config,
+      cap: 1,
+      cwd: repo.cwd,
+      stdout: silent,
+    });
+    assert.equal(runExit, 1);
+    assert.equal(worker.spawns.length, 0);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("a Consumer that ignores its install output does not fail Doctor", async () => {
+  const repo = await throwawayRepo();
+  const chunks: string[] = [];
+  const config = defineConfig({
+    tracker: memoryTracker({
+      tickets: [ticket({ id: "52" })],
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+    }),
+    worker: recordingWorker({ exitCode: 0 }),
+    model: "composer-2",
+  });
+  try {
+    await commitNpmConsumer(repo.cwd);
+    await writeFile(join(repo.cwd, ".gitignore"), "node_modules/\n");
+    const doctorExit = await doctor({
+      config,
+      cwd: repo.cwd,
+      stdout: {
+        write(chunk: string) {
+          chunks.push(chunk);
+          return true;
+        },
+      },
+    });
+    assert.equal(doctorExit, 0);
+    assert.doesNotMatch(chunks.join(""), /install output/);
+    assert.match(chunks.join(""), /Next Ticket: 52/);
   } finally {
     await repo.cleanup();
   }

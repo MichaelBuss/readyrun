@@ -119,6 +119,56 @@ export async function worktreeIsClean(worktreePath: string): Promise<boolean> {
   return await git(worktreePath, ["status", "--porcelain"]) === "";
 }
 
+// npm / pnpm / yarn frozen install all write here. A Consumer that neither
+// tracks nor ignores it makes every Worktree look dirty after ReadyRun's own
+// install, which the dirty-Worktree hard stop then blames on the Worker.
+const installOutput = "node_modules";
+
+export async function unignoredInstallOutput(
+  cwd: string,
+): Promise<string | undefined> {
+  if (await detectInstallCommand(cwd) === undefined) {
+    return undefined;
+  }
+  // Trailing slash: `node_modules/` in .gitignore only matches a directory, and
+  // check-ignore cannot see that a missing path is one unless we say so.
+  if (
+    await pathIsIgnored(cwd, `${installOutput}/`) ||
+    await pathIsTracked(cwd, installOutput)
+  ) {
+    return undefined;
+  }
+  return installOutput;
+}
+
+async function pathIsIgnored(cwd: string, path: string): Promise<boolean> {
+  try {
+    await exec("git", ["-C", cwd, "check-ignore", "-q", "--", path]);
+    return true;
+  } catch (error) {
+    if (execExitCode(error) === 1) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function pathIsTracked(cwd: string, path: string): Promise<boolean> {
+  return await git(cwd, ["ls-files", "--", path]) !== "";
+}
+
+function execExitCode(error: unknown): number | undefined {
+  if (
+    error !== null &&
+    typeof error === "object" &&
+    "code" in error &&
+    typeof error.code === "number"
+  ) {
+    return error.code;
+  }
+  return undefined;
+}
+
 export type RunBase = {
   commit: string;
   // Undefined on a detached checkout, which is a base without a branch rather

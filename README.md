@@ -61,6 +61,8 @@ Without a `CONTEXT.md` the key is absent and the Worker gets tracker copy alone.
 
 `readyrun doctor` can tell "not installed" from "installed but not logged in": `cursor()` and `claude()` each define a cheap probe (`agent status`, `claude auth status`) that Doctor runs once it has confirmed the binary exists, reporting a probe failure distinctly from a missing binary. `custom()` Worker Adapters have no probe and keep today's existence-only check.
 
+Doctor also fails when a Consumer lockfile's install output (`node_modules`) is neither tracked nor ignored, and names adding it to `.gitignore` — otherwise every Ticket hard-stops as Worker dirt after ReadyRun's own install.
+
 For a Tracker this package doesn't ship (Jira, GitLab, ...), build one with `createTrackerAdapter`, the same building block `github()` and `linear()` use internally:
 
 ```ts
