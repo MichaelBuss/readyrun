@@ -83,11 +83,12 @@ _Avoid_: max mode (Cursor's interactive slash command), ultracode (a Claude Code
 - When more than one **Ticket** is on the **Frontier**, pick order is the **Tracker Adapter**’s stable order (GitHub: issue number ascending). There is no priority field on the **Ticket**.
 - When a **Worker** starts, the harness creates a **Branch** for that **Ticket**. It does not start on main. The **Ticket** body does not name the **Branch**.
 - Each **Worker** runs in a **Worktree** on that **Branch**, even when a **Run** is serial. There is no cwd-isolation mode and no clone-per-**Ticket**.
-- A **Run** has exactly one **Run Branch**, starting from whatever the **Consumer**'s checkout was on when the **Run** started. Each **Ticket**'s **Branch** starts from the **Run Branch**'s tip as at the moment that **Ticket** was picked — never from another **Ticket**'s **Branch**.
+- A **Run** names one **Run Branch**, starting from whatever the **Consumer**'s checkout was on when the **Run** started. The ref is created at the first successful merge; a **Run** that lands no **Tickets** leaves no **Run Branch** ref. Each **Ticket**'s **Branch** starts from the **Run Branch**'s tip as at the moment that **Ticket** was picked — never from another **Ticket**'s **Branch**. Before any merge, that tip is the base the **Run** resolved at start.
 - When a **Worker** succeeds, its **Ticket**'s **Branch** is merged into the **Run Branch** as exactly one merge commit — never fast-forwarded, never squashed — and is then deleted. One **Ticket** is therefore one entry in the **Run Branch**'s first-parent history, with the **Worker**'s own commits kept underneath it. The next **Ticket** starts from a tree containing every **Ticket** the **Run** has already finished.
 - ReadyRun never merges a **Run Branch** anywhere. What happens to it is the **Consumer**'s.
 - A **Worker** commits its own work; ReadyRun never writes a commit that describes code. The only commit it makes is the merge of a **Ticket**'s **Branch** into the **Run Branch**, and that message is derived from the **Ticket** exactly as the **Branch** name is. A **Worker** that exits 0 leaving its **Worktree** dirty, or its **Branch**'s tree matching the base it was cut from, has failed.
 - A **Worktree** is removed once its **Worker** succeeds and kept when the **Run** hard-stops, so a failure is still there to look at. The **Run Branch** outlives both.
+- A **Hard stop** leaves the **Run Branch** as it stands when that ref exists: **Tickets** already merged stay; the failed **Ticket** does not. If nothing has merged, there is no **Run Branch** ref — that **Run** produced nothing to review.
 - A **Run** (and **Doctor**) refuse to start if config lies about the **Frontier**: missing labels, repo ≠ remote, `unblocked` claimed but the **Tracker** cannot say so, unknown keys. Unused knobs (a label map with no matching **Tickets**) warn. The check is once at **Run** start, not every iteration.
 - A **Run** (and **Doctor**) also refuse to start if the **Consumer** has a lockfile whose install output is neither tracked nor ignored: ReadyRun would create that dirt itself, and every **Ticket** would then hard-stop as if the **Worker** left work uncommitted. A **Consumer** that already ignores it is unchanged.
 - Before a **Ticket** is claimed, a **Run** discloses the base commit it resolved and the **Run Branch** it will collect onto, calls out a base that is not the default branch, and warns when the primary checkout is dirty, because uncommitted changes there reach no **Worktree**. **Doctor** discloses the same base and names no **Run Branch**, because it creates none. This is disclosure, not a gate: starting from a feature branch on purpose is legitimate, and none of it stops a **Run**.
@@ -163,6 +164,9 @@ _Avoid_: max mode (Cursor's interactive slash command), ultracode (a Claude Code
 > **Dev:** "The **Worker** exited 1. Do we start #53?"
 > **Domain expert:** "No. The **Run** stops. We don't skip, and we don't retry GitHub until it works."
 >
+> **Dev:** "The **Run** hard-stopped. Throw away the **Run Branch**?"
+> **Domain expert:** "Only if nothing merged. **Tickets** that already landed are still on it. The failure is the one that didn't. If the first **Ticket** failed, there is no **Run Branch** ref yet."
+>
 > **Dev:** "Do I copy prompt.md and change Linear to GitHub?"
 > **Domain expert:** "No. The package tells the **Worker** it's GitHub #52 because you picked that **Tracker Adapter**. You may append a repo context file for how to test. You don't author the loop."
 >
@@ -186,7 +190,7 @@ _Avoid_: max mode (Cursor's interactive slash command), ultracode (a Claude Code
 - **Local Adapter** — resolved: not v0; later it is a first-class **Tracker** option, never a fallback when GitHub or Linear fail.
 - **Beads** — not in scope unless someone wants a git-native **Tracker**.
 - **Worktree** — resolved: v0 uses a git **Worktree** per **Ticket**, even while serial. Not a clone. Not the **Consumer** cwd. Lifetime resolved: disposable — removed once its **Worker** succeeds, kept when the **Run** hard-stops, and never a place the **Consumer** continues the **Ticket** by hand.
-- **Branch** vs **Run Branch** — resolved: unqualified **Branch** is the **Ticket**'s. The **Run Branch** is always named in full.
+- **Branch** vs **Run Branch** — resolved: unqualified **Branch** is the **Ticket**'s. The **Run Branch** is always named in full. The ref is created at the first successful merge; naming one does not mean git has it yet.
 - **Parallelism** — resolved for v0 behaviour: serial. Not resolved as “forever serial.” The shape must make raising concurrency later easy.
 - **How a Ticket lands** — unresolved. Push-for-review vs stay local, auto-review, integrate later are Policy, not the definition of **Branch**.
 - **Run stats** — unresolved. Token usage, context-window % across **Workers**, printed at the end of a **Run**. Wanted; not v0-blocking.
@@ -194,7 +198,7 @@ _Avoid_: max mode (Cursor's interactive slash command), ultracode (a Claude Code
 - **Permissions** — resolved: `"ask"` | `"unattended"`. Default ask. Not yolo. Not a boolean. Print-mode (`cursor()`, `claude()`) cannot use ask.
 - **Effort** — resolved: optional config default; CLI overrides the **Run**. Adapter maps to `--effort`. Cursor does not map the flag (model variants). **Doctor** fails that pairing. Not ultracode, not max-mode.
 - **Model** — resolved: required config default; CLI overrides the **Run**; label map overrides per **Ticket**. Not authored on the **Ticket**.
-- **Hard stop** — resolved: **Tracker**/git/**Worker** failure ends the **Run**. No skip, no retry-forever. Cap and empty **Frontier** are clean stops. Harness owns **Tracker** auth; CLI owns Worker login.
+- **Hard stop** — resolved: **Tracker**/git/**Worker** failure ends the **Run**. No skip, no retry-forever. Cap and empty **Frontier** are clean stops. Harness owns **Tracker** auth; CLI owns Worker login. **Tickets** already on the **Run Branch** stay; if none merged, there is no **Run Branch** ref.
 - **Worker prompt** — resolved: package + **Tracker Adapter**. Optional Consumer context file. Not a repo-owned `prompt.md`.
 - **Frontier query** — resolved: `ready: "unblocked"` + selector + optional root. Not parent-only, not labels without unblocked.
 - **Pick order** — resolved: stable **Tracker Adapter** order (GitHub: issue number ascending). No priority on the **Ticket**.
