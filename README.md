@@ -24,6 +24,7 @@ import { defineConfig, github, cursor } from "@readyrun/readyrun";
 defineConfig({
   worker: claude(),
   model: "opus",
+  permissions: "unattended",
   effort: "high",
 });
 ```
@@ -39,6 +40,24 @@ claude({ extraArgs: ["--verbose"] });
 `cursor()` shells out to `agent`, `claude()` shells out to `claude`; both must already be installed and authenticated before `run` — ReadyRun does not manage CLI auth.
 
 Both spawn print-mode (`-p`). `permissions: "ask"` (the default) is a Doctor failure — print-mode is not a chat. Pass `--permissions unattended`, or set `permissions: "unattended"` in config. `custom()` does not force print-mode, so ask remains valid there.
+
+`readyrun init` writes that line for you rather than asking, and points `contextFile` at a `CONTEXT.md` when the Consumer root already has one:
+
+```ts
+export default defineConfig({
+  tracker: github({
+    repo: "acme/widgets",
+    ready: "unblocked",
+    labels: ["ready-for-agent"],
+  }),
+  worker: cursor(),
+  model: "composer-2",
+  permissions: "unattended",
+  contextFile: "CONTEXT.md",
+});
+```
+
+Without a `CONTEXT.md` the key is absent and the Worker gets tracker copy alone. `--answers` writes the same stub without a TTY.
 
 `readyrun doctor` can tell "not installed" from "installed but not logged in": `cursor()` and `claude()` each define a cheap probe (`agent status`, `claude auth status`) that Doctor runs once it has confirmed the binary exists, reporting a probe failure distinctly from a missing binary. `custom()` Worker Adapters have no probe and keep today's existence-only check.
 

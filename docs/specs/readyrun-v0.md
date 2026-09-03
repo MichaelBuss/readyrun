@@ -190,6 +190,7 @@ A Run cannot start without a cap on how many Tickets it may start, so an unatten
 - Doctor also reports the Ticket that would be picked next.
 - Init is the single interactive surface: it asks for tracker, worker and frontier selector, then writes the config stub (ADR 0019).
 - Init also ensures the Consumer's `.gitignore` covers `.readyrun/`, creating the file if absent and appending the line if absent from an existing one, without duplicating it when an exact or broader existing pattern already covers the directory (ADR 0026).
+- The stub Init writes sets permissions to unattended, and sets `contextFile` to `CONTEXT.md` when that file already exists at the Consumer root, omitting the key otherwise. Neither is prompted for, and `--answers` produces the same stub (ADR 0030).
 
 ## Testing Decisions
 

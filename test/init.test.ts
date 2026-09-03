@@ -30,6 +30,22 @@ export default defineConfig({
   }),
   worker: cursor(),
   model: "composer-2",
+  permissions: "unattended",
+});
+`;
+
+const githubCursorContextStub = `import { defineConfig, github, cursor } from "@readyrun/readyrun";
+
+export default defineConfig({
+  tracker: github({
+    repo: "acme/widgets",
+    ready: "unblocked",
+    labels: ["ready-for-agent"],
+  }),
+  worker: cursor(),
+  model: "composer-2",
+  permissions: "unattended",
+  contextFile: "CONTEXT.md",
 });
 `;
 
@@ -52,6 +68,7 @@ export default defineConfig({
   }),
   worker: claude(),
   model: "opus",
+  permissions: "unattended",
   effort: "high",
 });
 `;
@@ -83,6 +100,7 @@ export default defineConfig({
     unattendedFlag: "--dangerously-skip-permissions",
   }),
   model: "local-model",
+  permissions: "unattended",
 });
 `;
 
@@ -101,6 +119,7 @@ export default defineConfig({
   }),
   worker: cursor(),
   model: "composer-2",
+  permissions: "unattended",
 });
 `;
 
@@ -157,6 +176,23 @@ test("init writes a custom Worker Adapter into the stub", async () => {
 
 test("init writes a Linear state Frontier selector into the stub", async () => {
   await assertWrittenStub(linearStateAnswers, linearStateStub);
+});
+
+test("init points contextFile at a CONTEXT.md already at the Consumer root", async () => {
+  await withConsumerRoot(async (cwd) => {
+    await writeFile(join(cwd, "CONTEXT.md"), "# Language\n");
+    const exitCode = await init({ cwd, answers: githubCursorAnswers });
+    assert.equal(exitCode, 0);
+    assert.equal(
+      await readFile(join(cwd, "readyrun.config.ts"), "utf8"),
+      githubCursorContextStub,
+    );
+    await assert.doesNotReject(() => loadStub(cwd));
+  });
+});
+
+test("init omits contextFile when the Consumer root has no CONTEXT.md", async () => {
+  await assertWrittenStub(githubCursorAnswers, githubCursorStub);
 });
 
 test("parseListedModels reads id and label from agent --list-models output", () => {
