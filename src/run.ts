@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { defineConfig, type ReadyRunConfig } from "./config.ts";
 import { discloseBase, doctorCheck, warnUnusedModelsByLabel } from "./doctor.ts";
 import {
-  branchHasCommitsSince,
+  branchTreeDiffersFrom,
   collectOntoRunBranch,
   createTicketWorktree,
   removeTicketWorktree,
@@ -175,10 +175,10 @@ export async function run(options: RunOptions): Promise<number> {
     // Exit 0 is not success on its own: a Worker that did nothing also exits 0
     // and also leaves a clean tree (ADR 0029).
     let clean;
-    let committed;
+    let changed;
     try {
       clean = await worktreeIsClean(worktree);
-      committed = await branchHasCommitsSince(cwd, branch, runBranchTip);
+      changed = await branchTreeDiffersFrom(cwd, branch, runBranchTip);
     } catch (error) {
       return hardStop(
         stdout,
@@ -195,12 +195,12 @@ export async function run(options: RunOptions): Promise<number> {
         `left work uncommitted in ${worktree}`,
       );
     }
-    if (!committed) {
+    if (!changed) {
       return hardStop(
         stdout,
         "worker",
         ticket.id,
-        `committed nothing on ${branch}`,
+        `produced nothing on ${branch}`,
       );
     }
     try {

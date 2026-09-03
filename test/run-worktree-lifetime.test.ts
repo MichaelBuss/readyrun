@@ -76,7 +76,7 @@ test("a Worker exiting non-zero leaves its Worktree on disk to look at", async (
   }
 });
 
-test("a Worker exiting 0 having committed nothing leaves its Worktree on disk; removal never runs before the success check", async () => {
+test("a Worker exiting 0 whose Branch tree matches the base leaves its Worktree on disk; removal never runs before the success check", async () => {
   const repo = await throwawayRepo();
   const worker = recordingWorker({ exitCode: 0, work: "none" });
   try {
