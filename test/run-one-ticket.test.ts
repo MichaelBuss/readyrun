@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { access } from "node:fs/promises";
+import { access, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
@@ -192,6 +192,7 @@ test("the Worktree has installed deps before the Worker is spawned", async () =>
   });
   try {
     await commitNpmConsumer(repo.cwd);
+    await writeFile(join(repo.cwd, ".gitignore"), "node_modules/\n");
     await run({
       config: defineConfig({
         tracker: memoryTracker({

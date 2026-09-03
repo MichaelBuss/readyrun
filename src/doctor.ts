@@ -5,6 +5,7 @@ import {
   normalizeRepository,
   originRepository,
   resolveRunBase,
+  unignoredInstallOutput,
   type RunBase,
 } from "./git.ts";
 import type { Ticket } from "./ticket.ts";
@@ -84,6 +85,12 @@ async function check(
   if (config.worker.printMode === true && permissions === "ask") {
     failures.push(
       "print-mode spawn cannot use permissions ask; pass --permissions unattended",
+    );
+  }
+  const installOutput = await unignoredInstallOutput(cwd);
+  if (installOutput !== undefined) {
+    failures.push(
+      `install output ${installOutput} is neither tracked nor ignored; add it to .gitignore`,
     );
   }
   return failures;
