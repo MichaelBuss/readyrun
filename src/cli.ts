@@ -30,7 +30,7 @@ const configNames = [
 export class ConfigNotFoundError extends Error {
   constructor() {
     super(
-      "No readyrun.config.ts, readyrun.config.js, or readyrun.config.mjs at the Consumer root",
+      "No readyrun.config.ts, readyrun.config.js, or readyrun.config.mjs at the Consumer root. Run `readyrun init`.",
     );
     this.name = "ConfigNotFoundError";
   }
@@ -38,16 +38,32 @@ export class ConfigNotFoundError extends Error {
 
 export class AmbiguousConfigError extends Error {
   constructor(names: readonly string[]) {
-    super(`Multiple config files at the Consumer root: ${names.join(", ")}`);
+    super(
+      `Multiple config files at the Consumer root: ${names.join(", ")}. Leave one file.`,
+    );
     this.name = "AmbiguousConfigError";
   }
 }
 
 export class ConfigExportError extends Error {
   constructor(name: string) {
-    super(`${name} must default-export defineConfig(...)`);
+    super(
+      `${name} must default-export defineConfig(...). Default-export defineConfig(...) from that file.`,
+    );
     this.name = "ConfigExportError";
   }
+}
+
+function configLoadFailure(error: unknown): string {
+  if (
+    error instanceof ConfigNotFoundError ||
+    error instanceof AmbiguousConfigError ||
+    error instanceof ConfigExportError
+  ) {
+    return error.message;
+  }
+  const detail = error instanceof Error ? error.message : String(error);
+  return `Could not load the ReadyRun config. Fix the config file. ${detail}`;
 }
 
 export async function loadConfig(cwd: string): Promise<ReadyRunConfig> {
@@ -211,7 +227,7 @@ export async function cli(options: CliOptions): Promise<number> {
   try {
     config = await (options.loadConfig ?? loadConfig)(cwd);
   } catch (error) {
-    stdout.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    stdout.write(`${configLoadFailure(error)}\n`);
     return 1;
   }
   if (runFlags !== undefined) {

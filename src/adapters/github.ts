@@ -131,7 +131,7 @@ export function github(
       if (fromGh !== undefined && fromGh.length > 0) {
         return fromGh;
       }
-      throw new Error("ReadyRun could not authenticate to GitHub");
+      throw new GitHubAuthError();
     }
     const env = runtime.env ?? process.env;
     const fromEnv = firstNonEmpty(env.GH_TOKEN, env.GITHUB_TOKEN);
@@ -142,7 +142,7 @@ export function github(
     if (fromGh !== undefined && fromGh.length > 0) {
       return fromGh;
     }
-    throw new Error("ReadyRun could not authenticate to GitHub");
+    throw new GitHubAuthError();
   }
 
   async function graphql<T>(
@@ -163,11 +163,17 @@ export function github(
         error instanceof Error &&
         /could not resolve to a repository/i.test(error.message)
       ) {
-        throw new Error(
-          `this token cannot see GitHub repository ${options.repo}`,
-        );
+        throw new GitHubCannotSeeError(options.repo);
       }
-      throw error;
+      if (
+        error instanceof GitHubUnreachableError ||
+        error instanceof GitHubAuthError ||
+        error instanceof GitHubCannotSeeError
+      ) {
+        throw error;
+      }
+      const vendor = error instanceof Error ? error.message : String(error);
+      throw new GitHubUnreachableError(vendor);
     }
   }
 
@@ -353,6 +359,33 @@ const githubHeaders = (token: string): Record<string, string> => ({
   "X-GitHub-Api-Version": "2022-11-28",
 });
 
+class GitHubUnreachableError extends Error {
+  constructor(vendor: string) {
+    super(
+      `ReadyRun could not reach GitHub. Check Tracker auth and network. ${vendor}`,
+    );
+    this.name = "GitHubUnreachableError";
+  }
+}
+
+class GitHubAuthError extends Error {
+  constructor() {
+    super(
+      "ReadyRun could not authenticate to GitHub. Check the GitHub token.",
+    );
+    this.name = "GitHubAuthError";
+  }
+}
+
+class GitHubCannotSeeError extends Error {
+  constructor(repo: string) {
+    super(
+      `this token cannot see GitHub repository ${repo}. Check the token's access to that repository.`,
+    );
+    this.name = "GitHubCannotSeeError";
+  }
+}
+
 async function githubGraphql<T>(
   http: typeof fetch,
   token: string,
@@ -370,13 +403,16 @@ async function githubGraphql<T>(
     errors?: { message: string }[];
   };
   if (!response.ok) {
-    throw new Error(`GitHub GraphQL HTTP ${response.status}`);
+    if (response.status === 401) {
+      throw new GitHubAuthError();
+    }
+    throw new GitHubUnreachableError(`GitHub GraphQL HTTP ${response.status}`);
   }
   if (payload.errors !== undefined && payload.errors.length > 0) {
     throw new Error(payload.errors[0]?.message ?? "GitHub GraphQL error");
   }
   if (payload.data === undefined) {
-    throw new Error("GitHub GraphQL returned no data");
+    throw new GitHubUnreachableError("GitHub GraphQL returned no data");
   }
   return payload.data;
 }
@@ -394,7 +430,10 @@ async function githubRest(
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (!response.ok) {
-    throw new Error(`GitHub REST HTTP ${response.status}`);
+    if (response.status === 401) {
+      throw new GitHubAuthError();
+    }
+    throw new GitHubUnreachableError(`GitHub REST HTTP ${response.status}`);
   }
 }
 

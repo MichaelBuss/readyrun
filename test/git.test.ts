@@ -155,6 +155,13 @@ test("createTicketWorktree refuses a Branch that already exists, instead of a ra
       (error: unknown) => {
         assert.ok(error instanceof WorktreeExistsError);
         assert.match(error.message, /already has a Worktree for branch readyrun\/52/);
+        assert.match(
+          error.message,
+          /git worktree remove .*readyrun-52/,
+        );
+        assert.match(error.message, /git branch -D readyrun\/52/);
+        assert.match(error.message, /start a new Run/);
+        assert.doesNotMatch(error.message, /finish|continue|by hand/i);
         return true;
       },
     );

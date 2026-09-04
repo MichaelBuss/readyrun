@@ -301,6 +301,7 @@ test("Doctor fails when ReadyRun cannot authenticate to GitHub", async () => {
       chunks.join(""),
       /Doctor: ReadyRun could not authenticate to GitHub/,
     );
+    assert.match(chunks.join(""), /Check the GitHub token/);
   } finally {
     await repo.cleanup();
   }
@@ -351,8 +352,53 @@ test("Doctor names a token that cannot see the repository, not a wrong repo stri
       output,
       /Doctor: this token cannot see GitHub repository acme\/widgets/,
     );
+    assert.match(output, /Check the token's access to that repository/);
     assert.doesNotMatch(output, /Could not resolve/);
     assert.doesNotMatch(output, /was not found/);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("Doctor does not print a raw GitHub GraphQL HTTP string as the failure", async () => {
+  const repo = await repoWithOrigin();
+  const adapter = github(
+    {
+      repo: "acme/widgets",
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+    },
+    {
+      token: "test-token",
+      fetch: async () =>
+        new Response(JSON.stringify({}), {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        }),
+    },
+  );
+  const chunks: string[] = [];
+  try {
+    const exit = await doctor({
+      config: defineConfig({
+        tracker: adapter,
+        worker: recordingWorker({ exitCode: 0 }),
+        model: "composer-2",
+      }),
+      cwd: repo.cwd,
+      stdout: {
+        write(chunk: string) {
+          chunks.push(chunk);
+          return true;
+        },
+      },
+    });
+    assert.equal(exit, 1);
+    const output = chunks.join("");
+    assert.match(output, /Doctor: ReadyRun could not reach GitHub/);
+    assert.match(output, /Check Tracker auth and network/);
+    assert.match(output, /GitHub GraphQL HTTP 500/);
+    assert.doesNotMatch(output, /^Doctor: GitHub GraphQL HTTP 500$/m);
   } finally {
     await repo.cleanup();
   }
