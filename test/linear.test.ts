@@ -7,6 +7,7 @@ import {
   linearFromWorld,
   linearHttpFixture,
   linearInReviewStateId,
+  postedComments,
 } from "./linear-http-fixture.ts";
 import { landing, ticket } from "./tracker-adapter-contract.ts";
 import { throwawayRepo } from "./throwaway-repo.ts";
@@ -35,6 +36,66 @@ test("success moves the Ticket to In Review and never Done", async () => {
     ),
     false,
   );
+  assert.equal(postedComments(fixture, "52").length, 1);
+});
+
+test("the comment names the Run Branch, the merge commit, and that the ref is local to the machine that ran the Run", async () => {
+  const { adapter, fixture } = linearFromWorld(world);
+  const frontier = await adapter.frontier();
+  const finished = frontier[0];
+  assert.ok(finished);
+  await adapter.leaveFrontier(
+    finished,
+    landing({
+      runBranch: "readyrun/run-20261102-091500",
+      mergeCommit: "9c8b7a6543210fedcba98765432100fedcba9876",
+    }),
+  );
+
+  assert.equal(
+    postedComments(fixture, "52")[0],
+    [
+      "ReadyRun: this Ticket left the Frontier after a successful Worker.",
+      "",
+      "The work landed on the Run Branch `readyrun/run-20261102-091500` as merge commit `9c8b7a6`. That ref is local to the machine that ran the Run — ReadyRun never pushes, so it cannot be fetched from anywhere else.",
+    ].join("\n"),
+  );
+});
+
+test("a comment failure is a Tracker failure, not a quiet continue", async () => {
+  const fixture = linearHttpFixture(world);
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const body = typeof init?.body === "string" ? init.body : undefined;
+    const operation = body === undefined
+      ? undefined
+      : (JSON.parse(body) as { operationName?: string }).operationName;
+    if (operation === "CommentCreate") {
+      return new Response(
+        JSON.stringify({ errors: [{ message: "Comment create failed" }] }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    return fixture.fetch(input, init);
+  };
+  const adapter = linear(
+    { ready: "unblocked", label: "ready-for-agent" },
+    { token: "test-token", fetch: fetchImpl },
+  );
+  const frontier = await adapter.frontier();
+  const finished = frontier[0];
+  assert.ok(finished);
+  await assert.rejects(
+    () => adapter.leaveFrontier(finished, landing()),
+    (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /could not reach Linear/);
+      assert.match(error.message, /Comment create failed/);
+      return true;
+    },
+  );
+  const bodies = fixture.requests.map((request) => request.body ?? "").join("\n");
+  assert.match(bodies, new RegExp(linearInReviewStateId));
+  assert.equal(bodies.includes(linearDoneStateId), false);
 });
 
 test("when Linear exposes a suggested branch name, that is the Branch", async () => {

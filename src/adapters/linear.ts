@@ -1,3 +1,4 @@
+import { landingComment } from "../landing-comment.ts";
 import {
   createTrackerAdapter,
   type TrackerAdapter,
@@ -131,6 +132,13 @@ const leaveFrontierMutation = `mutation LeaveFrontier($id: String!, $input: Issu
   issueUpdate(id: $id, input: $input) {
     success
     issue { identifier state { name type } }
+  }
+}`;
+
+const commentCreateMutation = `mutation CommentCreate($input: CommentCreateInput!) {
+  commentCreate(input: $input) {
+    success
+    comment { id }
   }
 }`;
 
@@ -302,7 +310,7 @@ export function linear(
       branchName(ticket) {
         return suggestedBranches.get(ticket.id) ?? `readyrun/${ticket.id}`;
       },
-      async leaveFrontier(ticket) {
+      async leaveFrontier(ticket, landing) {
         const data = await graphql<IssueStatesData>(
           "IssueStates",
           issueStatesQuery,
@@ -321,6 +329,9 @@ export function linear(
         await graphql("LeaveFrontier", leaveFrontierMutation, {
           id: ticket.id,
           input: { stateId: inReview.id },
+        });
+        await graphql("CommentCreate", commentCreateMutation, {
+          input: { issueId: ticket.id, body: landingComment(landing) },
         });
       },
       promptCopy(ticket) {
