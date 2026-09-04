@@ -355,6 +355,50 @@ test("Doctor fails when ReadyRun cannot authenticate to Linear", async () => {
       chunks.join(""),
       /Doctor: ReadyRun could not authenticate to Linear/,
     );
+    assert.match(chunks.join(""), /Check the Linear token/);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("Doctor does not print a raw Linear GraphQL HTTP string as the failure", async () => {
+  const repo = await throwawayRepo();
+  const adapter = linear(
+    {
+      ready: "unblocked",
+      label: "ready-for-agent",
+    },
+    {
+      token: "test-token",
+      fetch: async () =>
+        new Response(JSON.stringify({}), {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        }),
+    },
+  );
+  const chunks: string[] = [];
+  try {
+    const exit = await doctor({
+      config: defineConfig({
+        tracker: adapter,
+        worker: recordingWorker({ exitCode: 0 }),
+        model: "composer-2",
+      }),
+      cwd: repo.cwd,
+      stdout: {
+        write(chunk: string) {
+          chunks.push(chunk);
+          return true;
+        },
+      },
+    });
+    assert.equal(exit, 1);
+    const output = chunks.join("");
+    assert.match(output, /Doctor: ReadyRun could not reach Linear/);
+    assert.match(output, /Check Tracker auth and network/);
+    assert.match(output, /Linear GraphQL HTTP 500/);
+    assert.doesNotMatch(output, /^Doctor: Linear GraphQL HTTP 500$/m);
   } finally {
     await repo.cleanup();
   }

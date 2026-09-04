@@ -8,7 +8,7 @@ import { createTrackerAdapter, defineConfig, run } from "../src/mod.ts";
 import { memoryTracker, recordingWorker } from "../src/testing/mod.ts";
 import { createWorkerAdapter } from "../src/worker-adapter.ts";
 import { ticket } from "./tracker-adapter-contract.ts";
-import { commitMismatchedNpmLockfile, throwawayRepo } from "./throwaway-repo.ts";
+import { commitMismatchedNpmLockfile, commitWorkerWork, runBranch, throwawayRepo } from "./throwaway-repo.ts";
 
 const exec = promisify(execFile);
 const silent = { write(_chunk?: string) { return true; } };
@@ -95,6 +95,11 @@ test("a Worker exiting non-zero hard-stops the Run without skip or retry", async
     );
     const output = chunks.join("");
     assert.match(output, /Hard stop: Ticket 52 failed at worker: exit code 42/);
+    assert.match(output, /The Ticket remains on the Frontier/);
+    assert.doesNotMatch(output, /claude auth login/);
+    assert.match(output, /0 Tickets landed; no Run Branch was created/);
+    assert.doesNotMatch(output, /landed on readyrun\/run-/);
+    assert.match(output, /Worktree kept at .*readyrun-52/);
   } finally {
     await repo.cleanup();
   }
@@ -133,7 +138,12 @@ test("a Tracker API or auth failure hard-stops the Run", async () => {
 
     assert.equal(exitCode, 1);
     assert.equal(worker.spawns.length, 0);
-    assert.match(chunks.join(""), /Hard stop: failed at tracker/);
+    assert.match(
+      chunks.join(""),
+      /Hard stop: failed at tracker: 401 Unauthorized/,
+    );
+    assert.match(chunks.join(""), /Check Tracker auth and network/);
+    assert.doesNotMatch(chunks.join(""), /Worktree kept/);
   } finally {
     await repo.cleanup();
   }
@@ -244,7 +254,11 @@ test("a missing or unauthenticated Worker at spawn hard-stops the Run", async ()
 
     assert.equal(exitCode, 1);
     assert.deepEqual(attempted, ["52"]);
-    assert.match(chunks.join(""), /Hard stop: Ticket 52 failed at spawn/);
+    assert.match(
+      chunks.join(""),
+      /Hard stop: Ticket 52 failed at spawn: Worker is not logged in/,
+    );
+    assert.match(chunks.join(""), /Check the Worker binary and that it is logged in/);
   } finally {
     await repo.cleanup();
   }
@@ -284,7 +298,57 @@ test("a Tracker failure finishing a Ticket hard-stops the Run and names that Tic
 
     assert.equal(exitCode, 1);
     assert.deepEqual(worker.spawns.map((spawn) => spawn.ticket.id), ["52"]);
-    assert.match(chunks.join(""), /Hard stop: Ticket 52 failed at tracker/);
+    assert.match(
+      chunks.join(""),
+      /Hard stop: Ticket 52 failed at tracker: GitHub API 500/,
+    );
+    assert.match(chunks.join(""), /Check Tracker auth and network/);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("a hard stop after a merge names the Run Branch and how many Tickets landed", async () => {
+  const repo = await throwawayRepo();
+  const worker = createWorkerAdapter({
+    async spawn(request) {
+      if (request.ticket.id === "57") {
+        return { exitCode: 42 };
+      }
+      await commitWorkerWork(request);
+      return { exitCode: 0 };
+    },
+  });
+  const chunks: string[] = [];
+  try {
+    const exitCode = await run({
+      config: defineConfig({
+        tracker: memoryTracker({
+          tickets: [
+            ticket({ id: "52", title: "Fix the thing" }),
+            ticket({ id: "57", title: "Fix the other thing" }),
+          ],
+          ready: "unblocked",
+          labels: ["ready-for-agent"],
+        }),
+        worker,
+        model: "composer-2",
+      }),
+      cap: 2,
+      cwd: repo.cwd,
+      stdout: {
+        write(chunk: string) {
+          chunks.push(chunk);
+          return true;
+        },
+      },
+    });
+
+    assert.equal(exitCode, 1);
+    const output = chunks.join("");
+    const branch = await runBranch(repo.cwd);
+    assert.match(output, new RegExp(`1 Ticket landed on ${branch}`));
+    assert.doesNotMatch(output, /no Run Branch was created/);
   } finally {
     await repo.cleanup();
   }

@@ -80,6 +80,7 @@ test("a label named in the selector that does not exist on the Tracker fails Doc
       chunks.join(""),
       /Doctor: label "does-not-exist" does not exist on the Tracker/,
     );
+    assert.match(chunks.join(""), /Check the Frontier selector/);
 
     const runExit = await run({
       config,
