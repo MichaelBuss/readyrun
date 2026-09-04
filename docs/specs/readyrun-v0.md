@@ -55,6 +55,7 @@ A Run cannot start without a cap on how many Tickets it may start, so an unatten
 23. As an operator, I want one **Worker** at a time in v0, so that I can watch what is happening while the tool is young.
 24. As an operator, I want the **Ticket** the **Worker** is given to be one Ticket, never a tree, so that scope does not drift into neighbouring work.
 25. As an operator, I want live status on my terminal showing the current **Ticket**, how many of the cap are used, and the **Branch**, so that I can see progress at a glance.
+25a. As an operator, I want `run` and `doctor` to show liveness through Doctor, Frontier, Worktree, and Worker — not silence until a Ticket line or `Next Ticket` — and to stay line-oriented when stdout is not a TTY.
 26. As an operator, I want the process exit code to distinguish a clean finish from a hard stop, so that I can drive ReadyRun from a script.
 
 ### Choosing what runs next
@@ -155,7 +156,7 @@ A Run cannot start without a cap on how many Tickets it may start, so an unatten
 - A Run requires a maximum number of Tickets it may start. The unit is Tickets started, not wall-clock and not dollars, and not the Worker's internal turn limit — that may still be passed through to the coding CLI. There is no unlimited Run; a one-shot invocation is a Run with a cap of one (ADR 0005).
 - Reaching the cap stops the Run without prompting.
 - v0 starts one Worker at a time. Concurrency is deliberately a later setting rather than a redesign, which is why isolation is already per-Ticket (ADR 0007).
-- Live status is written to standard output. Interactive prompting exists only in `init`; there is no wizard that assembles a `run` invocation, because every flag would then exist twice and an unattended Run cannot prompt (ADR 0019).
+- Live status is written to standard output. On a TTY, `run` and `doctor` show a heartbeat labelled with the current stage (Doctor, Frontier, Worktree, Worker); off a TTY those stages are newline-delimited lines with no spinner animation. Once a Ticket is in flight the durable line includes id, title, branch, and started/cap. Interactive prompting exists only in `init`; there is no wizard that assembles a `run` invocation, because every flag would then exist twice and an unattended Run cannot prompt (ADR 0019, ADR 0032).
 
 ### Git
 
@@ -198,7 +199,7 @@ A Run cannot start without a cap on how many Tickets it may start, so an unatten
 
 A good test here asserts what a Consumer can observe — which Tickets ran and in what order, what the Tracker was asked to change, whether a Branch and Worktree existed, what was printed, and the exit code. It does not reach into how the Loop stores its state or how many times an internal function was called, because every one of those is something we should be free to change.
 
-**The seam is the public config surface.** Tests assemble the same configuration object a Consumer writes, substituting a fake Tracker Adapter holding in-memory Tickets with labels and blocking edges, and a fake Worker Adapter that records what it was spawned with and returns a scripted exit code. They then invoke the same entry point the CLI invokes. This is the highest available seam and the only one a Consumer has, and every decision above is expressible through it: the cap, serial execution, pick order, refusal to start on the default branch, the finish transition, hard stops, permission mapping, model resolution, and the composed prompt.
+**The seam is the public config surface.** Tests assemble the same configuration object a Consumer writes, substituting a fake Tracker Adapter holding in-memory Tickets with labels and blocking edges, and a fake Worker Adapter that records what it was spawned with and returns a scripted exit code. They then invoke the same entry point the CLI invokes. This is the highest available seam and the only one a Consumer has, and every decision above is expressible through it: the cap, serial execution, pick order, refusal to start on the default branch, the finish transition, hard stops, permission mapping, model resolution, and the composed prompt. Live status is asserted the same way: a delayed Tracker inspect/frontier or Worker spawn, then the captured stdout — stage lines (or a TTY heartbeat) before those calls return, and no spinner control characters when stdout is not a TTY.
 
 **Git is real.** Each test that touches git runs against a throwaway repository created for it. "Never starts on the default branch" and "one Worktree per Ticket" are promises about git itself, and a faked git would only prove the fake behaves as written.
 

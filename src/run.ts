@@ -1,7 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { defineConfig, type ReadyRunConfig } from "./config.ts";
-import { discloseBase, doctorCheck, warnUnusedModelsByLabel } from "./doctor.ts";
+import { collectDoctorFailures, discloseBase, writeDoctorFailures, warnUnusedModelsByLabel } from "./doctor.ts";
+import { startLiveness, type Liveness, type LivenessStdout } from "./liveness.ts";
 import {
   branchTreeDiffersFrom,
   collectOntoRunBranch,
@@ -14,7 +15,7 @@ import { composeWorkerPrompt } from "./prompt.ts";
 import type { Ticket } from "./ticket.ts";
 import type { Effort, Permissions } from "./worker-adapter.ts";
 
-type RunStdout = { write(chunk: string): unknown };
+type RunStdout = LivenessStdout;
 
 export type RunOptions = {
   config: ReadyRunConfig;
@@ -105,15 +106,31 @@ export async function run(options: RunOptions): Promise<number> {
 
   const cwd = options.cwd ?? process.cwd();
   const stdout = options.stdout ?? process.stdout;
-  if (
-    await doctorCheck(
-      config,
-      cwd,
-      stdout,
-      options.effort ?? config.effort,
-      options.permissions ?? config.permissions,
-    ) === 1
-  ) {
+  const live = startLiveness(stdout);
+  try {
+    return await runWithLiveness(options, config, cap, cwd, stdout, live);
+  } finally {
+    live.stop();
+  }
+}
+
+async function runWithLiveness(
+  options: RunOptions,
+  config: ReadyRunConfig & { permissions: Permissions },
+  cap: number,
+  cwd: string,
+  stdout: RunStdout,
+  live: Liveness,
+): Promise<number> {
+  live.stage("Doctor");
+  const failures = await collectDoctorFailures(
+    config,
+    cwd,
+    options.effort ?? config.effort,
+    options.permissions ?? config.permissions,
+  );
+  live.stop();
+  if (writeDoctorFailures(stdout, failures) === 1) {
     return 1;
   }
   const runBranch = runBranchName(new Date());
@@ -124,8 +141,9 @@ export async function run(options: RunOptions): Promise<number> {
     ticketId?: string,
     detail?: string,
     nextAction?: string,
-  ): 1 =>
-    hardStop(
+  ): 1 => {
+    live.stop();
+    return hardStop(
       stdout,
       stage,
       ticketId,
@@ -135,6 +153,7 @@ export async function run(options: RunOptions): Promise<number> {
       keptWorktree,
       nextAction,
     );
+  };
   let base;
   try {
     base = await resolveRunBase(cwd);
@@ -157,6 +176,7 @@ export async function run(options: RunOptions): Promise<number> {
   let unusedModelsWarned = false;
 
   while (started < cap) {
+    live.stage("Frontier");
     let frontier;
     try {
       frontier = await config.tracker.frontier();
@@ -168,6 +188,7 @@ export async function run(options: RunOptions): Promise<number> {
         "Check Tracker auth and network",
       );
     }
+    live.stop();
     if (!unusedModelsWarned) {
       warnUnusedModelsByLabel(stdout, config.modelsByLabel, frontier);
       unusedModelsWarned = true;
@@ -178,6 +199,7 @@ export async function run(options: RunOptions): Promise<number> {
     }
 
     const branch = config.tracker.branchName(ticket);
+    live.stage("Worktree");
     let worktree;
     try {
       worktree = await createTicketWorktree(cwd, branch, runBranchTip);
@@ -190,7 +212,14 @@ export async function run(options: RunOptions): Promise<number> {
       );
     }
     started += 1;
-    stdout.write(`Ticket ${ticket.id}  ${started}/${cap}  ${branch}\n`);
+    live.ticket({
+      id: ticket.id,
+      title: ticket.title,
+      branch,
+      started,
+      cap,
+    });
+    live.stage("Worker");
     let result;
     try {
       result = await config.worker.spawn({
