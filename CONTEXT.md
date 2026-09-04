@@ -42,6 +42,10 @@ _Avoid_: main
 The one **Branch** a **Run** collects its finished **Tickets** onto, so a **Run** leaves one thing to review instead of one per **Ticket**.
 _Avoid_: integration branch, trunk, main
 
+**Landing**:
+Where a finished **Ticket**'s work went: the **Run Branch** it was collected onto and the merge commit that collected it. What a **Ticket** is told as it leaves the **Frontier**, because its own **Branch** is gone by then.
+_Avoid_: handoff, location (unqualified), PR, remote
+
 **Worktree**:
 The directory a **Worker** runs in; one per **Ticket**, on that **Ticket**’s **Branch**. Disposable: the **Branch** carries the work forward, not the directory.
 _Avoid_: clone, cwd mode, workspace (somewhere the **Consumer** continues by hand)
