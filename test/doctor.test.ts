@@ -712,7 +712,7 @@ test("the check runs once at Run start, not on every iteration", async () => {
   const tracker = createTrackerAdapter({
     frontier: () => inner.frontier(),
     branchName: (ticket) => inner.branchName(ticket),
-    leaveFrontier: (ticket, landed) => inner.leaveFrontier(ticket, landed),
+    leaveFrontier: (ticket, landing) => inner.leaveFrontier(ticket, landing),
     promptCopy: (ticket) => inner.promptCopy(ticket),
     inspect() {
       inspects += 1;

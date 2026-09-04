@@ -68,14 +68,14 @@ test("the comment names the Run Branch, the merge commit, and that the ref is lo
   await adapter.leaveFrontier(
     finished,
     landing({
-      runBranch: "readyrun/run-20260904-143000",
-      mergeCommit: "0f1e2d3c4b5a69788796a5b4c3d2e1f009182736",
+      runBranch: "readyrun/run-20261102-091500",
+      mergeCommit: "9c8b7a6543210fedcba98765432100fedcba9876",
     }),
   );
 
   const comment = postedComments(fixture, "52")[0] ?? "";
-  assert.match(comment, /readyrun\/run-20260904-143000/);
-  assert.match(comment, /0f1e2d3/);
+  assert.match(comment, /readyrun\/run-20261102-091500/);
+  assert.match(comment, /9c8b7a6/);
   assert.match(comment, /local to the machine that ran the Run/);
   // A reviewer must not read the ref as somewhere they can fetch from.
   assert.match(comment, /never pushes/);

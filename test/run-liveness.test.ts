@@ -53,7 +53,7 @@ function delayTracker(
       return inner.frontier();
     },
     branchName: (item) => inner.branchName(item),
-    leaveFrontier: (item, landed) => inner.leaveFrontier(item, landed),
+    leaveFrontier: (item, landing) => inner.leaveFrontier(item, landing),
     promptCopy: (item) => inner.promptCopy(item),
     async inspect() {
       if (delays.inspect !== undefined) {
