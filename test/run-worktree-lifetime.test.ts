@@ -94,11 +94,13 @@ test("a Worker exiting 0 whose Branch tree matches the base leaves its Worktree 
   }
 });
 
-test("a Tracker failure finishing a Ticket leaves the Worktree on disk even though the Worker succeeded", async () => {
+test("a Tracker failure finishing a Ticket keeps no Worktree, because the merge it is told about already landed the work", async () => {
   const repo = await throwawayRepo();
   const inner = tracker();
   const worker = recordingWorker({ exitCode: 0 });
   try {
+    const base = await git(repo.cwd, ["rev-parse", "HEAD"]);
+
     const exitCode = await run({
       config: defineConfig({
         tracker: createTrackerAdapter({
@@ -117,7 +119,10 @@ test("a Tracker failure finishing a Ticket leaves the Worktree on disk even thou
     });
 
     assert.equal(exitCode, 1);
-    assert.equal(await onDisk(worktreeOf(repo.cwd, "52")), true);
+    assert.equal(await onDisk(worktreeOf(repo.cwd, "52")), false);
+    // Nothing to look at is lost: the Ticket the Tracker was never told about
+    // is on the Run Branch, which is what the Worktree was standing in for.
+    assert.equal((await runBranchMerges(repo.cwd, base)).length, 1);
   } finally {
     await repo.cleanup();
   }

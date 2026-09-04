@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { MemoryTrackerOptions } from "../src/testing/memory-tracker.ts";
 import type { Ticket } from "../src/ticket.ts";
-import type { TrackerAdapter } from "../src/tracker-adapter.ts";
+import type { Landing, TrackerAdapter } from "../src/tracker-adapter.ts";
 
 export type TrackerContractFactory = (
   world: MemoryTrackerOptions,
@@ -17,6 +17,16 @@ export function ticket(
     url: `https://example.test/${overrides.id}`,
     labels: ["ready-for-agent"],
     blockedBy: [],
+    ...overrides,
+  };
+}
+
+// A landing as `run` reports one: the Run Branch the Ticket was collected onto
+// and the full merge commit git wrote.
+export function landing(overrides: Partial<Landing> = {}): Landing {
+  return {
+    runBranch: "readyrun/run-20260904-143000",
+    mergeCommit: "0f1e2d3c4b5a69788796a5b4c3d2e1f009182736",
     ...overrides,
   };
 }
@@ -136,7 +146,7 @@ export function trackerAdapterContract(
 
     const finished = before[0];
     assert.ok(finished);
-    await adapter.leaveFrontier(finished);
+    await adapter.leaveFrontier(finished, landing());
 
     const after = await adapter.frontier();
     assert.deepEqual(
