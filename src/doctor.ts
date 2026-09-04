@@ -198,9 +198,8 @@ export async function doctor(options: DoctorOptions): Promise<number> {
     try {
       discloseBase(stdout, await resolveRunBase(cwd));
     } catch {
-      // A checkout git cannot answer for — no commit yet, or no repository — has
-      // no base to disclose. A Run hard-stops at git there, which is where that
-      // gets reported.
+      // A checkout git cannot answer for — no commit yet, or no repository.
+      // Has no base to disclose. A Run hard-stops at git there, which is where that gets reported.
     }
     live.stage("Frontier");
     const frontier = await config.tracker.frontier();
