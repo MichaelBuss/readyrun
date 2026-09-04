@@ -9,6 +9,7 @@ import {
   createTicketWorktree,
   removeTicketWorktree,
   resolveRunBase,
+  shortCommit,
   worktreeIsClean,
 } from "./git.ts";
 import { composeWorkerPrompt } from "./prompt.ts";
@@ -67,6 +68,30 @@ function mergeMessage(ticket: Ticket): string {
 
 type HardStopStage = "tracker" | "git" | "spawn" | "worker";
 
+// The two clean stops (ADR 0013). Which one it was is the only fact in the
+// report a Consumer cannot recover from git afterwards, and it is what says
+// whether work remains on the Frontier.
+type CleanStop = "frontier-empty" | "cap";
+
+function ticketNoun(count: number): string {
+  return count === 1 ? "Ticket" : "Tickets";
+}
+
+// A Run Branch is created lazily at the first merge (ADR 0028), so a Run that
+// landed nothing must not name the ref it disclosed at start: git has none.
+// The base is named only where there is a Branch that was cut from it.
+function landingLine(
+  landed: number,
+  runBranch: string,
+  base?: string,
+): string {
+  if (landed === 0) {
+    return "0 Tickets landed; no Run Branch was created.";
+  }
+  const cutFrom = base === undefined ? "" : `, cut from ${shortCommit(base)}`;
+  return `${landed} ${ticketNoun(landed)} landed on ${runBranch}${cutFrom}.`;
+}
+
 function caughtMessage(error: unknown): string | undefined {
   return error instanceof Error ? error.message : undefined;
 }
@@ -85,16 +110,35 @@ function hardStop(
   const suffix = detail === undefined ? "" : `: ${detail}`;
   const action = nextAction === undefined ? "" : `. ${nextAction}`;
   stdout.write(`Hard stop: ${ticketPrefix}failed at ${stage}${suffix}${action}\n`);
-  if (landed === 0) {
-    stdout.write("0 Tickets landed; no Run Branch was created.\n");
-  } else {
-    const noun = landed === 1 ? "Ticket" : "Tickets";
-    stdout.write(`${landed} ${noun} landed on ${runBranch}.\n`);
-  }
+  stdout.write(`${landingLine(landed, runBranch)}\n`);
   if (worktree !== undefined) {
     stdout.write(`Worktree kept at ${worktree}\n`);
   }
   return 1;
+}
+
+// A clean stop leaves a Consumer with the question the hard-stop report already
+// answers — how many Tickets landed, and whether the Run Branch ref exists —
+// plus the two a hard stop has no room for: the base and why the Run stopped.
+// It prescribes no push and no merge, because ReadyRun cannot decline to own
+// integration and then recommend a workflow for it (ADR 0033).
+function completionReport(
+  stdout: RunStdout,
+  reason: CleanStop,
+  cap: number,
+  landed: number,
+  runBranch: string,
+  base: string,
+): 0 {
+  stdout.write(
+    reason === "frontier-empty"
+      ? "Run complete: the Frontier is empty\n"
+      : `Run complete: cap of ${cap} ${
+        ticketNoun(cap)
+      } reached; the Frontier may still hold work\n`,
+  );
+  stdout.write(`${landingLine(landed, runBranch, base)}\n`);
+  return 0;
 }
 
 export async function run(options: RunOptions): Promise<number> {
@@ -166,6 +210,10 @@ async function runWithLiveness(
   }
   discloseBase(stdout, base);
   stdout.write(`Run Branch: ${runBranch}\n`);
+  const complete = (reason: CleanStop): 0 => {
+    live.stop();
+    return completionReport(stdout, reason, cap, landed, runBranch, base.commit);
+  };
   // A Ticket's Branch is cut from the Run Branch's tip, which until the first
   // Ticket lands is the base the Run resolved at start (ADR 0028).
   let runBranchTip = base.commit;
@@ -195,7 +243,7 @@ async function runWithLiveness(
     }
     const ticket = frontier[0];
     if (ticket === undefined) {
-      return 0;
+      return complete("frontier-empty");
     }
 
     const branch = config.tracker.branchName(ticket);
@@ -318,5 +366,5 @@ async function runWithLiveness(
       );
     }
   }
-  return 0;
+  return complete("cap");
 }

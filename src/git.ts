@@ -178,6 +178,13 @@ export type RunBase = {
   dirty: boolean;
 };
 
+// How a commit is named to a Consumer, wherever one is named: the base a Run
+// discloses at start and the base its report says the Run Branch was cut from
+// have to be the same string to be recognisable as the same commit.
+export function shortCommit(commit: string): string {
+  return commit.slice(0, 7);
+}
+
 // One read of the checkout a Run starts from: the commit every Worktree is cut
 // from, plus what a Consumer cannot see from that commit alone — that the base
 // is not the default branch, and that uncommitted work here reaches no

@@ -61,6 +61,10 @@ test("a Run names the base commit and the Run Branch before it claims a Ticket, 
       "Worktree",
       "Ticket 52  Ticket 52  1/1  readyrun/52",
       "Worker",
+      "Run complete: cap of 1 Ticket reached; the Frontier may still hold work",
+      `1 Ticket landed on ${await runBranch(repo.cwd)}, cut from ${
+        base.slice(0, 7)
+      }.`,
     ]);
   } finally {
     await repo.cleanup();
@@ -180,6 +184,10 @@ test("Doctor and a Run disclose a dirty, non-default base in the same words", as
       "Worktree",
       "Ticket 52  Ticket 52  1/1  readyrun/52",
       "Worker",
+      "Run complete: cap of 1 Ticket reached; the Frontier may still hold work",
+      `1 Ticket landed on ${await runBranch(repo.cwd)}, cut from ${
+        base.slice(0, 7)
+      }.`,
     ]);
   } finally {
     await repo.cleanup();

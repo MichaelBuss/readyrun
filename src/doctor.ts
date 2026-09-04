@@ -5,6 +5,7 @@ import {
   normalizeRepository,
   originRepository,
   resolveRunBase,
+  shortCommit,
   unignoredInstallOutput,
   type RunBase,
 } from "./git.ts";
@@ -114,7 +115,7 @@ function workerBinaryExists(bin: string): boolean {
 }
 
 function baseLine(base: RunBase): string {
-  const commit = base.commit.slice(0, 7);
+  const commit = shortCommit(base.commit);
   // A detached checkout is on no branch, so it is named the default branch
   // rather than told it differs from one: the base may well be that branch's
   // own tip.
