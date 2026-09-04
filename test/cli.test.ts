@@ -238,7 +238,10 @@ test("doctor refuses when there is no config file at the Consumer root", async (
       });
       assert.equal(exitCode, 1);
       assert.equal(checked, false);
-      assert.match(chunks.join(""), /readyrun\.config/);
+      const output = chunks.join("");
+      assert.match(output, /readyrun\.config/);
+      assert.match(output, /readyrun init/);
+      assert.doesNotMatch(output, /Doctor:/);
     },
   );
 });
@@ -296,6 +299,87 @@ test("multiple config files of the same basename are refused", async () => {
           return true;
         },
       );
+      const chunks: string[] = [];
+      const exitCode = await cli({
+        argv: ["doctor"],
+        cwd,
+        stdout: {
+          write(chunk: string) {
+            chunks.push(chunk);
+            return true;
+          },
+        },
+        doctor: async () => 0,
+      });
+      assert.equal(exitCode, 1);
+      const output = chunks.join("");
+      assert.match(output, /Multiple config files/);
+      assert.match(output, /Leave one file/);
+      assert.doesNotMatch(output, /Doctor:/);
+    },
+  );
+});
+
+test("a config that does not default-export defineConfig names a next action", async () => {
+  await withConsumerRoot(
+    async (cwd) => {
+      await writeFile(
+        join(cwd, "package.json"),
+        JSON.stringify({ type: "module" }),
+      );
+      await writeFile(
+        join(cwd, "readyrun.config.js"),
+        "export const model = \"composer-2\";\n",
+      );
+    },
+    async (cwd) => {
+      const chunks: string[] = [];
+      const exitCode = await cli({
+        argv: ["doctor"],
+        cwd,
+        stdout: {
+          write(chunk: string) {
+            chunks.push(chunk);
+            return true;
+          },
+        },
+        doctor: async () => 0,
+      });
+      assert.equal(exitCode, 1);
+      const output = chunks.join("");
+      assert.match(output, /must default-export defineConfig/);
+      assert.doesNotMatch(output, /Doctor:/);
+    },
+  );
+});
+
+test("a config that fails to load names a next action without a Doctor prefix", async () => {
+  await withConsumerRoot(
+    async (cwd) => {
+      await writeFile(
+        join(cwd, "package.json"),
+        JSON.stringify({ type: "module" }),
+      );
+      await writeFile(join(cwd, "readyrun.config.js"), "export default {\n");
+    },
+    async (cwd) => {
+      const chunks: string[] = [];
+      const exitCode = await cli({
+        argv: ["doctor"],
+        cwd,
+        stdout: {
+          write(chunk: string) {
+            chunks.push(chunk);
+            return true;
+          },
+        },
+        doctor: async () => 0,
+      });
+      assert.equal(exitCode, 1);
+      const output = chunks.join("");
+      assert.match(output, /Could not load the ReadyRun config/);
+      assert.match(output, /Fix the config file/);
+      assert.doesNotMatch(output, /Doctor:/);
     },
   );
 });

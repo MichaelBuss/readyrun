@@ -52,6 +52,7 @@ test("a Worker exiting 0 with a dirty Worktree hard-stops the Run and leaves its
       chunks.join(""),
       /Hard stop: Ticket 52 failed at worker: left work uncommitted in .*readyrun-52/,
     );
+    assert.match(chunks.join(""), /The Ticket remains on the Frontier/);
     const worktree = worker.spawns[0]?.cwd;
     assert.ok(worktree);
     await access(join(worktree, "ticket-52.txt"));
@@ -88,6 +89,7 @@ test("a Worker exiting 0 whose Branch tree matches the base hard-stops the Run a
       chunks.join(""),
       /Hard stop: Ticket 52 failed at worker: produced nothing on readyrun\/52/,
     );
+    assert.match(chunks.join(""), /The Ticket remains on the Frontier/);
   } finally {
     await repo.cleanup();
   }
@@ -121,6 +123,7 @@ test("a Worker exiting 0 after an empty commit hard-stops the Run and leaves its
       chunks.join(""),
       /Hard stop: Ticket 52 failed at worker: produced nothing on readyrun\/52/,
     );
+    assert.match(chunks.join(""), /The Ticket remains on the Frontier/);
     assert.equal(
       await onDisk(join(repo.cwd, ".readyrun", "worktrees", "readyrun-52")),
       true,
@@ -192,6 +195,7 @@ test("a Worker that commits on another Branch leaves its Branch's tree matching 
       chunks.join(""),
       /Hard stop: Ticket 52 failed at worker: produced nothing on readyrun\/52/,
     );
+    assert.match(chunks.join(""), /The Ticket remains on the Frontier/);
   } finally {
     await repo.cleanup();
   }

@@ -160,6 +160,8 @@ test("re-running a Ticket whose Worktree was kept still hard-stops with Worktree
       chunks.join(""),
       /Hard stop: Ticket 52 failed at git: ReadyRun already has a Worktree for branch readyrun\/52/,
     );
+    assert.match(chunks.join(""), /git worktree remove .*readyrun-52/);
+    assert.match(chunks.join(""), /git branch -D readyrun\/52/);
     assert.equal(await onDisk(worktreeOf(repo.cwd, "52")), true);
   } finally {
     await repo.cleanup();

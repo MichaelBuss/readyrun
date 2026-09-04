@@ -184,7 +184,7 @@ export function linear(
     if (fromEnv !== undefined && fromEnv.length > 0) {
       return fromEnv;
     }
-    throw new Error("ReadyRun could not authenticate to Linear");
+    throw linearAuthFailure();
   }
 
   async function graphql<T>(
@@ -384,6 +384,18 @@ function names(nodes: (LabelNode | null)[]): string[] {
   return nodes.flatMap((node) => node === null ? [] : [node.name]);
 }
 
+function linearUnreachable(vendor: string): Error {
+  return new Error(
+    `ReadyRun could not reach Linear. Check Tracker auth and network. ${vendor}`,
+  );
+}
+
+function linearAuthFailure(): Error {
+  return new Error(
+    "ReadyRun could not authenticate to Linear. Check the Linear token.",
+  );
+}
+
 async function linearGraphql<T>(
   http: typeof fetch,
   token: string,
@@ -405,15 +417,15 @@ async function linearGraphql<T>(
   };
   if (!response.ok) {
     if (response.status === 401) {
-      throw new Error("ReadyRun could not authenticate to Linear");
+      throw linearAuthFailure();
     }
-    throw new Error(`Linear GraphQL HTTP ${response.status}`);
+    throw linearUnreachable(`Linear GraphQL HTTP ${response.status}`);
   }
   if (payload.errors !== undefined && payload.errors.length > 0) {
-    throw new Error(payload.errors[0]?.message ?? "Linear GraphQL error");
+    throw linearUnreachable(payload.errors[0]?.message ?? "Linear GraphQL error");
   }
   if (payload.data === undefined) {
-    throw new Error("Linear GraphQL returned no data");
+    throw linearUnreachable("Linear GraphQL returned no data");
   }
   return payload.data;
 }

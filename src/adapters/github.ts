@@ -131,7 +131,7 @@ export function github(
       if (fromGh !== undefined && fromGh.length > 0) {
         return fromGh;
       }
-      throw new Error("ReadyRun could not authenticate to GitHub");
+      throw githubAuthFailure();
     }
     const env = runtime.env ?? process.env;
     const fromEnv = firstNonEmpty(env.GH_TOKEN, env.GITHUB_TOKEN);
@@ -142,7 +142,7 @@ export function github(
     if (fromGh !== undefined && fromGh.length > 0) {
       return fromGh;
     }
-    throw new Error("ReadyRun could not authenticate to GitHub");
+    throw githubAuthFailure();
   }
 
   async function graphql<T>(
@@ -164,10 +164,18 @@ export function github(
         /could not resolve to a repository/i.test(error.message)
       ) {
         throw new Error(
-          `this token cannot see GitHub repository ${options.repo}`,
+          `this token cannot see GitHub repository ${options.repo}. Check the token's access to that repository.`,
         );
       }
-      throw error;
+      if (
+        error instanceof Error &&
+        (error.message.startsWith("ReadyRun ") ||
+          error.message.startsWith("this token cannot see "))
+      ) {
+        throw error;
+      }
+      const vendor = error instanceof Error ? error.message : String(error);
+      throw githubUnreachable(vendor);
     }
   }
 
@@ -353,6 +361,18 @@ const githubHeaders = (token: string): Record<string, string> => ({
   "X-GitHub-Api-Version": "2022-11-28",
 });
 
+function githubUnreachable(vendor: string): Error {
+  return new Error(
+    `ReadyRun could not reach GitHub. Check Tracker auth and network. ${vendor}`,
+  );
+}
+
+function githubAuthFailure(): Error {
+  return new Error(
+    "ReadyRun could not authenticate to GitHub. Check the GitHub token.",
+  );
+}
+
 async function githubGraphql<T>(
   http: typeof fetch,
   token: string,
@@ -370,13 +390,16 @@ async function githubGraphql<T>(
     errors?: { message: string }[];
   };
   if (!response.ok) {
-    throw new Error(`GitHub GraphQL HTTP ${response.status}`);
+    if (response.status === 401) {
+      throw githubAuthFailure();
+    }
+    throw githubUnreachable(`GitHub GraphQL HTTP ${response.status}`);
   }
   if (payload.errors !== undefined && payload.errors.length > 0) {
     throw new Error(payload.errors[0]?.message ?? "GitHub GraphQL error");
   }
   if (payload.data === undefined) {
-    throw new Error("GitHub GraphQL returned no data");
+    throw githubUnreachable("GitHub GraphQL returned no data");
   }
   return payload.data;
 }
@@ -394,7 +417,10 @@ async function githubRest(
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (!response.ok) {
-    throw new Error(`GitHub REST HTTP ${response.status}`);
+    if (response.status === 401) {
+      throw githubAuthFailure();
+    }
+    throw githubUnreachable(`GitHub REST HTTP ${response.status}`);
   }
 }
 

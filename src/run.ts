@@ -66,15 +66,33 @@ function mergeMessage(ticket: Ticket): string {
 
 type HardStopStage = "tracker" | "git" | "spawn" | "worker";
 
+function caughtMessage(error: unknown): string | undefined {
+  return error instanceof Error ? error.message : undefined;
+}
+
 function hardStop(
   stdout: RunStdout,
   stage: HardStopStage,
-  ticketId?: string,
-  detail?: string,
+  ticketId: string | undefined,
+  detail: string | undefined,
+  landed: number,
+  runBranch: string,
+  worktree: string | undefined,
+  nextAction?: string,
 ): 1 {
   const ticketPrefix = ticketId === undefined ? "" : `Ticket ${ticketId} `;
   const suffix = detail === undefined ? "" : `: ${detail}`;
-  stdout.write(`Hard stop: ${ticketPrefix}failed at ${stage}${suffix}\n`);
+  const action = nextAction === undefined ? "" : `. ${nextAction}`;
+  stdout.write(`Hard stop: ${ticketPrefix}failed at ${stage}${suffix}${action}\n`);
+  if (landed === 0) {
+    stdout.write("0 Tickets landed; no Run Branch was created.\n");
+  } else {
+    const noun = landed === 1 ? "Ticket" : "Tickets";
+    stdout.write(`${landed} ${noun} landed on ${runBranch}.\n`);
+  }
+  if (worktree !== undefined) {
+    stdout.write(`Worktree kept at ${worktree}\n`);
+  }
   return 1;
 }
 
@@ -99,15 +117,32 @@ export async function run(options: RunOptions): Promise<number> {
     return 1;
   }
   const runBranch = runBranchName(new Date());
+  let landed = 0;
+  let keptWorktree: string | undefined;
+  const stop = (
+    stage: HardStopStage,
+    ticketId?: string,
+    detail?: string,
+    nextAction?: string,
+  ): 1 =>
+    hardStop(
+      stdout,
+      stage,
+      ticketId,
+      detail,
+      landed,
+      runBranch,
+      keptWorktree,
+      nextAction,
+    );
   let base;
   try {
     base = await resolveRunBase(cwd);
   } catch (error) {
-    return hardStop(
-      stdout,
+    return stop(
       "git",
       undefined,
-      error instanceof Error ? error.message : undefined,
+      caughtMessage(error),
     );
   }
   discloseBase(stdout, base);
@@ -125,8 +160,13 @@ export async function run(options: RunOptions): Promise<number> {
     let frontier;
     try {
       frontier = await config.tracker.frontier();
-    } catch {
-      return hardStop(stdout, "tracker");
+    } catch (error) {
+      return stop(
+        "tracker",
+        undefined,
+        caughtMessage(error),
+        "Check Tracker auth and network",
+      );
     }
     if (!unusedModelsWarned) {
       warnUnusedModelsByLabel(stdout, config.modelsByLabel, frontier);
@@ -141,12 +181,12 @@ export async function run(options: RunOptions): Promise<number> {
     let worktree;
     try {
       worktree = await createTicketWorktree(cwd, branch, runBranchTip);
+      keptWorktree = worktree;
     } catch (error) {
-      return hardStop(
-        stdout,
+      return stop(
         "git",
         ticket.id,
-        error instanceof Error ? error.message : undefined,
+        caughtMessage(error),
       );
     }
     started += 1;
@@ -161,15 +201,20 @@ export async function run(options: RunOptions): Promise<number> {
         effort: options.effort ?? config.effort,
         prompt: composeWorkerPrompt(config.tracker.promptCopy(ticket), context),
       });
-    } catch {
-      return hardStop(stdout, "spawn", ticket.id);
+    } catch (error) {
+      return stop(
+        "spawn",
+        ticket.id,
+        caughtMessage(error),
+        "Check the Worker binary and that it is logged in",
+      );
     }
     if (result.exitCode !== 0) {
-      return hardStop(
-        stdout,
+      return stop(
         "worker",
         ticket.id,
         `exit code ${result.exitCode}`,
+        "The Ticket remains on the Frontier",
       );
     }
     // Exit 0 is not success on its own: a Worker that did nothing also exits 0
@@ -180,27 +225,26 @@ export async function run(options: RunOptions): Promise<number> {
       clean = await worktreeIsClean(worktree);
       changed = await branchTreeDiffersFrom(cwd, branch, runBranchTip);
     } catch (error) {
-      return hardStop(
-        stdout,
+      return stop(
         "git",
         ticket.id,
-        error instanceof Error ? error.message : undefined,
+        caughtMessage(error),
       );
     }
     if (!clean) {
-      return hardStop(
-        stdout,
+      return stop(
         "worker",
         ticket.id,
         `left work uncommitted in ${worktree}`,
+        "The Ticket remains on the Frontier",
       );
     }
     if (!changed) {
-      return hardStop(
-        stdout,
+      return stop(
         "worker",
         ticket.id,
         `produced nothing on ${branch}`,
+        "The Ticket remains on the Frontier",
       );
     }
     try {
@@ -209,26 +253,32 @@ export async function run(options: RunOptions): Promise<number> {
       } else {
         await config.tracker.leaveFrontier(ticket);
       }
-    } catch {
-      return hardStop(stdout, "tracker", ticket.id);
+    } catch (error) {
+      return stop(
+        "tracker",
+        ticket.id,
+        caughtMessage(error),
+        "Check Tracker auth and network",
+      );
     }
     // After the Worktree, so that a hard stop at any earlier stage leaves it on
     // disk for the Consumer to look at (ADR 0029) — and because a Branch cannot
     // be deleted while a Worktree still has it checked out.
     try {
       await removeTicketWorktree(cwd, worktree);
+      keptWorktree = undefined;
       runBranchTip = await collectOntoRunBranch(cwd, {
         runBranch,
         branch,
         base: base.commit,
         message: mergeMessage(ticket),
       });
+      landed += 1;
     } catch (error) {
-      return hardStop(
-        stdout,
+      return stop(
         "git",
         ticket.id,
-        error instanceof Error ? error.message : undefined,
+        caughtMessage(error),
       );
     }
   }

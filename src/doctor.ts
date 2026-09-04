@@ -27,7 +27,7 @@ async function check(
 ): Promise<string[]> {
   const failures: string[] = [];
   if (typeof config.model !== "string" || config.model.length === 0) {
-    failures.push("missing model default");
+    failures.push("missing model default. Set model in config or pass --model.");
   }
   let inspect;
   try {
@@ -38,21 +38,25 @@ async function check(
   }
   for (const label of inspect.selectorLabels) {
     if (!inspect.existingLabels.includes(label)) {
-      failures.push(`label "${label}" does not exist on the Tracker`);
+      failures.push(
+        `label "${label}" does not exist on the Tracker. Check the Frontier selector.`,
+      );
     }
   }
   if (
     inspect.selectorState !== undefined &&
     !(inspect.existingStates ?? []).includes(inspect.selectorState)
   ) {
-    failures.push(`state "${inspect.selectorState}" does not exist on the Tracker`);
+    failures.push(
+      `state "${inspect.selectorState}" does not exist on the Tracker. Check the Frontier selector.`,
+    );
   }
   if (
     inspect.selectorProject !== undefined &&
     !(inspect.existingProjects ?? []).includes(inspect.selectorProject)
   ) {
     failures.push(
-      `project "${inspect.selectorProject}" does not exist on the Tracker`,
+      `project "${inspect.selectorProject}" does not exist on the Tracker. Check the Frontier selector.`,
     );
   }
   if (inspect.repository !== undefined) {
@@ -62,17 +66,19 @@ async function check(
       normalizeRepository(remote) !== normalizeRepository(inspect.repository)
     ) {
       failures.push(
-        `configured repository ${inspect.repository} is not the git remote (${remote ?? "none"})`,
+        `configured repository ${inspect.repository} is not the git remote (${remote ?? "none"}). Point the Tracker at this checkout's origin.`,
       );
     }
   }
   if (!inspect.canExpressBlocking) {
     failures.push(
-      "Tracker cannot express blocking; unblocked ordering is a lie",
+      "Tracker cannot express blocking; unblocked ordering is a lie. Use a Tracker that can express blocking.",
     );
   }
   if (config.worker.bin !== undefined && !workerBinaryExists(config.worker.bin)) {
-    failures.push(`Worker binary "${config.worker.bin}" is missing`);
+    failures.push(
+      `Worker binary "${config.worker.bin}" is missing. Install it or fix worker.bin.`,
+    );
   } else if (config.worker.probe !== undefined) {
     const probeResult = await config.worker.probe();
     if (!probeResult.ok) {
@@ -80,7 +86,9 @@ async function check(
     }
   }
   if (effort !== undefined && config.worker.effortFlag === undefined) {
-    failures.push("effort is set but this Worker Adapter does not map it");
+    failures.push(
+      "effort is set but this Worker Adapter does not map it. Unset effort or pick a Worker Adapter that maps it.",
+    );
   }
   if (config.worker.printMode === true && permissions === "ask") {
     failures.push(

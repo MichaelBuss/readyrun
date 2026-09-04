@@ -15,7 +15,7 @@ export class DefaultBranchError extends Error {
 export class WorktreeExistsError extends Error {
   constructor(branch: string, worktreePath: string) {
     super(
-      `ReadyRun already has a Worktree for branch ${branch} at ${worktreePath}`,
+      `ReadyRun already has a Worktree for branch ${branch} at ${worktreePath}. Discard it with \`git worktree remove ${worktreePath}\` and \`git branch -D ${branch}\`, then start a new Run.`,
     );
     this.name = "WorktreeExistsError";
   }
