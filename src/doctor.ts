@@ -8,10 +8,11 @@ import {
   unignoredInstallOutput,
   type RunBase,
 } from "./git.ts";
+import { startLiveness, type LivenessStdout } from "./liveness.ts";
 import type { Ticket } from "./ticket.ts";
 import type { Effort, Permissions } from "./worker-adapter.ts";
 
-type DoctorStdout = { write(chunk: string): unknown };
+type DoctorStdout = LivenessStdout;
 
 export type DoctorOptions = {
   config: ReadyRunConfig;
@@ -155,14 +156,19 @@ export function warnUnusedModelsByLabel(
   }
 }
 
-export async function doctorCheck(
+export async function collectDoctorFailures(
   config: ReadyRunConfig,
   cwd: string,
-  stdout: DoctorStdout,
   effort: Effort | undefined = config.effort,
   permissions: Permissions = config.permissions ?? "ask",
-): Promise<0 | 1> {
-  const failures = await check(config, cwd, effort, permissions);
+): Promise<string[]> {
+  return check(config, cwd, effort, permissions);
+}
+
+export function writeDoctorFailures(
+  stdout: DoctorStdout,
+  failures: string[],
+): 0 | 1 {
   if (failures.length === 0) {
     return 0;
   }
@@ -176,23 +182,37 @@ export async function doctor(options: DoctorOptions): Promise<number> {
   const config = defineConfig(options.config);
   const cwd = options.cwd ?? process.cwd();
   const stdout = options.stdout ?? process.stdout;
-  if (await doctorCheck(config, cwd, stdout) === 1) {
-    return 1;
-  }
+  const live = startLiveness(stdout);
   try {
-    discloseBase(stdout, await resolveRunBase(cwd));
-  } catch {
-    // A checkout git cannot answer for — no commit yet, or no repository — has
-    // no base to disclose. A Run hard-stops at git there, which is where that
-    // gets reported.
+    live.stage("Doctor");
+    const failures = await collectDoctorFailures(
+      config,
+      cwd,
+      config.effort,
+      config.permissions,
+    );
+    live.stop();
+    if (writeDoctorFailures(stdout, failures) === 1) {
+      return 1;
+    }
+    try {
+      discloseBase(stdout, await resolveRunBase(cwd));
+    } catch {
+      // A checkout git cannot answer for — no commit yet, or no repository.
+      // Has no base to disclose. A Run hard-stops at git there, which is where that gets reported.
+    }
+    live.stage("Frontier");
+    const frontier = await config.tracker.frontier();
+    live.stop();
+    warnUnusedModelsByLabel(stdout, config.modelsByLabel, frontier);
+    const next = frontier[0];
+    if (next === undefined) {
+      stdout.write("Frontier is empty\n");
+    } else {
+      stdout.write(`Next Ticket: ${next.id}\n`);
+    }
+    return 0;
+  } finally {
+    live.stop();
   }
-  const frontier = await config.tracker.frontier();
-  warnUnusedModelsByLabel(stdout, config.modelsByLabel, frontier);
-  const next = frontier[0];
-  if (next === undefined) {
-    stdout.write("Frontier is empty\n");
-  } else {
-    stdout.write(`Next Ticket: ${next.id}\n`);
-  }
-  return 0;
 }

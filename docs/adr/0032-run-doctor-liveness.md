@@ -1,0 +1,3 @@
+# Run and Doctor report liveness on stdout, not a Clack prompt
+
+A TTY `run` or `doctor` shows a heartbeat labelled with the current stage (Doctor, Frontier, Worktree, Worker) so a slow Tracker or Worktree does not look hung, and once a Ticket is in flight the durable line carries id, title, branch, and started/cap. Off a TTY (CI, redirected stdout) those stages are newline-delimited lines with no spinner frames and no ANSI animation. Clack's spinner was rejected for this job: it hijacks stdin and SIGINT, and an in-place spinner on stdout would eat a Worker that inherits the terminal (ADR 0010). Init remains the only Clack prompt UI; this is not a wizard in front of `run` (ADR 0019). Token and context stats are still #3.

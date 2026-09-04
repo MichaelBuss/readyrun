@@ -54,9 +54,13 @@ test("a Run names the base commit and the Run Branch before it claims a Ticket, 
 
     assert.equal(exitCode, 0);
     assert.deepEqual(lines(out.chunks), [
+      "Doctor",
       `Base: ${base.slice(0, 7)} on main`,
       `Run Branch: ${await runBranch(repo.cwd)}`,
-      "Ticket 52  1/1  readyrun/52",
+      "Frontier",
+      "Worktree",
+      "Ticket 52  Ticket 52  1/1  readyrun/52",
+      "Worker",
     ]);
   } finally {
     await repo.cleanup();
@@ -78,9 +82,10 @@ test("a Run calls out a base that is not the default branch", async () => {
     });
 
     assert.equal(exitCode, 0);
-    assert.equal(
-      lines(out.chunks)[0],
-      `Base: ${base.slice(0, 7)} on feature-x; not the default branch (main)`,
+    assert.ok(
+      lines(out.chunks).includes(
+        `Base: ${base.slice(0, 7)} on feature-x; not the default branch (main)`,
+      ),
     );
   } finally {
     await repo.cleanup();
@@ -102,7 +107,7 @@ test("a dirty primary checkout warns that those changes reach no Worktree, and t
 
     assert.equal(exitCode, 0);
     assert.ok(lines(out.chunks).includes(dirtyWarning));
-    assert.ok(lines(out.chunks).includes("Ticket 52  1/1  readyrun/52"));
+    assert.ok(lines(out.chunks).includes("Ticket 52  Ticket 52  1/1  readyrun/52"));
     await git(repo.cwd, ["rev-parse", "--verify", await runBranch(repo.cwd)]);
   } finally {
     await repo.cleanup();
@@ -123,7 +128,9 @@ test("Doctor discloses the base a Run would start from, and names no Run Branch 
 
     assert.equal(exitCode, 0);
     assert.deepEqual(lines(out.chunks), [
+      "Doctor",
       `Base: ${base.slice(0, 7)} on main`,
+      "Frontier",
       "Next Ticket: 52",
     ]);
     assert.deepEqual(await runBranches(repo.cwd), []);
@@ -158,15 +165,21 @@ test("Doctor and a Run disclose a dirty, non-default base in the same words", as
     assert.equal(doctorExit, 0);
     assert.equal(runExit, 0);
     assert.deepEqual(lines(doctorOut.chunks), [
+      "Doctor",
       baseLine,
       dirtyWarning,
+      "Frontier",
       "Next Ticket: 52",
     ]);
     assert.deepEqual(lines(runOut.chunks), [
+      "Doctor",
       baseLine,
       dirtyWarning,
       `Run Branch: ${await runBranch(repo.cwd)}`,
-      "Ticket 52  1/1  readyrun/52",
+      "Frontier",
+      "Worktree",
+      "Ticket 52  Ticket 52  1/1  readyrun/52",
+      "Worker",
     ]);
   } finally {
     await repo.cleanup();
@@ -187,9 +200,10 @@ test("a detached checkout is disclosed as the commit it is, and is not told it d
     });
 
     assert.equal(exitCode, 0);
-    assert.equal(
-      lines(out.chunks)[0],
-      `Base: ${base.slice(0, 7)} (detached HEAD); the default branch is main`,
+    assert.ok(
+      lines(out.chunks).includes(
+        `Base: ${base.slice(0, 7)} (detached HEAD); the default branch is main`,
+      ),
     );
   } finally {
     await repo.cleanup();
@@ -207,7 +221,11 @@ test("a checkout with no commit to start from leaves Doctor with no base to disc
     });
 
     assert.equal(exitCode, 0);
-    assert.deepEqual(lines(out.chunks), ["Next Ticket: 52"]);
+    assert.deepEqual(lines(out.chunks), [
+      "Doctor",
+      "Frontier",
+      "Next Ticket: 52",
+    ]);
   } finally {
     await repo.cleanup();
   }
