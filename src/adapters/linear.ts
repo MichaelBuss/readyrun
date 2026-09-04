@@ -184,7 +184,7 @@ export function linear(
     if (fromEnv !== undefined && fromEnv.length > 0) {
       return fromEnv;
     }
-    throw new Error("ReadyRun could not authenticate to Linear");
+    throw new LinearAuthError();
   }
 
   async function graphql<T>(
@@ -192,7 +192,24 @@ export function linear(
     query: string,
     variables: Record<string, unknown> = {},
   ): Promise<T> {
-    return linearGraphql<T>(http, await token(), operationName, query, variables);
+    try {
+      return await linearGraphql<T>(
+        http,
+        await token(),
+        operationName,
+        query,
+        variables,
+      );
+    } catch (error) {
+      if (
+        error instanceof LinearUnreachableError ||
+        error instanceof LinearAuthError
+      ) {
+        throw error;
+      }
+      const vendor = error instanceof Error ? error.message : String(error);
+      throw new LinearUnreachableError(vendor);
+    }
   }
 
   async function canExpressBlocking(): Promise<boolean> {
@@ -384,6 +401,24 @@ function names(nodes: (LabelNode | null)[]): string[] {
   return nodes.flatMap((node) => node === null ? [] : [node.name]);
 }
 
+class LinearUnreachableError extends Error {
+  constructor(vendor: string) {
+    super(
+      `ReadyRun could not reach Linear. Check Tracker auth and network. ${vendor}`,
+    );
+    this.name = "LinearUnreachableError";
+  }
+}
+
+class LinearAuthError extends Error {
+  constructor() {
+    super(
+      "ReadyRun could not authenticate to Linear. Check the Linear token.",
+    );
+    this.name = "LinearAuthError";
+  }
+}
+
 async function linearGraphql<T>(
   http: typeof fetch,
   token: string,
@@ -405,15 +440,15 @@ async function linearGraphql<T>(
   };
   if (!response.ok) {
     if (response.status === 401) {
-      throw new Error("ReadyRun could not authenticate to Linear");
+      throw new LinearAuthError();
     }
-    throw new Error(`Linear GraphQL HTTP ${response.status}`);
+    throw new LinearUnreachableError(`Linear GraphQL HTTP ${response.status}`);
   }
   if (payload.errors !== undefined && payload.errors.length > 0) {
-    throw new Error(payload.errors[0]?.message ?? "Linear GraphQL error");
+    throw new LinearUnreachableError(payload.errors[0]?.message ?? "Linear GraphQL error");
   }
   if (payload.data === undefined) {
-    throw new Error("Linear GraphQL returned no data");
+    throw new LinearUnreachableError("Linear GraphQL returned no data");
   }
   return payload.data;
 }
