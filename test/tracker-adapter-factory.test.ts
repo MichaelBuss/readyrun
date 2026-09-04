@@ -8,7 +8,7 @@ import {
 } from "../src/mod.ts";
 import type { Ticket } from "../src/mod.ts";
 import { recordingWorker } from "../src/testing/mod.ts";
-import { ticket } from "./tracker-adapter-contract.ts";
+import { landing, ticket } from "./tracker-adapter-contract.ts";
 import { throwawayRepo } from "./throwaway-repo.ts";
 
 const silent = { write(_chunk?: string) { return true; } };
@@ -74,7 +74,9 @@ test("createTrackerAdapter defaults branchName, leaveFrontier, promptCopy, and i
   });
 
   assert.equal(tracker.branchName(ticket({ id: "52" })), "readyrun/52");
-  await assert.doesNotReject(() => tracker.leaveFrontier(ticket({ id: "52" })));
+  await assert.doesNotReject(() =>
+    tracker.leaveFrontier(ticket({ id: "52" }), landing())
+  );
   assert.match(tracker.promptCopy(ticket({ id: "52" })), /52/);
   const inspected = await tracker.inspect();
   assert.equal(inspected.canExpressBlocking, true);

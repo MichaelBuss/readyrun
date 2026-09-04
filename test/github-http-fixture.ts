@@ -24,6 +24,21 @@ export type GitHubHttpFixture = {
   requests: readonly GitHubRecordedRequest[];
 };
 
+// What a Consumer would read on the Ticket, in the order it was posted.
+export function postedComments(
+  fixture: GitHubHttpFixture,
+  ticketId: string,
+): string[] {
+  return fixture.requests
+    .filter((request) =>
+      request.method === "POST" &&
+      request.url.endsWith(`/issues/${ticketId}/comments`)
+    )
+    .map((request) =>
+      (JSON.parse(request.body ?? "{}") as { body?: string }).body ?? ""
+    );
+}
+
 export function githubFromWorld(
   world: MemoryTrackerOptions,
   repo = "acme/widgets",

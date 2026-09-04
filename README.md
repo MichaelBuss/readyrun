@@ -70,7 +70,10 @@ import { createTrackerAdapter, defineConfig } from "@readyrun/readyrun";
 
 const jira = createTrackerAdapter({
   frontier() { /* return this Tracker's ready Tickets */ },
-  leaveFrontier(ticket) { /* move the Ticket off the Frontier */ },
+  leaveFrontier(ticket, landing) {
+    /* move the Ticket off the Frontier, and say where its work went:
+       landing.runBranch and landing.mergeCommit, local to this machine */
+  },
 });
 
 defineConfig({ tracker: jira, worker: cursor(), model: "composer-2" });

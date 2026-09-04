@@ -4,8 +4,12 @@ import { test } from "node:test";
 import { promisify } from "node:util";
 import { defineConfig, doctor, github, run } from "../src/mod.ts";
 import { recordingWorker } from "../src/testing/mod.ts";
-import { githubFromWorld, githubHttpFixture } from "./github-http-fixture.ts";
-import { ticket } from "./tracker-adapter-contract.ts";
+import {
+  githubFromWorld,
+  githubHttpFixture,
+  postedComments,
+} from "./github-http-fixture.ts";
+import { landing, ticket } from "./tracker-adapter-contract.ts";
 import { throwawayRepo } from "./throwaway-repo.ts";
 
 const exec = promisify(execFile);
@@ -32,7 +36,7 @@ test("success drops the frontier label, comments, and does not close", async () 
   const frontier = await adapter.frontier();
   const finished = frontier[0];
   assert.ok(finished);
-  await adapter.leaveFrontier(finished);
+  await adapter.leaveFrontier(finished, landing());
 
   assert.ok(
     fixture.requests.some(
@@ -41,12 +45,9 @@ test("success drops the frontier label, comments, and does not close", async () 
         request.url.endsWith("/issues/52/labels/ready-for-agent"),
     ),
   );
-  const comments = fixture.requests.filter(
-    (request) =>
-      request.method === "POST" && request.url.endsWith("/issues/52/comments"),
-  );
+  const comments = postedComments(fixture, "52");
   assert.equal(comments.length, 1);
-  assert.match(comments[0]?.body ?? "", /left the Frontier/);
+  assert.match(comments[0] ?? "", /left the Frontier/);
   assert.equal(
     fixture.requests.filter((request) => request.method === "PATCH").length,
     0,
@@ -57,6 +58,27 @@ test("success drops the frontier label, comments, and does not close", async () 
       (request.body ?? "").includes("\"state\":\"closed\"")
     ),
   );
+});
+
+test("the comment names the Run Branch, the merge commit, and that the ref is local to the machine that ran the Run", async () => {
+  const { adapter, fixture } = githubFromWorld(world);
+  const frontier = await adapter.frontier();
+  const finished = frontier[0];
+  assert.ok(finished);
+  await adapter.leaveFrontier(
+    finished,
+    landing({
+      runBranch: "readyrun/run-20260904-143000",
+      mergeCommit: "0f1e2d3c4b5a69788796a5b4c3d2e1f009182736",
+    }),
+  );
+
+  const comment = postedComments(fixture, "52")[0] ?? "";
+  assert.match(comment, /readyrun\/run-20260904-143000/);
+  assert.match(comment, /0f1e2d3/);
+  assert.match(comment, /local to the machine that ran the Run/);
+  // A reviewer must not read the ref as somewhere they can fetch from.
+  assert.match(comment, /never pushes/);
 });
 
 test("inspect reports labels that exist on GitHub, not the selector", async () => {

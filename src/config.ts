@@ -1,5 +1,5 @@
 import type { Ticket } from "./ticket.ts";
-import type { TrackerAdapter } from "./tracker-adapter.ts";
+import type { Landing, TrackerAdapter } from "./tracker-adapter.ts";
 import type { Effort, Permissions, WorkerAdapter } from "./worker-adapter.ts";
 import { assertKnownKeys } from "./unknown-keys.ts";
 
@@ -24,7 +24,7 @@ export type ReadyRunConfig = {
   effort?: Effort;
   contextFile?: string;
   cap?: number;
-  leaveFrontier?: (ticket: Ticket) => void | Promise<void>;
+  leaveFrontier?: (ticket: Ticket, landing: Landing) => void | Promise<void>;
 };
 
 export function defineConfig<T extends ReadyRunConfig>(config: T): T & {

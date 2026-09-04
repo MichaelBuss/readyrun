@@ -22,11 +22,20 @@ export type TrackerInspect = {
   readonly canExpressBlocking: boolean;
 };
 
+// Where a finished Ticket's work went. The Run Branch and the merge commit are
+// the only durable pointers to it, since the Ticket's own Branch is deleted as
+// it merges (ADR 0028), and a Ticket that names them says nothing a Tracker
+// Adapter has to look up (ADR 0033).
+export type Landing = {
+  readonly runBranch: string;
+  readonly mergeCommit: string;
+};
+
 export type TrackerAdapter = {
   readonly [brand]: true;
   frontier(): Promise<Ticket[]>;
   branchName(ticket: Ticket): string;
-  leaveFrontier(ticket: Ticket): Promise<void>;
+  leaveFrontier(ticket: Ticket, landing: Landing): Promise<void>;
   promptCopy(ticket: Ticket): string;
   inspect(): Promise<TrackerInspect>;
 };

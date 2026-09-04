@@ -324,23 +324,10 @@ async function runWithLiveness(
         "The Ticket remains on the Frontier",
       );
     }
-    try {
-      if (config.leaveFrontier) {
-        await config.leaveFrontier(ticket);
-      } else {
-        await config.tracker.leaveFrontier(ticket);
-      }
-    } catch (error) {
-      return stop(
-        "tracker",
-        ticket.id,
-        caughtMessage(error),
-        "Check the Tracker",
-      );
-    }
-    // After the Worktree, so that a hard stop at any earlier stage leaves it on
-    // disk for the Consumer to look at (ADR 0029) — and because a Branch cannot
-    // be deleted while a Worktree still has it checked out.
+    // After the success checks, so that a hard stop at any earlier stage leaves
+    // the Worktree on disk for the Consumer to look at (ADR 0029) — and before
+    // the merge, because a Branch cannot be deleted while a Worktree still has
+    // it checked out.
     try {
       await removeTicketWorktree(cwd, worktree);
       keptWorktree = undefined;
@@ -363,6 +350,24 @@ async function runWithLiveness(
         gitError === undefined
           ? "ReadyRun could not merge the Ticket's Branch into the Run Branch"
           : `ReadyRun could not merge the Ticket's Branch into the Run Branch. ${gitError}`,
+      );
+    }
+    // After the merge, because the commit the Ticket is about to name does not
+    // exist before it — and because a merge that fails must leave the Ticket on
+    // the Frontier rather than off it with nothing landed (ADR 0033).
+    const landing = { runBranch, mergeCommit: runBranchTip };
+    try {
+      if (config.leaveFrontier) {
+        await config.leaveFrontier(ticket, landing);
+      } else {
+        await config.tracker.leaveFrontier(ticket, landing);
+      }
+    } catch (error) {
+      return stop(
+        "tracker",
+        ticket.id,
+        caughtMessage(error),
+        "Check the Tracker",
       );
     }
   }

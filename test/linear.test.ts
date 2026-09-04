@@ -8,7 +8,7 @@ import {
   linearHttpFixture,
   linearInReviewStateId,
 } from "./linear-http-fixture.ts";
-import { ticket } from "./tracker-adapter-contract.ts";
+import { landing, ticket } from "./tracker-adapter-contract.ts";
 import { throwawayRepo } from "./throwaway-repo.ts";
 
 const silent = { write(_chunk?: string) { return true; } };
@@ -24,7 +24,7 @@ test("success moves the Ticket to In Review and never Done", async () => {
   const frontier = await adapter.frontier();
   const finished = frontier[0];
   assert.ok(finished);
-  await adapter.leaveFrontier(finished);
+  await adapter.leaveFrontier(finished, landing());
 
   const bodies = fixture.requests.map((request) => request.body ?? "").join("\n");
   assert.match(bodies, new RegExp(linearInReviewStateId));
