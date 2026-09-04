@@ -85,7 +85,8 @@ _Avoid_: max mode (Cursor's interactive slash command), ultracode (a Claude Code
 - Each **Worker** runs in a **Worktree** on that **Branch**, even when a **Run** is serial. There is no cwd-isolation mode and no clone-per-**Ticket**.
 - A **Run** names one **Run Branch**, starting from whatever the **Consumer**'s checkout was on when the **Run** started. The ref is created at the first successful merge; a **Run** that lands no **Tickets** leaves no **Run Branch** ref. Each **Ticket**'s **Branch** starts from the **Run Branch**'s tip as at the moment that **Ticket** was picked — never from another **Ticket**'s **Branch**. Before any merge, that tip is the base the **Run** resolved at start.
 - When a **Worker** succeeds, its **Ticket**'s **Branch** is merged into the **Run Branch** as exactly one merge commit — never fast-forwarded, never squashed — and is then deleted. One **Ticket** is therefore one entry in the **Run Branch**'s first-parent history, with the **Worker**'s own commits kept underneath it. The next **Ticket** starts from a tree containing every **Ticket** the **Run** has already finished.
-- ReadyRun never merges a **Run Branch** anywhere. What happens to it is the **Consumer**'s.
+- ReadyRun never merges a **Run Branch** anywhere, and never pushes one. A **Run Branch** is local to the machine that ran the **Run**, and what happens to it is the **Consumer**'s. There is no pull request, so there is no draft-vs-ready and no one-per-**Ticket**-vs-one-per-**Run** question.
+- A **Run** ends by saying where the work is: how many **Tickets** landed, whether the **Run Branch** ref exists, the base it was cut from, and whether it stopped on an empty **Frontier** or the cap. It does not tell the **Consumer** to push or merge, because integration is not its to recommend. When a **Ticket** leaves the **Frontier** it is told the same thing — the **Run Branch**, the merge commit, and that the ref is local — so the reviewer is not left reading a **Ticket** that points nowhere.
 - A **Worker** commits its own work; ReadyRun never writes a commit that describes code. The only commit it makes is the merge of a **Ticket**'s **Branch** into the **Run Branch**, and that message is derived from the **Ticket** exactly as the **Branch** name is. A **Worker** that exits 0 leaving its **Worktree** dirty, or its **Branch**'s tree matching the base it was cut from, has failed.
 - A **Worktree** is removed once its **Worker** succeeds and kept when the **Run** hard-stops, so a failure is still there to look at. The **Run Branch** outlives both.
 - A **Hard stop** leaves the **Run Branch** as it stands when that ref exists: **Tickets** already merged stay; the failed **Ticket** does not. If nothing has merged, there is no **Run Branch** ref — that **Run** produced nothing to review.
@@ -179,6 +180,12 @@ _Avoid_: max mode (Cursor's interactive slash command), ultracode (a Claude Code
 > **Dev:** "The **Worker** finished and its directory is gone. Where's my work?"
 > **Domain expert:** "On the **Run Branch**. The **Worktree** was only where the **Worker** ran. If it had failed we'd have left the directory for you."
 >
+> **Dev:** "The **Run** finished. Where's my PR?"
+> **Domain expert:** "There isn't one. The **Run Branch** is on your machine and nowhere else. The **Run** told you its name, how many **Tickets** are on it, and where it started; pushing it is yours."
+>
+> **Dev:** "So why does the **Ticket** name a branch my colleague can't fetch?"
+> **Domain expert:** "Because it says so. It names the **Run Branch**, the merge commit, and that the ref is local to the machine that ran the **Run**. Naming it without that would read like a shared location."
+>
 > **Dev:** "The **Worker** exited 0 without changing anything. Clean finish?"
 > **Domain expert:** "No, that's a hard stop. Exit 0 on a **Branch** whose tree matches the base it was cut from means it produced nothing, and we're not taking the **Ticket** off the **Frontier** for that."
 
@@ -192,7 +199,7 @@ _Avoid_: max mode (Cursor's interactive slash command), ultracode (a Claude Code
 - **Worktree** — resolved: v0 uses a git **Worktree** per **Ticket**, even while serial. Not a clone. Not the **Consumer** cwd. Lifetime resolved: disposable — removed once its **Worker** succeeds, kept when the **Run** hard-stops, and never a place the **Consumer** continues the **Ticket** by hand.
 - **Branch** vs **Run Branch** — resolved: unqualified **Branch** is the **Ticket**'s. The **Run Branch** is always named in full. The ref is created at the first successful merge; naming one does not mean git has it yet.
 - **Parallelism** — resolved for v0 behaviour: serial. Not resolved as “forever serial.” The shape must make raising concurrency later easy.
-- **How a Ticket lands** — unresolved. Push-for-review vs stay local, auto-review, integrate later are Policy, not the definition of **Branch**.
+- **How a Run Branch leaves the machine** — resolved: it does not. ReadyRun pushes nothing and opens no pull request; it reports where the work is, on stdout and on the **Ticket**, and integration stays the **Consumer**'s. Previously flagged as "How a Ticket lands", which ADR 0028 had already answered.
 - **Run stats** — unresolved. Token usage, context-window % across **Workers**, printed at the end of a **Run**. Wanted; not v0-blocking.
 - **Automatic review** — resolved for v0: no. A review **Ticket** on the **Frontier** is just a **Ticket**. A second **Worker** that reviews the first is later.
 - **Permissions** — resolved: `"ask"` | `"unattended"`. Default ask. Not yolo. Not a boolean. Print-mode (`cursor()`, `claude()`) cannot use ask.
