@@ -134,29 +134,19 @@ function hardStop(
   return 1;
 }
 
-// Only where the cap is what stopped the Run and there is a Run Branch to
-// continue from: an empty Frontier has nothing left to continue to, and a Run
-// that landed nothing created no ref to name (ADR 0034). The cap carried is the
-// one the Consumer just used, so continuing is the same slice again — and it is
-// ReadyRun's own next invocation, which declining to own integration does not
-// stop it recommending (ADR 0033).
-function continueLine(
-  reason: CleanStop,
-  cap: number,
-  landed: number,
-  runBranch: string,
-): string | undefined {
-  if (reason !== "cap" || landed === 0) {
-    return undefined;
-  }
-  return `Continue with: readyrun run --max ${cap} --base ${runBranch}`;
-}
-
 // A clean stop leaves a Consumer with the question the hard-stop report already
 // answers — how many Tickets landed, and whether the Run Branch ref exists —
 // plus the two a hard stop has no room for: the base and why the Run stopped.
 // It prescribes no push and no merge, because ReadyRun cannot decline to own
 // integration and then recommend a workflow for it (ADR 0033).
+//
+// The cap is the only stop worth continuing from, and it hangs off the same
+// distinction the reason already draws: an empty Frontier has nothing left to
+// continue to. The cap carried is the one the Consumer just used, so continuing
+// is the same slice again — and it is ReadyRun's own next invocation, which
+// declining to own integration does not stop it explaining (ADR 0034). The
+// landing is what the base must be, so the line waits on a Run Branch existing
+// rather than on the cap alone.
 function completionReport(
   stdout: RunStdout,
   reason: CleanStop,
@@ -174,9 +164,8 @@ function completionReport(
       } reached; the Frontier may still hold work\n`,
   );
   stdout.write(`${landingLine(landed, runBranch, base)}\n`);
-  const carryOn = continueLine(reason, cap, landed, runBranch);
-  if (carryOn !== undefined) {
-    stdout.write(`${carryOn}\n`);
+  if (reason === "cap" && landed > 0) {
+    stdout.write(`Continue with: readyrun run --max ${cap} --base ${runBranch}\n`);
   }
   return 0;
 }

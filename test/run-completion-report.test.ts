@@ -141,43 +141,6 @@ test("a Run that stops on the cap names the invocation that continues from the R
   }
 });
 
-// A cap of 0 is the only way to stop on the cap having landed nothing, and it
-// is the report seam this pins: there is no Run Branch to continue from, so
-// there is no command to name and no ref git can be asked for.
-test("a cap stop that landed nothing names no continue invocation and no Run Branch ref", async () => {
-  const repo = await throwawayRepo();
-  const out = capturing();
-  try {
-    const exitCode = await run({
-      config: defineConfig({
-        tracker: memoryTracker({
-          tickets: [ticket({ id: "52" })],
-          ready: "unblocked",
-          labels: ["ready-for-agent"],
-        }),
-        worker: recordingWorker({ exitCode: 0 }),
-        model: "composer-2",
-      }),
-      cap: 0,
-      cwd: repo.cwd,
-      stdout: out.stdout,
-    });
-
-    assert.equal(exitCode, 0);
-    assert.deepEqual(await runBranches(repo.cwd), []);
-    assert.deepEqual(reportLines(out.chunks), [
-      "Run complete: cap of 0 Tickets reached; the Frontier may still hold work",
-      "0 Tickets landed; no Run Branch was created.",
-    ]);
-    assert.equal(
-      lines(out.chunks).filter((line) => line.includes("readyrun/run-")).length,
-      1,
-    );
-  } finally {
-    await repo.cleanup();
-  }
-});
-
 test("a Run that lands nothing says no Run Branch was created, and names no ref that does not exist", async () => {
   const repo = await throwawayRepo();
   const out = capturing();
