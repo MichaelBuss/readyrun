@@ -169,13 +169,27 @@ function execExitCode(error: unknown): number | undefined {
   return undefined;
 }
 
+export class BaseNotFoundError extends Error {
+  constructor(commitish: string) {
+    super(
+      `ReadyRun cannot resolve --base ${commitish} to a commit in this checkout`,
+    );
+    this.name = "BaseNotFoundError";
+  }
+}
+
 export type RunBase = {
   commit: string;
   // Undefined on a detached checkout, which is a base without a branch rather
-  // than a branch named HEAD.
+  // than a branch named HEAD — and on a named base, which is a commit rather
+  // than somewhere the Consumer is standing, even when the commit-ish they
+  // typed happens to be a branch.
   branch: string | undefined;
   defaultBranch: string;
   dirty: boolean;
+  // The commit-ish `--base` named, absent when the base is the checkout's own
+  // HEAD.
+  named?: string;
 };
 
 // How a commit is named to a Consumer, wherever one is named: the base a Run
@@ -185,12 +199,29 @@ export function shortCommit(commit: string): string {
   return commit.slice(0, 7);
 }
 
-// One read of the checkout a Run starts from: the commit every Worktree is cut
-// from, plus what a Consumer cannot see from that commit alone — that the base
-// is not the default branch, and that uncommitted work here reaches no
-// Worktree. The commit is read first, so a checkout with nothing to branch from
-// fails before anything else is read.
-export async function resolveRunBase(cwd: string): Promise<RunBase> {
+// One read of what a Run starts from: the commit every Worktree is cut from,
+// plus what a Consumer cannot see from that commit alone — that the base is not
+// the default branch, and that uncommitted work in the primary checkout reaches
+// no Worktree. The commit is read first, so nothing to branch from fails before
+// anything else is read.
+//
+// A named commit-ish is resolved instead of HEAD and never moves the checkout,
+// so continuing a capped Run does not require that checkout to have been clean
+// (ADR 0034). The dirty read is still the primary checkout's, because that is
+// the tree whose uncommitted work is being left behind either way.
+export async function resolveRunBase(
+  cwd: string,
+  named?: string,
+): Promise<RunBase> {
+  if (named !== undefined) {
+    return {
+      commit: await resolveCommitish(cwd, named),
+      branch: undefined,
+      named,
+      defaultBranch: await defaultBranch(cwd),
+      dirty: !await worktreeIsClean(cwd),
+    };
+  }
   const commit = await headCommit(cwd);
   const branch = await git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]);
   return {
@@ -199,6 +230,21 @@ export async function resolveRunBase(cwd: string): Promise<RunBase> {
     defaultBranch: await defaultBranch(cwd),
     dirty: !await worktreeIsClean(cwd),
   };
+}
+
+// `^{commit}` so a tag resolves to what it points at and a tree or a blob is
+// not mistaken for a base.
+async function resolveCommitish(cwd: string, commitish: string): Promise<string> {
+  try {
+    return await git(cwd, [
+      "rev-parse",
+      "--verify",
+      "--end-of-options",
+      `${commitish}^{commit}`,
+    ]);
+  } catch {
+    throw new BaseNotFoundError(commitish);
+  }
 }
 
 // Read the Branch ref, not the Worktree's HEAD: a Worker that committed

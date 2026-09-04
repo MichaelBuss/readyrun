@@ -21,6 +21,11 @@ type RunStdout = LivenessStdout;
 export type RunOptions = {
   config: ReadyRunConfig;
   cap?: number;
+  // The commit-ish every Worktree is cut from, and what the Run Branch
+  // collects onto. Defaults to the Consumer's checkout; naming the previous
+  // Run Branch is how a capped Run is continued (ADR 0034). There is no config
+  // key for it, because a permanently overridden base is nobody's workflow.
+  base?: string;
   cwd?: string;
   stdout?: RunStdout;
   model?: string;
@@ -96,6 +101,17 @@ function caughtMessage(error: unknown): string | undefined {
   return error instanceof Error ? error.message : undefined;
 }
 
+// A Worker writes to the inherited descriptor rather than through ReadyRun, so
+// ReadyRun cannot know whether the last byte on the stream was a newline. Two
+// newlines both close a line a Worker left open and leave a blank one above, so
+// a report reads as the Run's closing statement rather than as more Worker
+// output. Shared by both reports, whose symmetry is deliberate (ADR 0033), and
+// whitespace throughout, because off a TTY the output carries no escapes
+// (ADR 0032).
+function separateReport(stdout: RunStdout): void {
+  stdout.write("\n\n");
+}
+
 function hardStop(
   stdout: RunStdout,
   stage: HardStopStage,
@@ -109,12 +125,31 @@ function hardStop(
   const ticketPrefix = ticketId === undefined ? "" : `Ticket ${ticketId} `;
   const suffix = detail === undefined ? "" : `: ${detail}`;
   const action = nextAction === undefined ? "" : `. ${nextAction}`;
+  separateReport(stdout);
   stdout.write(`Hard stop: ${ticketPrefix}failed at ${stage}${suffix}${action}\n`);
   stdout.write(`${landingLine(landed, runBranch)}\n`);
   if (worktree !== undefined) {
     stdout.write(`Worktree kept at ${worktree}\n`);
   }
   return 1;
+}
+
+// Only where the cap is what stopped the Run and there is a Run Branch to
+// continue from: an empty Frontier has nothing left to continue to, and a Run
+// that landed nothing created no ref to name (ADR 0034). The cap carried is the
+// one the Consumer just used, so continuing is the same slice again — and it is
+// ReadyRun's own next invocation, which declining to own integration does not
+// stop it recommending (ADR 0033).
+function continueLine(
+  reason: CleanStop,
+  cap: number,
+  landed: number,
+  runBranch: string,
+): string | undefined {
+  if (reason !== "cap" || landed === 0) {
+    return undefined;
+  }
+  return `Continue with: readyrun run --max ${cap} --base ${runBranch}`;
 }
 
 // A clean stop leaves a Consumer with the question the hard-stop report already
@@ -130,6 +165,7 @@ function completionReport(
   runBranch: string,
   base: string,
 ): 0 {
+  separateReport(stdout);
   stdout.write(
     reason === "frontier-empty"
       ? "Run complete: the Frontier is empty\n"
@@ -138,6 +174,10 @@ function completionReport(
       } reached; the Frontier may still hold work\n`,
   );
   stdout.write(`${landingLine(landed, runBranch, base)}\n`);
+  const carryOn = continueLine(reason, cap, landed, runBranch);
+  if (carryOn !== undefined) {
+    stdout.write(`${carryOn}\n`);
+  }
   return 0;
 }
 
@@ -200,7 +240,7 @@ async function runWithLiveness(
   };
   let base;
   try {
-    base = await resolveRunBase(cwd);
+    base = await resolveRunBase(cwd, options.base);
   } catch (error) {
     return stop(
       "git",

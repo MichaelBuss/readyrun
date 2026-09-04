@@ -88,6 +88,14 @@ readyrun doctor
 readyrun run --max 5
 ```
 
+A **Run** cuts every **Worktree** from your checkout unless `--base <commit-ish>` names another commit; either way it leaves your checkout where it is. Hitting the cap ends a **Run**, so carrying on is a *new* **Run** based on the **Run Branch** the last one built ([ADR 0034](./docs/adr/0034-continuing-a-capped-run-is-a-new-run-with-an-explicit-base.md)) — and a cap stop prints that command, so there is no timestamp to remember:
+
+```
+Run complete: cap of 2 Tickets reached; the Frontier may still hold work
+2 Tickets landed on readyrun/run-20260904-152033, cut from 68a6987.
+Continue with: readyrun run --max 2 --base readyrun/run-20260904-152033
+```
+
 JSR does not put `readyrun` on PATH. Run the `cli` export as a program (Deno):
 
 ```sh

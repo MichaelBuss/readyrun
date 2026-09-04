@@ -15,7 +15,7 @@ const usage = `Usage: readyrun <command>
 
 Commands:
   init [--answers <file>]
-  run --max <n> [--model <id>] [--permissions ask|unattended] [--effort low|medium|high|xhigh|max]
+  run --max <n> [--base <commit-ish>] [--model <id>] [--permissions ask|unattended] [--effort low|medium|high|xhigh|max]
   doctor
 
 A Run cannot start without a cap.
@@ -100,6 +100,7 @@ export type CliOptions = {
 
 type RunFlags = {
   cap?: number;
+  base?: string;
   permissions?: Permissions;
   model?: string;
   effort?: Effort;
@@ -109,6 +110,7 @@ function parseRunFlags(args: string[]):
   | ({ ok: true } & RunFlags)
   | { ok: false; message: string } {
   let cap: number | undefined;
+  let base: string | undefined;
   let permissions: Permissions | undefined;
   let model: string | undefined;
   let effort: Effort | undefined;
@@ -118,6 +120,13 @@ function parseRunFlags(args: string[]):
     if (arg === "--max") {
       sawMax = true;
       cap = Number(args[i + 1]);
+      i += 1;
+    } else if (arg === "--base") {
+      const value = args[i + 1];
+      if (value === undefined || value.length === 0) {
+        return { ok: false, message: "--base requires a commit-ish" };
+      }
+      base = value;
       i += 1;
     } else if (arg === "--permissions") {
       const value = args[i + 1];
@@ -144,7 +153,7 @@ function parseRunFlags(args: string[]):
   if (sawMax && (cap === undefined || !Number.isInteger(cap) || cap < 1)) {
     return { ok: false, message: "A Run cannot start without a cap" };
   }
-  return { ok: true, cap, permissions, model, effort };
+  return { ok: true, cap, base, permissions, model, effort };
 }
 
 function parseInitFlags(args: string[]):
@@ -236,6 +245,7 @@ export async function cli(options: CliOptions): Promise<number> {
       return await invoke({
         config,
         cap: runFlags.cap,
+        base: runFlags.base,
         cwd,
         stdout,
         permissions: runFlags.permissions,

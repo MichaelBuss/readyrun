@@ -116,6 +116,12 @@ function workerBinaryExists(bin: string): boolean {
 
 function baseLine(base: RunBase): string {
   const commit = shortCommit(base.commit);
+  // The default-branch callout exists to catch a base nobody meant. A base the
+  // Consumer named was meant, so it is attributed to the flag and measured
+  // against nothing (ADR 0034).
+  if (base.named !== undefined) {
+    return `Base: ${commit} from --base ${base.named}`;
+  }
   // A detached checkout is on no branch, so it is named the default branch
   // rather than told it differs from one: the base may well be that branch's
   // own tip.
