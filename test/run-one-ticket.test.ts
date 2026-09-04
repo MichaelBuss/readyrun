@@ -298,6 +298,7 @@ test("live status on stdout shows the current Ticket, cap used, and Branch", asy
 
     const output = chunks.join("");
     assert.match(output, /52/);
+    assert.match(output, /One-Ticket Run: Branch, Worktree, spawn, leave the Frontier/);
     assert.match(output, /1\/1/);
     assert.match(output, /readyrun\/52/);
   } finally {
