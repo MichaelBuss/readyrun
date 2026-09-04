@@ -258,7 +258,7 @@ export async function run(options: RunOptions): Promise<number> {
         "tracker",
         ticket.id,
         caughtMessage(error),
-        "Check Tracker auth and network",
+        "Check the Tracker",
       );
     }
     // After the Worktree, so that a hard stop at any earlier stage leaves it on
@@ -267,6 +267,10 @@ export async function run(options: RunOptions): Promise<number> {
     try {
       await removeTicketWorktree(cwd, worktree);
       keptWorktree = undefined;
+    } catch (error) {
+      return stop("git", ticket.id, caughtMessage(error));
+    }
+    try {
       runBranchTip = await collectOntoRunBranch(cwd, {
         runBranch,
         branch,
@@ -275,10 +279,13 @@ export async function run(options: RunOptions): Promise<number> {
       });
       landed += 1;
     } catch (error) {
+      const gitError = caughtMessage(error);
       return stop(
         "git",
         ticket.id,
-        caughtMessage(error),
+        gitError === undefined
+          ? "ReadyRun could not merge the Ticket's Branch into the Run Branch"
+          : `ReadyRun could not merge the Ticket's Branch into the Run Branch. ${gitError}`,
       );
     }
   }

@@ -404,6 +404,47 @@ test("Doctor does not print a raw Linear GraphQL HTTP string as the failure", as
   }
 });
 
+test("Doctor does not print a raw Linear fetch throw as the failure", async () => {
+  const repo = await throwawayRepo();
+  const adapter = linear(
+    {
+      ready: "unblocked",
+      label: "ready-for-agent",
+    },
+    {
+      token: "test-token",
+      fetch: async () => {
+        throw new Error("fetch failed");
+      },
+    },
+  );
+  const chunks: string[] = [];
+  try {
+    const exit = await doctor({
+      config: defineConfig({
+        tracker: adapter,
+        worker: recordingWorker({ exitCode: 0 }),
+        model: "composer-2",
+      }),
+      cwd: repo.cwd,
+      stdout: {
+        write(chunk: string) {
+          chunks.push(chunk);
+          return true;
+        },
+      },
+    });
+    assert.equal(exit, 1);
+    const output = chunks.join("");
+    assert.match(output, /Doctor: ReadyRun could not reach Linear/);
+    assert.match(output, /Check Tracker auth and network/);
+    assert.match(output, /fetch failed/);
+    assert.doesNotMatch(output, /^Doctor: fetch failed$/m);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
 test("the Worker prompt names this Ticket as Linear and the Ticket id", async () => {
   const { adapter } = linearFromWorld(world);
   const [picked] = await adapter.frontier();

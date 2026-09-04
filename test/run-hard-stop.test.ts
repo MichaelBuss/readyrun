@@ -302,7 +302,7 @@ test("a Tracker failure finishing a Ticket hard-stops the Run and names that Tic
       chunks.join(""),
       /Hard stop: Ticket 52 failed at tracker: GitHub API 500/,
     );
-    assert.match(chunks.join(""), /Check Tracker auth and network/);
+    assert.match(chunks.join(""), /Check the Tracker/);
   } finally {
     await repo.cleanup();
   }
