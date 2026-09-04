@@ -169,14 +169,39 @@ function execExitCode(error: unknown): number | undefined {
   return undefined;
 }
 
-export type RunBase = {
+export class BaseNotFoundError extends Error {
+  constructor(commitish: string) {
+    super(
+      `ReadyRun cannot resolve --base ${commitish} to a commit in this checkout`,
+    );
+    this.name = "BaseNotFoundError";
+  }
+}
+
+// Where a base came from, which decides what a Consumer needs told about it. A
+// checkout is measured against the default branch, because a base nobody meant
+// is usually one they were standing on without noticing; a commit-ish they
+// typed was meant, so it is attributed to the flag and measured against nothing
+// (ADR 0034). The default branch is therefore a fact about a checkout rather
+// than about every base.
+type CheckoutBase = {
+  kind: "checkout";
   commit: string;
   // Undefined on a detached checkout, which is a base without a branch rather
   // than a branch named HEAD.
   branch: string | undefined;
   defaultBranch: string;
-  dirty: boolean;
 };
+
+type CommitishBase = {
+  kind: "commit-ish";
+  commit: string;
+  commitish: string;
+};
+
+// Dirty belongs to neither: it is the primary checkout's tree either way, since
+// that is the work reaching no Worktree whichever commit the Run builds on.
+export type RunBase = (CheckoutBase | CommitishBase) & { dirty: boolean };
 
 // How a commit is named to a Consumer, wherever one is named: the base a Run
 // discloses at start and the base its report says the Run Branch was cut from
@@ -185,20 +210,53 @@ export function shortCommit(commit: string): string {
   return commit.slice(0, 7);
 }
 
-// One read of the checkout a Run starts from: the commit every Worktree is cut
-// from, plus what a Consumer cannot see from that commit alone — that the base
-// is not the default branch, and that uncommitted work here reaches no
-// Worktree. The commit is read first, so a checkout with nothing to branch from
-// fails before anything else is read.
-export async function resolveRunBase(cwd: string): Promise<RunBase> {
+// One read of what a Run starts from: the commit every Worktree is cut from,
+// plus what a Consumer cannot see from that commit alone. A commit-ish is
+// resolved instead of HEAD and the checkout is never moved, so continuing a
+// capped Run does not require that checkout to have been clean (ADR 0034) —
+// but the dirty read is still the primary checkout's either way, because that
+// is the tree whose uncommitted work reaches no Worktree.
+export async function resolveRunBase(
+  cwd: string,
+  commitish?: string,
+): Promise<RunBase> {
+  const from: CheckoutBase | CommitishBase = commitish === undefined
+    ? await resolveCheckoutBase(cwd)
+    : {
+      kind: "commit-ish",
+      commit: await resolveCommitish(cwd, commitish),
+      commitish,
+    };
+  return { ...from, dirty: !await worktreeIsClean(cwd) };
+}
+
+// The commit is read first, so a checkout with nothing to branch from fails
+// before anything else is read.
+async function resolveCheckoutBase(cwd: string): Promise<CheckoutBase> {
   const commit = await headCommit(cwd);
   const branch = await git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]);
   return {
+    kind: "checkout",
     commit,
     branch: branch === "HEAD" ? undefined : branch,
     defaultBranch: await defaultBranch(cwd),
-    dirty: !await worktreeIsClean(cwd),
   };
+}
+
+// `^{commit}` so a tag resolves to what it points at and a tree or a blob is
+// not mistaken for a base; `--end-of-options` so a commit-ish that starts with
+// a dash fails as an unresolvable base rather than as a rev-parse flag.
+async function resolveCommitish(cwd: string, commitish: string): Promise<string> {
+  try {
+    return await git(cwd, [
+      "rev-parse",
+      "--verify",
+      "--end-of-options",
+      `${commitish}^{commit}`,
+    ]);
+  } catch {
+    throw new BaseNotFoundError(commitish);
+  }
 }
 
 // Read the Branch ref, not the Worktree's HEAD: a Worker that committed

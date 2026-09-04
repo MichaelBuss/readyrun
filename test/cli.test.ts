@@ -70,6 +70,7 @@ test("bare readyrun prints usage rather than opening a menu", async () => {
   assert.match(output, /Usage: readyrun/);
   assert.match(output, /init/);
   assert.match(output, /run --max/);
+  assert.match(output, /--base <commit-ish>/);
   assert.match(output, /doctor/);
   assert.doesNotMatch(output, /menu|wizard|select/i);
   assert.equal(exitCode, 1);
@@ -182,6 +183,51 @@ test("Effort must be low, medium, high, xhigh, or max", async () => {
   });
   assert.equal(exitCode, 1);
   assert.match(chunks.join(""), /Effort must be low, medium, high, xhigh, or max/);
+});
+
+test("--base hands the Run a base to cut from instead of the checkout", async () => {
+  const received: RunOptions[] = [];
+  await cli({
+    argv: ["run", "--max", "1", "--base", "readyrun/run-20260904-152033"],
+    stdout: silent,
+    loadConfig: async () => config,
+    run: async (options) => {
+      received.push(options);
+      return 0;
+    },
+  });
+  assert.equal(received[0]?.base, "readyrun/run-20260904-152033");
+});
+
+test("a Run without --base leaves the base to the checkout", async () => {
+  const received: RunOptions[] = [];
+  await cli({
+    argv: ["run", "--max", "1"],
+    stdout: silent,
+    loadConfig: async () => config,
+    run: async (options) => {
+      received.push(options);
+      return 0;
+    },
+  });
+  assert.equal(received[0]?.base, undefined);
+});
+
+test("--base without a commit-ish is refused rather than passed on empty", async () => {
+  const chunks: string[] = [];
+  const exitCode = await cli({
+    argv: ["run", "--max", "1", "--base"],
+    stdout: {
+      write(chunk: string) {
+        chunks.push(chunk);
+        return true;
+      },
+    },
+    loadConfig: async () => config,
+    run: async () => 0,
+  });
+  assert.equal(exitCode, 1);
+  assert.match(chunks.join(""), /--base requires a commit-ish/);
 });
 
 test("--model overrides the config default for this Run", async () => {

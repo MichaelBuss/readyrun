@@ -5,7 +5,7 @@ import { test } from "node:test";
 import { defineConfig, doctor, run } from "../src/mod.ts";
 import { memoryTracker, recordingWorker } from "../src/testing/mod.ts";
 import { ticket } from "./tracker-adapter-contract.ts";
-import { git, runBranch, runBranches, throwawayRepo } from "./throwaway-repo.ts";
+import { commitRepoFiles, git, runBranch, runBranches, throwawayRepo } from "./throwaway-repo.ts";
 
 const dirtyWarning =
   "Warning: uncommitted changes in the primary checkout reach no Worktree";
@@ -65,6 +65,7 @@ test("a Run names the base commit and the Run Branch before it claims a Ticket, 
       `1 Ticket landed on ${await runBranch(repo.cwd)}, cut from ${
         base.slice(0, 7)
       }.`,
+      `Continue with: readyrun run --max 1 --base ${await runBranch(repo.cwd)}`,
     ]);
   } finally {
     await repo.cleanup();
@@ -188,7 +189,59 @@ test("Doctor and a Run disclose a dirty, non-default base in the same words", as
       `1 Ticket landed on ${await runBranch(repo.cwd)}, cut from ${
         base.slice(0, 7)
       }.`,
+      `Continue with: readyrun run --max 1 --base ${await runBranch(repo.cwd)}`,
     ]);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("a base named by --base is disclosed as that commit, attributed to the flag rather than to a branch the Consumer is not on", async () => {
+  const repo = await throwawayRepo();
+  const out = capturing();
+  try {
+    await git(repo.cwd, ["checkout", "-b", "side"]);
+    await commitRepoFiles(repo.cwd, { "side.txt": "off the default branch\n" });
+    const base = await git(repo.cwd, ["rev-parse", "HEAD"]);
+    await git(repo.cwd, ["checkout", "main"]);
+
+    const exitCode = await run({
+      config: config(),
+      cap: 1,
+      base: "side",
+      cwd: repo.cwd,
+      stdout: out.stdout,
+    });
+
+    assert.equal(exitCode, 0);
+    assert.ok(
+      lines(out.chunks).includes(`Base: ${base.slice(0, 7)} from --base side`),
+    );
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+// The callout exists to catch a base nobody meant. A base the Consumer typed
+// was meant, so measuring it against the default branch is noise.
+test("a base named by --base is not called out for differing from the default branch", async () => {
+  const repo = await throwawayRepo();
+  const out = capturing();
+  try {
+    await git(repo.cwd, ["checkout", "-b", "side"]);
+    await commitRepoFiles(repo.cwd, { "side.txt": "off the default branch\n" });
+    await git(repo.cwd, ["checkout", "main"]);
+
+    const exitCode = await run({
+      config: config(),
+      cap: 1,
+      base: "side",
+      cwd: repo.cwd,
+      stdout: out.stdout,
+    });
+
+    assert.equal(exitCode, 0);
+    assert.doesNotMatch(out.chunks.join(""), /not the default branch/);
   } finally {
     await repo.cleanup();
   }

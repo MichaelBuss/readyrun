@@ -22,10 +22,13 @@ function lines(chunks: string[]): string[] {
   return chunks.join("").split("\n").filter(Boolean);
 }
 
-// The report is the last two lines a Run writes: the stop reason, then the
-// landing.
+// Everything a Run writes once its last Ticket is behind it: the stop reason,
+// the landing, and — on a cap that landed work — how to continue.
 function reportLines(chunks: string[]): string[] {
-  return lines(chunks).slice(-2);
+  const all = lines(chunks);
+  const start = all.findIndex((line) => line.startsWith("Run complete:"));
+  assert.notEqual(start, -1, "a clean stop writes a Run complete line");
+  return all.slice(start);
 }
 
 test("a Run that empties the Frontier reports the Tickets it landed, the Run Branch it collected them onto, the base it was cut from, and the empty Frontier", async () => {
@@ -53,6 +56,7 @@ test("a Run that empties the Frontier reports the Tickets it landed, the Run Bra
     });
 
     assert.equal(exitCode, 0);
+    // Nothing remains on the Frontier, so there is nothing to continue to.
     assert.deepEqual(reportLines(out.chunks), [
       "Run complete: the Frontier is empty",
       `2 Tickets landed on ${await runBranch(repo.cwd)}, cut from ${
@@ -94,7 +98,44 @@ test("a Run that stops on the cap names the cap as the reason, so it is clear th
       `1 Ticket landed on ${await runBranch(repo.cwd)}, cut from ${
         base.slice(0, 7)
       }.`,
+      `Continue with: readyrun run --max 1 --base ${await runBranch(repo.cwd)}`,
     ]);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+// A cap exists so a Consumer can slice a Frontier, which makes the next Run the
+// common path (ADR 0034). Naming it is the one thing a Run says about what to
+// do next, and it is ReadyRun's own invocation rather than a git workflow.
+test("a Run that stops on the cap names the invocation that continues from the Run Branch it just built", async () => {
+  const repo = await throwawayRepo();
+  const out = capturing();
+  try {
+    const exitCode = await run({
+      config: defineConfig({
+        tracker: memoryTracker({
+          tickets: [
+            ticket({ id: "52" }),
+            ticket({ id: "57" }),
+            ticket({ id: "70" }),
+          ],
+          ready: "unblocked",
+          labels: ["ready-for-agent"],
+        }),
+        worker: recordingWorker({ exitCode: 0 }),
+        model: "composer-2",
+      }),
+      cap: 2,
+      cwd: repo.cwd,
+      stdout: out.stdout,
+    });
+
+    assert.equal(exitCode, 0);
+    assert.equal(
+      reportLines(out.chunks).at(-1),
+      `Continue with: readyrun run --max 2 --base ${await runBranch(repo.cwd)}`,
+    );
   } finally {
     await repo.cleanup();
   }

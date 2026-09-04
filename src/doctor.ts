@@ -116,6 +116,9 @@ function workerBinaryExists(bin: string): boolean {
 
 function baseLine(base: RunBase): string {
   const commit = shortCommit(base.commit);
+  if (base.kind === "commit-ish") {
+    return `Base: ${commit} from --base ${base.commitish}`;
+  }
   // A detached checkout is on no branch, so it is named the default branch
   // rather than told it differs from one: the base may well be that branch's
   // own tip.
