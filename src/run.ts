@@ -117,11 +117,11 @@ function hardStop(
   return 1;
 }
 
-// Symmetric with the hard-stop report, because a clean stop leaves a Consumer
-// with the same question: how many Tickets landed, whether the Run Branch ref
-// exists, and where it started. It prescribes no push and no merge — ReadyRun
-// cannot decline to own integration and then recommend a workflow for it
-// (ADR 0033).
+// A clean stop leaves a Consumer with the question the hard-stop report already
+// answers — how many Tickets landed, and whether the Run Branch ref exists —
+// plus the two a hard stop has no room for: the base and why the Run stopped.
+// It prescribes no push and no merge, because ReadyRun cannot decline to own
+// integration and then recommend a workflow for it (ADR 0033).
 function completionReport(
   stdout: RunStdout,
   reason: CleanStop,
@@ -210,9 +210,9 @@ async function runWithLiveness(
   }
   discloseBase(stdout, base);
   stdout.write(`Run Branch: ${runBranch}\n`);
-  const complete = (reason: CleanStop, cutFrom: string): 0 => {
+  const complete = (reason: CleanStop): 0 => {
     live.stop();
-    return completionReport(stdout, reason, cap, landed, runBranch, cutFrom);
+    return completionReport(stdout, reason, cap, landed, runBranch, base.commit);
   };
   // A Ticket's Branch is cut from the Run Branch's tip, which until the first
   // Ticket lands is the base the Run resolved at start (ADR 0028).
@@ -243,7 +243,7 @@ async function runWithLiveness(
     }
     const ticket = frontier[0];
     if (ticket === undefined) {
-      return complete("frontier-empty", base.commit);
+      return complete("frontier-empty");
     }
 
     const branch = config.tracker.branchName(ticket);
@@ -366,5 +366,5 @@ async function runWithLiveness(
       );
     }
   }
-  return complete("cap", base.commit);
+  return complete("cap");
 }

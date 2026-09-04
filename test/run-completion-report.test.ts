@@ -22,7 +22,9 @@ function lines(chunks: string[]): string[] {
   return chunks.join("").split("\n").filter(Boolean);
 }
 
-function lastTwo(chunks: string[]): string[] {
+// The report is the last two lines a Run writes: the stop reason, then the
+// landing.
+function reportLines(chunks: string[]): string[] {
   return lines(chunks).slice(-2);
 }
 
@@ -51,7 +53,7 @@ test("a Run that empties the Frontier reports the Tickets it landed, the Run Bra
     });
 
     assert.equal(exitCode, 0);
-    assert.deepEqual(lastTwo(out.chunks), [
+    assert.deepEqual(reportLines(out.chunks), [
       "Run complete: the Frontier is empty",
       `2 Tickets landed on ${await runBranch(repo.cwd)}, cut from ${
         base.slice(0, 7)
@@ -87,7 +89,7 @@ test("a Run that stops on the cap names the cap as the reason, so it is clear th
     });
 
     assert.equal(exitCode, 0);
-    assert.deepEqual(lastTwo(out.chunks), [
+    assert.deepEqual(reportLines(out.chunks), [
       "Run complete: cap of 1 Ticket reached; the Frontier may still hold work",
       `1 Ticket landed on ${await runBranch(repo.cwd)}, cut from ${
         base.slice(0, 7)
@@ -119,7 +121,7 @@ test("a Run that lands nothing says no Run Branch was created, and names no ref 
 
     assert.equal(exitCode, 0);
     assert.deepEqual(await runBranches(repo.cwd), []);
-    assert.deepEqual(lastTwo(out.chunks), [
+    assert.deepEqual(reportLines(out.chunks), [
       "Run complete: the Frontier is empty",
       "0 Tickets landed; no Run Branch was created.",
     ]);
@@ -159,9 +161,11 @@ test("a completion report prescribes no integration: no push, no merge, no pull 
       0,
     );
 
+    // The whole Run, not just the report: a clean stop must not suggest
+    // integration anywhere it speaks.
     for (const out of [capped, emptied]) {
       assert.doesNotMatch(
-        lastTwo(out.chunks).join("\n"),
+        out.chunks.join(""),
         /push|merg|pull request|\bPR\b/i,
       );
     }

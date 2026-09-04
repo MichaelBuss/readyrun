@@ -347,7 +347,9 @@ test("a hard stop after a merge names the Run Branch and how many Tickets landed
     assert.equal(exitCode, 1);
     const output = chunks.join("");
     const branch = await runBranch(repo.cwd);
-    assert.match(output, new RegExp(`1 Ticket landed on ${branch}`));
+    // The whole line: a hard stop names the Run Branch and stops there, where a
+    // clean stop goes on to name the base it was cut from.
+    assert.match(output, new RegExp(`^1 Ticket landed on ${branch}\\.$`, "m"));
     assert.doesNotMatch(output, /no Run Branch was created/);
   } finally {
     await repo.cleanup();
