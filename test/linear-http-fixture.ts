@@ -60,6 +60,28 @@ const doneState: FixtureState = {
 export const linearInReviewStateId = inReviewState.id;
 export const linearDoneStateId = doneState.id;
 
+// What a Consumer would read on the Ticket, in the order it was posted.
+export function postedComments(
+  fixture: LinearHttpFixture,
+  ticketId: string,
+): string[] {
+  return fixture.requests.flatMap((request) => {
+    const parsed = request.body === undefined
+      ? undefined
+      : JSON.parse(request.body) as {
+        operationName?: string;
+        variables?: { input?: { issueId?: string; body?: string } };
+      };
+    if (
+      parsed?.operationName !== "CommentCreate" ||
+      parsed.variables?.input?.issueId !== ticketId
+    ) {
+      return [];
+    }
+    return [parsed.variables.input.body ?? ""];
+  });
+}
+
 export function linearFromWorld(
   world: LinearWorld,
 ): { adapter: ReturnType<typeof linear>; fixture: LinearHttpFixture } {
@@ -208,7 +230,7 @@ function graphqlResponse(
       variables?: {
         id?: string;
         cursor?: string;
-        input?: { stateId?: string };
+        input?: { stateId?: string; issueId?: string; body?: string };
       };
     };
   const operation = parsed.operationName ?? "";
@@ -305,6 +327,24 @@ function graphqlResponse(
                   "started",
               },
             },
+        },
+      },
+    }, 200);
+  }
+
+  if (operation === "CommentCreate") {
+    const issueId = variables.input?.issueId;
+    const issue = issues.find((candidate) => candidate.identifier === issueId);
+    if (issue === undefined) {
+      return jsonResponse({
+        errors: [{ message: `Linear Ticket ${issueId} was not found` }],
+      }, 200);
+    }
+    return jsonResponse({
+      data: {
+        commentCreate: {
+          success: true,
+          comment: { id: "comment-1" },
         },
       },
     }, 200);
