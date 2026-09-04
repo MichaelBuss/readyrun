@@ -213,7 +213,7 @@ There is no prior art in this repo — it currently contains only the glossary a
 
 ## Out of Scope
 
-The following are parked deliberately and tracked as `needs-refinement` issues. None is part of v0, and none should be pulled into the implementation queue without another grilling session:
+The following are parked deliberately and tracked as `needs-triage` issues. None is part of v0, and none should be pulled into the implementation queue without another grilling session:
 
 - How a Ticket lands — pushing for review versus staying local, and how work is eventually integrated ([#1](https://github.com/MichaelBuss/readyrun/issues/1)).
 - A second Worker that reviews the first ([#2](https://github.com/MichaelBuss/readyrun/issues/2)). A review-shaped Ticket on the Frontier is just a Ticket; by-label model routing is not automatic review.
