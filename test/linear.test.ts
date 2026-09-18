@@ -167,6 +167,91 @@ test("an unblocked Ticket that does not match the Linear project is not on the F
   );
 });
 
+test("a parent root named on the frontier call narrows Linear to that parent's children", async () => {
+  const { adapter } = linearFromWorld({
+    tickets: [
+      ticket({ id: "ACME-11", parent: "ACME-8" }),
+      ticket({ id: "ACME-12", parent: "ACME-9" }),
+      ticket({ id: "ACME-8" }),
+    ],
+    ready: "unblocked",
+    labels: ["ready-for-agent"],
+  });
+
+  const frontier = await adapter.frontier({ kind: "parent", id: "ACME-8" });
+  assert.deepEqual(
+    frontier.map((ticket) => ticket.id),
+    ["ACME-11"],
+  );
+});
+
+test("a list root named on the frontier call bypasses the Linear selector but not unblocked", async () => {
+  const { adapter } = linearFromWorld({
+    tickets: [
+      ticket({ id: "ACME-99", labels: ["other"] }),
+      ticket({ id: "ACME-53", labels: ["other"], blockedBy: ["ACME-99"] }),
+    ],
+    ready: "unblocked",
+    labels: ["ready-for-agent"],
+    state: "Todo",
+  });
+
+  const frontier = await adapter.frontier({
+    kind: "list",
+    ids: ["ACME-99", "ACME-53"],
+  });
+  assert.deepEqual(
+    frontier.map((ticket) => ticket.id),
+    ["ACME-99"],
+  );
+});
+
+test("a named Ticket that does not exist on Linear is refused as a lie", async () => {
+  const { adapter } = linearFromWorld(world);
+  await assert.rejects(
+    () => adapter.frontier({ kind: "list", ids: ["ACME-999"] }),
+    (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /Ticket ACME-999 does not exist on Linear/);
+      return true;
+    },
+  );
+});
+
+test("a named Ticket that is done on Linear is refused as a lie", async () => {
+  const { adapter } = linearFromWorld({
+    tickets: [ticket({ id: "ACME-53" })],
+    ready: "unblocked",
+    labels: ["ready-for-agent"],
+    ticketStates: { "ACME-53": "Done" },
+  });
+  await assert.rejects(
+    () => adapter.frontier({ kind: "list", ids: ["ACME-53"] }),
+    /Ticket ACME-53 is closed on Linear/,
+  );
+});
+
+test("a named Ticket already In Review on Linear is refused as a lie", async () => {
+  const { adapter } = linearFromWorld({
+    tickets: [ticket({ id: "ACME-53" })],
+    ready: "unblocked",
+    labels: ["ready-for-agent"],
+    ticketStates: { "ACME-53": "In Review" },
+  });
+  await assert.rejects(
+    () => adapter.frontier({ kind: "list", ids: ["ACME-53"] }),
+    /Ticket ACME-53 has left the Frontier/,
+  );
+});
+
+test("a parent root that does not exist on Linear is refused as a lie", async () => {
+  const { adapter } = linearFromWorld(world);
+  await assert.rejects(
+    () => adapter.frontier({ kind: "parent", id: "ACME-999" }),
+    /Ticket ACME-999 does not exist on Linear/,
+  );
+});
+
 test("Linear Frontier needs a state, label, or project", () => {
   assert.throws(
     () => linear({ ready: "unblocked" }),

@@ -34,6 +34,10 @@ _Avoid_: agent, session
 The set of **Tickets** the loop may pick from next.
 _Avoid_: queue, backlog, sprint
 
+**Root**:
+What a **Frontier** is rooted at, named on the command line per **Run**: a parent **Ticket**, whose children become the **Frontier**, or an explicit list of **Tickets**. The list bypasses the Consumer selector but never `ready: "unblocked"`; the parent narrows the selector's **Frontier** to its children, and is itself never worked.
+_Avoid_: scope, focus, target list, allowlist
+
 **Branch**:
 The git ref created for a **Ticket** when its **Worker** starts. The name is derived by the harness / **Tracker Adapter**, not authored on the **Ticket**.
 _Avoid_: main
@@ -51,7 +55,7 @@ The directory a **Worker** runs in; one per **Ticket**, on that **Ticket**’s *
 _Avoid_: clone, cwd mode, workspace (somewhere the **Consumer** continues by hand)
 
 **Doctor**:
-The check that config matches the **Tracker**. A **Run** will not start if it fails.
+The check that config — and any named **Root** — matches the **Tracker**. A **Run** will not start if it fails. It takes the same root flags as `run`.
 _Avoid_: lint (SpeechDeck’s word), validate
 
 **Init**:
@@ -83,8 +87,8 @@ _Avoid_: max mode (Cursor's interactive slash command), ultracode (a Claude Code
 - If the chosen **Tracker** cannot be reached, the loop does not invent another **Tracker**. A local **Tracker Adapter** is a future option a **Consumer** would select on purpose.
 - One **Ticket** is one **Worker**. The loop never gives two **Tickets** to one process.
 - A parent id or a label query names a **Frontier**. It is not a **Ticket**.
-- A **Frontier** is the **Tracker Adapter**’s answer to: `ready: "unblocked"` (string literal), plus a Consumer selector (GitHub labels, Linear state/label/project), plus an optional root (parent id or a list of **Ticket** ids). The **Ticket** body does not name the **Frontier**.
-- When more than one **Ticket** is on the **Frontier**, pick order is the **Tracker Adapter**’s stable order (GitHub: issue number ascending). There is no priority field on the **Ticket**.
+- A **Frontier** is the **Tracker Adapter**’s answer to: `ready: "unblocked"` (string literal), plus a Consumer selector (GitHub labels, Linear state/label/project), plus an optional root (a parent id or an explicit list of **Ticket** ids), named on the command line per **Run**. The **Ticket** body does not name the **Frontier**.
+- When more than one **Ticket** is on the **Frontier**, pick order is the **Tracker Adapter**’s stable order (GitHub: issue number ascending). There is no priority field on the **Ticket**. Naming **Tickets** does not sequence them — command-line order is not pick order; a blocking relationship is.
 - When a **Worker** starts, the harness creates a **Branch** for that **Ticket**. It does not start on main. The **Ticket** body does not name the **Branch**.
 - Each **Worker** runs in a **Worktree** on that **Branch**, even when a **Run** is serial. There is no cwd-isolation mode and no clone-per-**Ticket**.
 - A **Worker** is anchored to its **Worktree** by its **Worker Adapter**'s argv — a `{cwd}` placeholder interpolated at spawn — never by process cwd alone, because a CLI that re-roots linked worktrees resolves cwd to the git common dir and never sees the **Worktree** at all. The **Worker** prompt names the **Worktree**'s absolute path and the **Ticket**'s **Branch**; "this directory" is not an instruction (ADR 0036).
@@ -97,14 +101,14 @@ _Avoid_: max mode (Cursor's interactive slash command), ultracode (a Claude Code
 - A **Worker** commits its own work; ReadyRun never writes a commit that describes code. The only commit it makes is the merge of a **Ticket**'s **Branch** into the **Run Branch**, and that message is derived from the **Ticket** exactly as the **Branch** name is. A **Worker** that exits 0 leaving its **Worktree** dirty, or its **Branch**'s tree matching the base it was cut from, has failed.
 - A **Worktree** is removed once its **Worker** succeeds and kept when the **Run** hard-stops, so a failure is still there to look at. The **Run Branch** outlives both.
 - A **Hard stop** leaves the **Run Branch** as it stands when that ref exists: **Tickets** already merged stay; the failed **Ticket** does not. If nothing has merged, there is no **Run Branch** ref — that **Run** produced nothing to review.
-- A **Run** (and **Doctor**) refuse to start if config lies about the **Frontier**: missing labels, repo ≠ remote, `unblocked` claimed but the **Tracker** cannot say so, unknown keys. Unused knobs (a label map with no matching **Tickets**) warn. The check is once at **Run** start, not every iteration.
+- A **Run** (and **Doctor**) refuse to start if config or the command line lies about the **Frontier**: missing labels, repo ≠ remote, `unblocked` claimed but the **Tracker** cannot say so, unknown keys, a named **Ticket** that can never join the **Frontier** (nonexistent, closed, a duplicate, outside the root), a root for a **Tracker Adapter** that cannot read parents. A named **Ticket** that is merely blocked is waiting work, not a lie: warn, and it joins when its blocker clears mid-**Run**. Unused knobs (a label map with no matching **Tickets**) warn. The check is once at **Run** start, not every iteration.
 - A **Run** (and **Doctor**) also refuse to start if the **Consumer** has a lockfile whose install output is neither tracked nor ignored: ReadyRun would create that dirt itself, and every **Ticket** would then hard-stop as if the **Worker** left work uncommitted. A **Consumer** that already ignores it is unchanged.
 - Before a **Ticket** is claimed, a **Run** discloses the base commit it resolved and the **Run Branch** it will collect onto, calls out a base that is not the default branch, and warns when the primary checkout is dirty, because uncommitted changes there reach no **Worktree**. **Doctor** discloses the same base and names no **Run Branch**, because it creates none. This is disclosure, not a gate: starting from a feature branch on purpose is legitimate, and none of it stops a **Run**.
 - When a **Worker Adapter** defines a probe, **Doctor** runs it once the binary is confirmed to exist, and a probe failure is reported distinctly from a missing binary. A **Worker Adapter** with no probe (`custom` today) keeps the existence-only check unchanged.
 - **ReadyRun** loads one `readyrun.config.ts` (same basename, JS/MJS allowed) at the **Consumer** root. **Init** writes that stub. There is no generated scripts folder and no search through other config filenames.
 - The stub **Init** writes sets **Permissions** `"unattended"` and, when the **Consumer** root already holds a `CONTEXT.md`, points `contextFile` at it. Neither is a Clack question: ask cannot reach a **Consumer** through print-mode, and the context file is either already there or it is not. **Init** asks only what it cannot see.
 - **Init** is the only Clack prompt UI, and Clack is its default. `--answers <file>` is the scriptable path through the same writer; it is not a second prompt UI. `run` and `doctor` are flags plus stdout. A **Run** owns the terminal while a **Worker** runs: it renders the **Worker**'s stream — one annotated line per tool call (kind glyph + verb + target), tool results silent unless failed, narration passed through, unknown output never silently dropped — under one glyph taxonomy shared with the Run's own lines (picked, landed, stopped, warned). On a TTY a spinner (glyph + elapsed since the **Ticket** started) shows between prints, and `--verbose` bypasses rendering for the raw stream; off a TTY the same render is newline-delimited lines with no animation, and the stage heartbeat (Doctor, Frontier, Worktree, Worker) and in-flight **Ticket** line (id, title, branch, started/cap) are unchanged. There is no wizard that assembles a `run` command. Bare `readyrun` is usage, not a menu. An unattended **Run** must not prompt.
-- A **Run** cannot start without a cap: a maximum number of **Tickets** it may start. Hitting the cap stops the **Run**; it does not prompt. A single-**Ticket** invocation is a **Run** with cap 1. There is no unlimited **Run**.
+- A **Run** cannot start without a cap: a maximum number of **Tickets** it may start. The cap resolves `--max`, then config `cap`, then — for an explicit list — the list’s length, so a single-**Ticket** invocation is a **Run** with cap 1. Hitting the cap stops the **Run**; it does not prompt; a list longer than the cap keeps its remainder on the **Frontier**. There is no unlimited **Run**.
 - A v0 **Run** starts one **Worker** at a time. That is behaviour, not the isolation model: a **Worker** is already one **Ticket**, one **Branch**, one **Worktree**, so concurrency later is a knob, not a rewrite.
 - **Permissions** are first-class on the **Run**: `"ask"` or `"unattended"`. Default `"ask"`. Never implied by looping. The **Worker Adapter** maps `"unattended"` to its flag; `custom` is told the flag. `cursor()` and `claude()` spawn print-mode (`-p`); ask has nowhere to go, so **Doctor** (and a **Run**) refuse it and name `--permissions unattended`. Sandbox-bypass is not a third value in v0.
 - **Effort** is first-class on the **Run**: optional config default, CLI `--effort` for this **Run**. The **Worker Adapter** maps it to `--effort`; Cursor does not — pick a model variant instead. **Doctor** fails if effort is set on an adapter that does not map it. Not authored on the **Ticket**.
@@ -132,6 +136,9 @@ _Avoid_: max mode (Cursor's interactive slash command), ultracode (a Claude Code
 >
 > **Dev:** "How do I say which **Tickets** are in play?"
 > **Domain expert:** "Unblocked, plus your labels or Linear state. Optionally a parent or a list of ids. That's the **Frontier**. Not a sentence on the issue."
+>
+> **Dev:** "I dumped ten **Tickets** and two are blocked by the first. Do I order the list?"
+> **Domain expert:** "No. Naming is not sequencing. Blocked **Tickets** wait off the **Frontier** and join when their blocker lands."
 >
 > **Dev:** "#53 and #57 are both unblocked. Which **Worker** starts?"
 > **Domain expert:** "#53. GitHub number, lowest first. You don't put priority on the **Ticket**."
@@ -223,7 +230,7 @@ _Avoid_: max mode (Cursor's interactive slash command), ultracode (a Claude Code
 - **Model** — resolved: required config default; CLI overrides the **Run**; label map overrides per **Ticket**. Not authored on the **Ticket**.
 - **Hard stop** — resolved: **Tracker**/git/**Worker** failure ends the **Run**. No skip, no retry-forever. Cap and empty **Frontier** are clean stops. Harness owns **Tracker** auth; CLI owns Worker login. **Tickets** already on the **Run Branch** stay; if none merged, there is no **Run Branch** ref.
 - **Worker prompt** — resolved: package + **Tracker Adapter**. Optional Consumer context file. Not a repo-owned `prompt.md`.
-- **Frontier query** — resolved: `ready: "unblocked"` + selector + optional root. Not parent-only, not labels without unblocked.
+- **Frontier query** — resolved: `ready: "unblocked"` + selector + optional root. Not parent-only, not labels without unblocked. Resolved further as a command-line root (#131): the explicit list bypasses the selector but never `unblocked`; the parent narrows and is never worked itself; naming is not sequencing (stable order holds, blocking sequences); the list's length is the cap floor; permanent lies refuse at start, waiting work warns and joins mid-**Run**.
 - **Pick order** — resolved: stable **Tracker Adapter** order (GitHub: issue number ascending). No priority on the **Ticket**.
 - **Config file** — resolved: `readyrun.config.ts` at the **Consumer** root. **Init** writes it. No `ralph/` scripts, no cosmiconfig.
 - **Clack** — resolved: **Init** is the only prompt UI, interactive by default. `--answers` scripts **Init** without a TTY; it is not a command assembler in front of `run`. **Run** and **Doctor** liveness is stdout (stage heartbeat on a TTY, stage lines otherwise), not Clack. A launcher offering a **Run Branch** to continue from was weighed and deferred rather than refused, and the reasoning is parked on #108.

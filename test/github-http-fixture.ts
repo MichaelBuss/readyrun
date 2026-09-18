@@ -58,8 +58,12 @@ export function githubFromWorld(
 }
 
 export function githubHttpFixture(
-  world: MemoryTrackerOptions & { repo: string },
+  world: MemoryTrackerOptions & {
+    repo: string;
+    closedIds?: readonly string[];
+  },
 ): GitHubHttpFixture {
+  const closed = new Set(world.closedIds ?? []);
   const issues: FixtureIssue[] = world.tickets.map((ticket) => ({
     number: Number(ticket.id),
     title: ticket.title,
@@ -68,7 +72,7 @@ export function githubHttpFixture(
     labels: [...ticket.labels],
     blockedBy: ticket.blockedBy.map((id) => Number(id)),
     parent: ticket.parent === undefined ? undefined : Number(ticket.parent),
-    state: "OPEN",
+    state: closed.has(String(ticket.id)) ? "CLOSED" : "OPEN",
     comments: [],
   }));
   const existingLabels = world.existingLabels ?? [
@@ -250,6 +254,20 @@ function graphqlResponse(
             pageInfo: { hasNextPage: false, endCursor: null },
             nodes,
           },
+        },
+      },
+    }, 200);
+  }
+
+  if (operation === "Ticket") {
+    const number = (parsed.variables as { number?: number }).number;
+    const issue = issues.find((candidate) => candidate.number === number);
+    return jsonResponse({
+      data: {
+        repository: {
+          issue: issue === undefined
+            ? null
+            : { number: issue.number, state: issue.state },
         },
       },
     }, 200);

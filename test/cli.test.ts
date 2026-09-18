@@ -244,6 +244,112 @@ test("--model overrides the config default for this Run", async () => {
   assert.equal(received[0]?.model, "opus");
 });
 
+test("--ticket names an explicit list and accepts a bare id or a URL", async () => {
+  const received: RunOptions[] = [];
+  await cli({
+    argv: [
+      "run",
+      "--max",
+      "1",
+      "--ticket",
+      "53",
+      "--ticket",
+      "https://github.com/acme/widgets/issues/57",
+      "--ticket",
+      "https://linear.app/acme/issue/ACME-59",
+    ],
+    stdout: silent,
+    loadConfig: async () => config,
+    run: async (options) => {
+      received.push(options);
+      return 0;
+    },
+  });
+  assert.deepEqual(received[0]?.root, {
+    kind: "list",
+    ids: ["53", "57", "ACME-59"],
+  });
+});
+
+test("--root names a parent", async () => {
+  const received: RunOptions[] = [];
+  await cli({
+    argv: ["run", "--max", "1", "--root", "8"],
+    stdout: silent,
+    loadConfig: async () => config,
+    run: async (options) => {
+      received.push(options);
+      return 0;
+    },
+  });
+  assert.deepEqual(received[0]?.root, { kind: "parent", id: "8" });
+});
+
+test("--ticket and --root are mutually exclusive", async () => {
+  const chunks: string[] = [];
+  const exitCode = await cli({
+    argv: ["run", "--max", "1", "--ticket", "53", "--root", "8"],
+    stdout: {
+      write(chunk: string) {
+        chunks.push(chunk);
+        return true;
+      },
+    },
+    loadConfig: async () => config,
+    run: async () => 0,
+  });
+  assert.equal(exitCode, 1);
+  assert.match(chunks.join(""), /--ticket names a list, --root names a parent/);
+});
+
+test("naming the same Ticket twice is refused", async () => {
+  const chunks: string[] = [];
+  const exitCode = await cli({
+    argv: ["run", "--max", "1", "--ticket", "53", "--ticket", "53"],
+    stdout: {
+      write(chunk: string) {
+        chunks.push(chunk);
+        return true;
+      },
+    },
+    loadConfig: async () => config,
+    run: async () => 0,
+  });
+  assert.equal(exitCode, 1);
+  assert.match(chunks.join(""), /Duplicate Ticket 53/);
+});
+
+test("--ticket without an id is refused", async () => {
+  const chunks: string[] = [];
+  const exitCode = await cli({
+    argv: ["run", "--max", "1", "--ticket"],
+    stdout: {
+      write(chunk: string) {
+        chunks.push(chunk);
+        return true;
+      },
+    },
+    loadConfig: async () => config,
+    run: async () => 0,
+  });
+  assert.equal(exitCode, 1);
+  assert.match(chunks.join(""), /--ticket requires a Ticket id or URL/);
+});
+
+test("doctor takes the same root flags", async () => {
+  const received: DoctorOptions[] = [];
+  await cli({
+    argv: ["doctor", "--ticket", "53"],
+    stdout: silent,
+    loadConfig: async () => config,
+    doctor: async (options) => {
+      received.push(options);
+      return 0;
+    },
+  });
+  assert.deepEqual(received[0]?.root, { kind: "list", ids: ["53"] });
+});
+
 test("readyrun doctor runs the shared check with the loaded config", async () => {
   const received: DoctorOptions[] = [];
   const exitCode = await cli({

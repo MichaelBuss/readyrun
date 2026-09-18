@@ -4,6 +4,8 @@ import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { doctor as doctorEntry, type DoctorOptions } from "./doctor.ts";
+import { parseTicketRef } from "./frontier-root.ts";
+import type { FrontierRoot } from "./tracker-adapter.ts";
 import { init as initEntry, parseInitAnswers, type InitAnswers, type InitOptions } from "./init.ts";
 import { run as runEntry, RunCapRequiredError, type RunOptions } from "./run.ts";
 import type { ReadyRunConfig } from "./config.ts";
@@ -15,10 +17,10 @@ const usage = `Usage: readyrun <command>
 
 Commands:
   init [--answers <file>]
-  run --max <n> [--base <commit-ish>] [--model <id>] [--permissions ask|unattended] [--effort low|medium|high|xhigh|max]
-  doctor
+  run --max <n> [--base <commit-ish>] [--ticket <id-or-url> ...] [--root <parent>] [--model <id>] [--permissions ask|unattended] [--effort low|medium|high|xhigh|max]
+  doctor [--ticket <id-or-url> ...] [--root <parent>]
 
-A Run cannot start without a cap.
+A Run cannot start without a cap; an explicit --ticket list defaults the cap to its length. --root runs a parent's children; the parent is never worked.
 `;
 
 const configNames = [
@@ -104,11 +106,72 @@ type RunFlags = {
   permissions?: Permissions;
   model?: string;
   effort?: Effort;
+  tickets: string[];
+  root?: string;
 };
+
+// The root flags `run` and `doctor` both take (ADR 0038): a repeatable
+// --ticket naming an explicit list, or one --root naming a parent — never both.
+function parseRootFlags(
+  args: string[],
+): ({ ok: true; tickets: string[]; root?: string } | { ok: false; message: string }) {
+  const tickets: string[] = [];
+  let root: string | undefined;
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === "--ticket") {
+      const value = args[i + 1];
+      if (value === undefined || value.trim().length === 0) {
+        return { ok: false, message: "--ticket requires a Ticket id or URL" };
+      }
+      const id = parseTicketRef(value);
+      if (tickets.includes(id)) {
+        return { ok: false, message: `Duplicate Ticket ${id} in --ticket` };
+      }
+      tickets.push(id);
+      i += 1;
+    } else if (arg === "--root") {
+      const value = args[i + 1];
+      if (value === undefined || value.trim().length === 0) {
+        return {
+          ok: false,
+          message: "--root requires a parent Ticket id or URL",
+        };
+      }
+      root = parseTicketRef(value);
+      i += 1;
+    }
+  }
+  if (tickets.length > 0 && root !== undefined) {
+    return {
+      ok: false,
+      message:
+        "--ticket names a list, --root names a parent; name one root, not both",
+    };
+  }
+  return { ok: true, tickets, root };
+}
+
+function namedRoot(
+  tickets: readonly string[],
+  root: string | undefined,
+): FrontierRoot | undefined {
+  if (tickets.length > 0) {
+    return { kind: "list", ids: tickets };
+  }
+  if (root !== undefined) {
+    return { kind: "parent", id: root };
+  }
+  return undefined;
+}
 
 function parseRunFlags(args: string[]):
   | ({ ok: true } & RunFlags)
   | { ok: false; message: string } {
+  const roots = parseRootFlags(args);
+  if (!roots.ok) {
+    return roots;
+  }
   let cap: number | undefined;
   let base: string | undefined;
   let permissions: Permissions | undefined;
@@ -148,12 +211,23 @@ function parseRunFlags(args: string[]):
       }
       effort = value;
       i += 1;
+    } else if (arg === "--ticket" || arg === "--root") {
+      i += 1;
     }
   }
   if (sawMax && (cap === undefined || !Number.isInteger(cap) || cap < 1)) {
     return { ok: false, message: "A Run cannot start without a cap" };
   }
-  return { ok: true, cap, base, permissions, model, effort };
+  return {
+    ok: true,
+    cap,
+    base,
+    permissions,
+    model,
+    effort,
+    tickets: roots.tickets,
+    root: roots.root,
+  };
 }
 
 function parseInitFlags(args: string[]):
@@ -223,6 +297,7 @@ export async function cli(options: CliOptions): Promise<number> {
     return 1;
   }
   let runFlags: RunFlags | undefined;
+  let root: FrontierRoot | undefined;
   if (command === "run") {
     const flags = parseRunFlags(options.argv.slice(1));
     if (!flags.ok) {
@@ -230,6 +305,14 @@ export async function cli(options: CliOptions): Promise<number> {
       return 1;
     }
     runFlags = flags;
+    root = namedRoot(flags.tickets, flags.root);
+  } else {
+    const flags = parseRootFlags(options.argv.slice(1));
+    if (!flags.ok) {
+      stdout.write(`${flags.message}\n`);
+      return 1;
+    }
+    root = namedRoot(flags.tickets, flags.root);
   }
   const cwd = options.cwd ?? process.cwd();
   let config: ReadyRunConfig;
@@ -246,6 +329,7 @@ export async function cli(options: CliOptions): Promise<number> {
         config,
         cap: runFlags.cap,
         base: runFlags.base,
+        root,
         cwd,
         stdout,
         permissions: runFlags.permissions,
@@ -261,7 +345,7 @@ export async function cli(options: CliOptions): Promise<number> {
     }
   }
   const invoke = options.doctor ?? doctorEntry;
-  return invoke({ config, cwd, stdout });
+  return invoke({ config, root, cwd, stdout });
 }
 
 function isCliEntry(): boolean {

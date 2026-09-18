@@ -13,7 +13,13 @@ import {
   worktreeIsClean,
 } from "./git.ts";
 import { composeWorkerPrompt } from "./prompt.ts";
+import {
+  describeRoot,
+  rootViolationMessages,
+  warnWaitingRootTickets,
+} from "./frontier-root.ts";
 import type { Ticket } from "./ticket.ts";
+import type { FrontierRoot } from "./tracker-adapter.ts";
 import type { Effort, Permissions } from "./worker-adapter.ts";
 
 type RunStdout = LivenessStdout;
@@ -26,6 +32,11 @@ export type RunOptions = {
   // Run Branch is how a capped Run is continued (ADR 0034). There is no config
   // key for it, because a permanently overridden base is nobody's workflow.
   base?: string;
+  // The Frontier's root for this Run (ADR 0038): a parent whose children
+  // become the Frontier, or an explicit list that bypasses the Consumer
+  // selector. A root named here replaces any config-level root, as --max and
+  // --model do.
+  root?: FrontierRoot;
   cwd?: string;
   stdout?: RunStdout;
   model?: string;
@@ -154,6 +165,7 @@ function completionReport(
   landed: number,
   runBranch: string,
   base: string,
+  root: FrontierRoot | undefined,
 ): 0 {
   separateReport(stdout);
   stdout.write(
@@ -165,14 +177,22 @@ function completionReport(
   );
   stdout.write(`${landingLine(landed, runBranch, base)}\n`);
   if (reason === "cap" && landed > 0) {
-    stdout.write(`Continue with: readyrun run --max ${cap} --base ${runBranch}\n`);
+    // The root is part of the slice the Consumer just used, so continuing
+    // without it would continue onto a different Frontier (ADR 0038).
+    const rooted = root === undefined ? "" : ` ${describeRoot(root)}`;
+    stdout.write(
+      `Continue with: readyrun run --max ${cap} --base ${runBranch}${rooted}\n`,
+    );
   }
   return 0;
 }
 
 export async function run(options: RunOptions): Promise<number> {
   const config = defineConfig(options.config);
-  const cap = options.cap ?? config.cap;
+  // The cap resolves --max, then config, then an explicit list's length
+  // (ADR 0038), so a single-Ticket invocation is a Run with cap 1.
+  const cap = options.cap ?? config.cap ??
+    (options.root?.kind === "list" ? options.root.ids.length : undefined);
   if (cap === undefined) {
     throw new RunCapRequiredError();
   }
@@ -201,6 +221,7 @@ async function runWithLiveness(
     cwd,
     options.effort ?? config.effort,
     options.permissions ?? config.permissions,
+    options.root,
   );
   live.stop();
   if (writeDoctorFailures(stdout, failures) === 1) {
@@ -241,7 +262,15 @@ async function runWithLiveness(
   stdout.write(`Run Branch: ${runBranch}\n`);
   const complete = (reason: CleanStop): 0 => {
     live.stop();
-    return completionReport(stdout, reason, cap, landed, runBranch, base.commit);
+    return completionReport(
+      stdout,
+      reason,
+      cap,
+      landed,
+      runBranch,
+      base.commit,
+      options.root,
+    );
   };
   // A Ticket's Branch is cut from the Run Branch's tip, which until the first
   // Ticket lands is the base the Run resolved at start (ADR 0028).
@@ -251,12 +280,13 @@ async function runWithLiveness(
     : await readFile(join(cwd, config.contextFile), "utf8");
   let started = 0;
   let unusedModelsWarned = false;
+  let waitingWorkWarned = false;
 
   while (started < cap) {
     live.stage("Frontier");
     let frontier;
     try {
-      frontier = await config.tracker.frontier();
+      frontier = await config.tracker.frontier(options.root);
     } catch (error) {
       return stop(
         "tracker",
@@ -266,6 +296,17 @@ async function runWithLiveness(
       );
     }
     live.stop();
+    const root = options.root;
+    if (root !== undefined) {
+      const violations = rootViolationMessages(frontier, root);
+      if (violations.length > 0) {
+        return stop("tracker", undefined, violations[0]);
+      }
+      if (!waitingWorkWarned) {
+        warnWaitingRootTickets(stdout, root, frontier);
+        waitingWorkWarned = true;
+      }
+    }
     if (!unusedModelsWarned) {
       warnUnusedModelsByLabel(stdout, config.modelsByLabel, frontier);
       unusedModelsWarned = true;

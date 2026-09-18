@@ -111,6 +111,110 @@ export function trackerAdapterContract(
     );
   });
 
+  test(`${name}: a parent root named on the frontier call narrows the Frontier to that parent's children without a selector root`, async () => {
+    const adapter = await create({
+      tickets: [
+        ticket({ id: "11", parent: "8" }),
+        ticket({ id: "12", parent: "9" }),
+        ticket({ id: "8" }),
+      ],
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+    });
+
+    const frontier = await adapter.frontier({ kind: "parent", id: "8" });
+    assert.deepEqual(
+      frontier.map((ticket) => ticket.id),
+      ["11"],
+    );
+  });
+
+  test(`${name}: a root named on the frontier call replaces the selector root`, async () => {
+    const adapter = await create({
+      tickets: [
+        ticket({ id: "11", parent: "8" }),
+        ticket({ id: "12", parent: "9" }),
+        ticket({ id: "9" }),
+      ],
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+      parent: "8",
+    });
+
+    const frontier = await adapter.frontier({ kind: "parent", id: "9" });
+    assert.deepEqual(
+      frontier.map((ticket) => ticket.id),
+      ["12"],
+    );
+  });
+
+  test(`${name}: an explicit list named on the frontier call bypasses the selector but not unblocked`, async () => {
+    const adapter = await create({
+      tickets: [
+        ticket({ id: "52", labels: ["ready-for-agent"] }),
+        ticket({ id: "99", labels: ["other"] }),
+        ticket({ id: "53", labels: ["other"], blockedBy: ["52"] }),
+      ],
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+    });
+
+    const frontier = await adapter.frontier({
+      kind: "list",
+      ids: ["99", "53"],
+    });
+    assert.deepEqual(
+      frontier.map((ticket) => ticket.id),
+      ["99"],
+    );
+  });
+
+  test(`${name}: a nonexistent named Ticket is a lie the adapter refuses`, async () => {
+    const adapter = await create({
+      tickets: [ticket({ id: "52" })],
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+    });
+
+    await assert.rejects(
+      () => adapter.frontier({ kind: "list", ids: ["999"] }),
+      /999/,
+    );
+  });
+
+  test(`${name}: a nonexistent parent root is a lie the adapter refuses`, async () => {
+    const adapter = await create({
+      tickets: [ticket({ id: "52" })],
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+    });
+
+    await assert.rejects(
+      () => adapter.frontier({ kind: "parent", id: "999" }),
+      /999/,
+    );
+  });
+
+  test(`${name}: naming is not sequencing; a list's pick order is still ascending identifier`, async () => {
+    const adapter = await create({
+      tickets: [
+        ticket({ id: "57" }),
+        ticket({ id: "52" }),
+      ],
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+    });
+
+    const frontier = await adapter.frontier({
+      kind: "list",
+      ids: ["57", "52"],
+    });
+    assert.deepEqual(
+      frontier.map((ticket) => ticket.id),
+      ["52", "57"],
+    );
+  });
+
   test(`${name}: pick order is ascending identifier; there is no priority field on the Ticket`, async () => {
     const adapter = await create({
       tickets: [

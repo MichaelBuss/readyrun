@@ -1,4 +1,8 @@
-import { createTrackerAdapter, type TrackerAdapter } from "../tracker-adapter.ts";
+import {
+  createTrackerAdapter,
+  type FrontierRoot,
+  type TrackerAdapter,
+} from "../tracker-adapter.ts";
 import type { Ticket } from "../ticket.ts";
 
 export type MemoryTrackerOptions = {
@@ -13,8 +17,30 @@ export type MemoryTrackerOptions = {
 
 export function memoryTracker(options: MemoryTrackerOptions): TrackerAdapter {
   const ineligible = new Set<string>();
+  const known = new Set(options.tickets.map((ticket) => ticket.id));
   return createTrackerAdapter({
-    frontier() {
+    frontier(root) {
+      // A root named on the call replaces the selector's root (ADR 0038).
+      const effective: FrontierRoot | undefined = root ??
+        (options.ids !== undefined
+          ? { kind: "list", ids: options.ids }
+          : options.parent !== undefined
+          ? { kind: "parent", id: options.parent }
+          : undefined);
+      if (effective?.kind === "list") {
+        for (const id of effective.ids) {
+          if (!known.has(id)) {
+            return Promise.reject(
+              new Error(`Ticket ${id} does not exist on the Tracker`),
+            );
+          }
+        }
+      }
+      if (effective?.kind === "parent" && !known.has(effective.id)) {
+        return Promise.reject(
+          new Error(`Ticket ${effective.id} does not exist on the Tracker`),
+        );
+      }
       return Promise.resolve(
         options.tickets
           .filter((ticket) => {
@@ -24,13 +50,13 @@ export function memoryTracker(options: MemoryTrackerOptions): TrackerAdapter {
             if (!ticket.blockedBy.every((id) => ineligible.has(id))) {
               return false;
             }
+            if (effective?.kind === "list") {
+              return effective.ids.includes(ticket.id);
+            }
             if (!options.labels.every((label) => ticket.labels.includes(label))) {
               return false;
             }
-            if (options.parent !== undefined && ticket.parent !== options.parent) {
-              return false;
-            }
-            if (options.ids !== undefined && !options.ids.includes(ticket.id)) {
+            if (effective?.kind === "parent" && ticket.parent !== effective.id) {
               return false;
             }
             return true;
