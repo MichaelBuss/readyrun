@@ -1,6 +1,6 @@
 import {
   createTrackerAdapter,
-  type FrontierRoot,
+  optionalRoot,
   type TrackerAdapter,
 } from "../tracker-adapter.ts";
 import type { Ticket } from "../ticket.ts";
@@ -21,12 +21,7 @@ export function memoryTracker(options: MemoryTrackerOptions): TrackerAdapter {
   return createTrackerAdapter({
     frontier(root) {
       // A root named on the call replaces the selector's root (ADR 0038).
-      const effective: FrontierRoot | undefined = root ??
-        (options.ids !== undefined
-          ? { kind: "list", ids: options.ids }
-          : options.parent !== undefined
-          ? { kind: "parent", id: options.parent }
-          : undefined);
+      const effective = root ?? optionalRoot(options.parent, options.ids);
       if (effective?.kind === "list") {
         for (const id of effective.ids) {
           if (!known.has(id)) {

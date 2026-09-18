@@ -29,6 +29,22 @@ export type FrontierRoot =
   | { readonly kind: "parent"; readonly id: string }
   | { readonly kind: "list"; readonly ids: readonly string[] };
 
+// The root a Tracker Adapter's own options stand in with when a Run names
+// none on the call (ADR 0038): the explicit list wins over the parent, as
+// only one root names a Frontier.
+export function optionalRoot(
+  parent: string | undefined,
+  ids: string[] | undefined,
+): FrontierRoot | undefined {
+  if (ids !== undefined) {
+    return { kind: "list", ids };
+  }
+  if (parent !== undefined) {
+    return { kind: "parent", id: parent };
+  }
+  return undefined;
+}
+
 // Where a finished Ticket's work went. The Run Branch and the merge commit are
 // the only durable pointers to it, since the Ticket's own Branch is deleted as
 // it merges (ADR 0028), and a Ticket that names them says nothing a Tracker
@@ -58,7 +74,7 @@ const defaults: Pick<
     if (root !== undefined) {
       return Promise.reject(
         new Error(
-          "This Tracker Adapter does not honor a root; implement frontier(root) or name the Frontier with the selector alone.",
+          "This Tracker Adapter does not honor a root, so a rooted Run cannot start. Drop the root flags or pick a Tracker Adapter that names a root.",
         ),
       );
     }

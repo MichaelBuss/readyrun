@@ -1,7 +1,7 @@
 import { landingComment } from "../landing-comment.ts";
 import {
   createTrackerAdapter,
-  type FrontierRoot,
+  optionalRoot,
   type TrackerAdapter,
 } from "../tracker-adapter.ts";
 import type { Ticket } from "../ticket.ts";
@@ -280,18 +280,6 @@ export function linear(
     };
   }
 
-  // The root named per Run reaches the Adapter as an argument (ADR 0038); a
-  // config-level root is what stands in when none is named on the call.
-  function optionsRoot(): FrontierRoot | undefined {
-    if (options.ids !== undefined) {
-      return { kind: "list", ids: options.ids };
-    }
-    if (options.parent !== undefined) {
-      return { kind: "parent", id: options.parent };
-    }
-    return undefined;
-  }
-
   // The Frontier query answers every Ticket regardless of state, so a named
   // Ticket's absence or state is a lie the Adapter can see directly.
   function refuseTicketLie(id: string, node: IssueNode | undefined): void {
@@ -315,7 +303,9 @@ export function linear(
         if (!blocking) {
           throw new Error("Linear cannot express blocking");
         }
-        const effective = root ?? optionsRoot();
+        // The root named per Run reaches the Adapter as an argument (ADR 0038); a
+      // config-level root is what stands in when none is named on the call.
+      const effective = root ?? optionalRoot(options.parent, options.ids);
         suggestedBranches.clear();
         const issues = await paginate<FrontierData, IssueNode>(
           "Frontier",
@@ -328,21 +318,20 @@ export function linear(
           for (const id of effective.ids) {
             const node = byId.get(id);
             refuseTicketLie(id, node);
-            if (
-              node !== undefined &&
-              !hasLeftFrontier(node.state) &&
-              blockedBy(node).length === 0
-            ) {
+            if (node !== undefined && blockedBy(node).length === 0) {
               matched.push(node);
             }
           }
         } else {
           for (const node of issues) {
             if (effective?.kind === "parent") {
+              // The parent narrows the selector's Frontier, so its children
+              // are still selector Tickets: labels and unblocked both apply.
               if (
                 node.parent === null ||
                 node.parent.identifier !== effective.id ||
-                !matchesSelector(node, options)
+                !matchesSelector(node, options) ||
+                blockedBy(node).length > 0
               ) {
                 continue;
               }

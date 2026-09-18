@@ -3,7 +3,7 @@ import { promisify } from "node:util";
 import { landingComment } from "../landing-comment.ts";
 import {
   createTrackerAdapter,
-  type FrontierRoot,
+  optionalRoot,
   type TrackerAdapter,
 } from "../tracker-adapter.ts";
 import type { Ticket } from "../ticket.ts";
@@ -244,20 +244,6 @@ export function github(
     };
   }
 
-  // The root named per Run reaches the Adapter as an argument (ADR 0038); a
-  // config-level root is what stands in when none is named on the call.
-  function optionsRoot(): FrontierRoot | undefined {
-    if (options.ids !== undefined) {
-      return { kind: "list", ids: options.ids };
-    }
-    if (options.parent !== undefined) {
-      return { kind: "parent", id: options.parent };
-    }
-    return undefined;
-  }
-
-  // The Frontier query only answers open issues, so a named Ticket missing
-  // from it is probed: a closed Ticket is a lie, and so is a nonexistent one.
   async function probeTicket(id: string): Promise<"OPEN" | "CLOSED" | null> {
     const number = Number(id);
     if (!Number.isInteger(number)) {
@@ -296,7 +282,9 @@ export function github(
         if (!blocking) {
           throw new Error("GitHub cannot express blocking");
         }
-        const effective = root ?? optionsRoot();
+        // The root named per Run reaches the Adapter as an argument (ADR 0038); a
+      // config-level root is what stands in when none is named on the call.
+      const effective = root ?? optionalRoot(options.parent, options.ids);
         // A bypassed selector must not judge its own blockers, so a list's
         // Tickets are read with no selector labels at all.
         const bypass = effective?.kind === "list";
@@ -335,9 +323,12 @@ export function github(
             }
           }
         } else if (effective?.kind === "parent") {
+          // The parent narrows the selector's Frontier, so its children are
+          // still selector Tickets: labels and unblocked both apply.
           frontier = tickets.filter((ticket) =>
             ticket.parent === effective.id &&
-            options.labels.every((label) => ticket.labels.includes(label))
+            options.labels.every((label) => ticket.labels.includes(label)) &&
+            ticket.blockedBy.length === 0
           );
           // A closed parent can still hold open children, so the parent is
           // probed even when children answered.

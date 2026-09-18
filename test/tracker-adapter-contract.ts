@@ -115,6 +115,7 @@ export function trackerAdapterContract(
     const adapter = await create({
       tickets: [
         ticket({ id: "11", parent: "8" }),
+        ticket({ id: "13", parent: "8", blockedBy: ["12"] }),
         ticket({ id: "12", parent: "9" }),
         ticket({ id: "8" }),
       ],
