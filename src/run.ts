@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { defineConfig, type ReadyRunConfig } from "./config.ts";
 import { collectDoctorFailures, discloseBase, writeDoctorFailures, warnUnusedModelsByLabel } from "./doctor.ts";
 import { startLiveness, type Liveness, type LivenessStdout } from "./liveness.ts";
@@ -320,7 +320,9 @@ async function runWithLiveness(
     live.stage("Worktree");
     let worktree;
     try {
-      worktree = await createTicketWorktree(cwd, branch, runBranchTip);
+      // Absolute, because the prompt names it (ADR 0036) and a relative cwd
+      // would make "Your working directory is ..." point somewhere else.
+      worktree = resolve(await createTicketWorktree(cwd, branch, runBranchTip));
       keptWorktree = worktree;
     } catch (error) {
       return stop(
@@ -346,7 +348,12 @@ async function runWithLiveness(
         model: resolveModel(ticket, config, options.model),
         permissions: options.permissions ?? config.permissions,
         effort: options.effort ?? config.effort,
-        prompt: composeWorkerPrompt(config.tracker.promptCopy(ticket), context),
+        prompt: composeWorkerPrompt(
+          config.tracker.promptCopy(ticket),
+          worktree,
+          branch,
+          context,
+        ),
       });
     } catch (error) {
       return stop(
