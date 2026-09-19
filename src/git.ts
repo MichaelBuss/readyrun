@@ -381,7 +381,7 @@ export async function addDetachedWorktree(
   cwd: string,
   worktreePath: string,
 ): Promise<void> {
-  // Detached, so the probe creates no Branch at all — the Ticket-branch
+  // Detached, so the probe creates no Branch at all — the Ticket Branch
   // namespace stays untouched by definition.
   await exec("git", ["-C", cwd, "worktree", "add", "--detach", worktreePath, "HEAD"]);
 }

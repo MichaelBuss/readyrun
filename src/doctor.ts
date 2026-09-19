@@ -131,7 +131,6 @@ async function check(
       );
       const failure = await probeCwdFidelity(config.worker, cwd, {
         model: config.model,
-        permissions,
         timeoutMs: options.probeTimeoutMs,
       });
       if (failure !== undefined) {

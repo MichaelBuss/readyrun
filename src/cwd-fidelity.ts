@@ -7,13 +7,13 @@ import {
   removeWorktree,
 } from "./git.ts";
 import type { Ticket } from "./ticket.ts";
-import type { Permissions, SpawnRequest, WorkerAdapter } from "./worker-adapter.ts";
+import type { SpawnRequest, WorkerAdapter } from "./worker-adapter.ts";
 
 // The probe makes a real model call on a trivial prompt, so it must answer
 // quickly; a Worker that hangs is a Doctor failure, not a Doctor hang.
-export const cwdProbeTimeoutMs = 60_000;
+const cwdProbeTimeoutMs = 60_000;
 
-export const cwdProbePrompt =
+const cwdProbePrompt =
   "Print the output of `git rev-parse --show-toplevel` and nothing else.";
 
 const worktreeParentPrefix = "readyrun-cwd-probe-";
@@ -29,9 +29,6 @@ const probeTicket: Ticket = {
 
 export type CwdProbeOptions = {
   model: string;
-  // Always unattended in the spawn itself: Doctor has nobody to answer a
-  // prompt, and ask-mode print adapters are refused elsewhere.
-  permissions?: Permissions;
   timeoutMs?: number;
 };
 
@@ -55,7 +52,9 @@ export async function probeCwdFidelity(
       ticket: probeTicket,
       cwd: worktreePath,
       model: options.model,
-      permissions: options.permissions ?? "unattended",
+      // Doctor has nobody to answer a prompt, so the probe always spawns
+      // unattended; ask-mode print adapters are refused by Doctor anyway.
+      permissions: "unattended",
       prompt: cwdProbePrompt,
       capture: true,
       timeoutMs: options.timeoutMs ?? cwdProbeTimeoutMs,

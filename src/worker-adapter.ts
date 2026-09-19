@@ -191,7 +191,7 @@ export function printModeWorker(
       }
       args.push(request.prompt);
       return spawnWorkerBinary(bin, args, request.cwd, {
-        capture: request.capture === true,
+        capture: request.capture,
         timeoutMs: request.timeoutMs,
       });
     },

@@ -37,7 +37,7 @@ export function custom(options: CustomWorkerOptions): CustomWorkerAdapter {
           request.prompt,
         ];
         return spawnWorkerBinary(options.bin, args, request.cwd, {
-          capture: request.capture === true,
+          capture: request.capture,
           timeoutMs: request.timeoutMs,
         });
       },
