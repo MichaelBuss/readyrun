@@ -5,8 +5,10 @@ import { collectDoctorFailures, discloseBase, writeDoctorFailures, warnUnusedMod
 import { startLiveness, type Liveness, type LivenessStdout } from "./liveness.ts";
 import {
   branchTreeDiffersFrom,
+  captureRepoSnapshot,
   collectOntoRunBranch,
   createTicketWorktree,
+  escapeDetail,
   removeTicketWorktree,
   resolveRunBase,
   shortCommit,
@@ -341,6 +343,15 @@ async function runWithLiveness(
       cap,
     });
     live.stage("Worker");
+    // Repo-global state is snapshotted per spawn and diffed after the Worker
+    // exits, so work that landed anywhere but the Ticket's Worktree and Branch
+    // is named as the escape it is instead of mistaken for nothing (ADR 0037).
+    let beforeSpawn;
+    try {
+      beforeSpawn = await captureRepoSnapshot(cwd, branch);
+    } catch (error) {
+      return stop("git", ticket.id, caughtMessage(error));
+    }
     let result;
     try {
       result = await config.worker.spawn({
@@ -362,6 +373,21 @@ async function runWithLiveness(
         ticket.id,
         caughtMessage(error),
         "Check the Worker binary and that it is logged in",
+      );
+    }
+    let afterSpawn;
+    try {
+      afterSpawn = await captureRepoSnapshot(cwd, branch);
+    } catch (error) {
+      return stop("git", ticket.id, caughtMessage(error));
+    }
+    const escaped = escapeDetail(beforeSpawn, afterSpawn);
+    if (escaped !== undefined) {
+      return stop(
+        "worker",
+        ticket.id,
+        escaped,
+        "The Ticket remains on the Frontier",
       );
     }
     if (result.exitCode !== 0) {

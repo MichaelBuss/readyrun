@@ -4,8 +4,8 @@ import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
-import { collectOntoRunBranch, createTicketWorktree, headCommit, originRepository, WorktreeExistsError, WorktreeInstallError } from "../src/git.ts";
-import { commitMismatchedNpmLockfile, commitNpmConsumer, commitRepoFiles, throwawayRepo } from "./throwaway-repo.ts";
+import { captureRepoSnapshot, collectOntoRunBranch, createTicketWorktree, escapeDetail, headCommit, originRepository, WorktreeExistsError, WorktreeInstallError } from "../src/git.ts";
+import { commitMismatchedNpmLockfile, commitNpmConsumer, commitRepoFiles, git, throwawayRepo } from "./throwaway-repo.ts";
 
 const exec = promisify(execFile);
 
@@ -290,6 +290,158 @@ test("createTicketWorktree refuses a leftover Worktree directory even when the B
     await assert.rejects(
       createTicketWorktree(repo.cwd, "readyrun/52", await headCommit(repo.cwd)),
       WorktreeExistsError,
+    );
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("captureRepoSnapshot reads HEAD, the branch, porcelain without .readyrun/, and refs without the Ticket's Branch", async () => {
+  const repo = await throwawayRepo();
+  try {
+    const head = await headCommit(repo.cwd);
+    await writeFile(join(repo.cwd, "dirt.txt"), "the Consumer's\n");
+    await mkdir(join(repo.cwd, ".readyrun"), { recursive: true });
+    await writeFile(join(repo.cwd, ".readyrun", "own.txt"), "ReadyRun's\n");
+    await git(repo.cwd, ["branch", "readyrun/52"]);
+    await git(repo.cwd, ["branch", "elsewhere"]);
+
+    const snapshot = await captureRepoSnapshot(repo.cwd, "readyrun/52");
+
+    assert.equal(snapshot.head, head);
+    assert.equal(snapshot.branch, "main");
+    assert.deepEqual(snapshot.porcelain, ["?? dirt.txt"]);
+    assert.deepEqual([...snapshot.refs.keys()], [
+      "refs/heads/elsewhere",
+      "refs/heads/main",
+    ]);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("captureRepoSnapshot leaves the branch undefined on a detached checkout", async () => {
+  const repo = await throwawayRepo();
+  try {
+    await git(repo.cwd, ["checkout", "--detach"]);
+
+    const snapshot = await captureRepoSnapshot(repo.cwd, "readyrun/52");
+
+    assert.equal(snapshot.branch, undefined);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("escapeDetail is undefined when only the excluded Ticket Branch moved", async () => {
+  const repo = await throwawayRepo();
+  try {
+    await git(repo.cwd, ["branch", "readyrun/52"]);
+    await git(repo.cwd, ["branch", "elsewhere"]);
+    await writeFile(join(repo.cwd, "dirt.txt"), "the Consumer's\n");
+    const before = await captureRepoSnapshot(repo.cwd, "readyrun/52");
+
+    await git(repo.cwd, ["branch", "-f", "readyrun/52", "elsewhere"]);
+
+    assert.equal(
+      escapeDetail(before, await captureRepoSnapshot(repo.cwd, "readyrun/52")),
+      undefined,
+    );
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("escapeDetail names an advanced Consumer HEAD with both shas and the branch", async () => {
+  const repo = await throwawayRepo();
+  try {
+    const before = await captureRepoSnapshot(repo.cwd, "readyrun/52");
+    await git(repo.cwd, ["commit", "--allow-empty", "-m", "escape"]);
+
+    const detail = escapeDetail(
+      before,
+      await captureRepoSnapshot(repo.cwd, "readyrun/52"),
+    );
+
+    assert.match(
+      detail ?? "",
+      /^the Consumer's checkout advanced from [0-9a-f]{7} to [0-9a-f]{7} on main; ref refs\/heads\/main moved from [0-9a-f]{7} to [0-9a-f]{7}$/,
+    );
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("escapeDetail omits the branch on an advanced detached checkout", async () => {
+  const repo = await throwawayRepo();
+  try {
+    const before = await captureRepoSnapshot(repo.cwd, "readyrun/52");
+    await git(repo.cwd, ["checkout", "--detach"]);
+    await git(repo.cwd, ["commit", "--allow-empty", "-m", "escape"]);
+
+    const detail = escapeDetail(
+      before,
+      await captureRepoSnapshot(repo.cwd, "readyrun/52"),
+    );
+
+    assert.match(
+      detail ?? "",
+      /^the Consumer's checkout advanced from [0-9a-f]{7} to [0-9a-f]{7}$/,
+    );
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("escapeDetail names porcelain entries that appeared, changed, or were cleared", async () => {
+  const repo = await throwawayRepo();
+  try {
+    await writeFile(join(repo.cwd, "cleared.txt"), "dirt\n");
+    const before = await captureRepoSnapshot(repo.cwd, "readyrun/52");
+    await rm(join(repo.cwd, "cleared.txt"));
+    await writeFile(join(repo.cwd, "README"), "changed\n");
+    await writeFile(join(repo.cwd, "appeared.txt"), "new\n");
+
+    const detail = escapeDetail(
+      before,
+      await captureRepoSnapshot(repo.cwd, "readyrun/52"),
+    );
+
+    assert.match(
+      detail ?? "",
+      /uncommitted changes appeared in the Consumer's checkout \( M README, \?\? appeared\.txt\)/,
+    );
+    assert.match(
+      detail ?? "",
+      /uncommitted changes were cleared from the Consumer's checkout \(.{1,4}cleared\.txt\)/,
+    );
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("escapeDetail names refs that were created or deleted, including remote-tracking refs", async () => {
+  const repo = await throwawayRepo();
+  try {
+    await git(repo.cwd, ["branch", "elsewhere"]);
+    const before = await captureRepoSnapshot(repo.cwd, "readyrun/52");
+    await git(repo.cwd, ["branch", "somewhere-else"]);
+    await git(repo.cwd, ["branch", "-D", "elsewhere"]);
+    await git(repo.cwd, ["update-ref", "refs/remotes/origin/main", "HEAD"]);
+
+    const detail = escapeDetail(
+      before,
+      await captureRepoSnapshot(repo.cwd, "readyrun/52"),
+    );
+
+    assert.match(
+      detail ?? "",
+      /ref refs\/heads\/somewhere-else was created at [0-9a-f]{7}/,
+    );
+    assert.match(detail ?? "", /ref refs\/heads\/elsewhere was deleted/);
+    assert.match(
+      detail ?? "",
+      /ref refs\/remotes\/origin\/main was created at [0-9a-f]{7}/,
     );
   } finally {
     await repo.cleanup();
