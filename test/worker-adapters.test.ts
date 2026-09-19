@@ -1,67 +1,16 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { delimiter, isAbsolute, join } from "node:path";
+import { isAbsolute } from "node:path";
 import { describe, test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { spawnWorkerBinary } from "../src/worker-adapter.ts";
 import { claude, cursor, custom, defineConfig, doctor, run } from "../src/mod.ts";
 import { memoryTracker } from "../src/testing/mod.ts";
 import { ticket } from "./tracker-adapter-contract.ts";
 import { throwawayRepo } from "./throwaway-repo.ts";
+import { readReceipt, withRecordingPath } from "./stub-worker.ts";
 
 const silent = { write(_chunk?: string) { return true; } };
-const tmpRoot = join(fileURLToPath(new URL(".", import.meta.url)), ".tmp");
 
-type SpawnReceipt = {
-  bin: string;
-  argv: string[];
-  cwd: string;
-};
-
-const stubSource = `#!/usr/bin/env node
-import { writeFileSync } from "node:fs";
-import { basename } from "node:path";
-writeFileSync(process.env.READYRUN_SPAWN_RECEIPT, JSON.stringify({
-  bin: basename(process.argv[1]),
-  argv: process.argv.slice(2),
-  cwd: process.cwd(),
-}));
-if (process.env.READYRUN_STUB_STDOUT !== undefined) {
-  process.stdout.write(process.env.READYRUN_STUB_STDOUT);
-}
-process.exitCode = Number(process.env.READYRUN_STUB_EXIT_CODE ?? "0");
-`;
-
-async function withRecordingPath(
-  names: string[],
-  fn: (paths: { bin: string; receiptPath: string }) => Promise<void>,
-): Promise<void> {
-  await mkdir(tmpRoot, { recursive: true });
-  const dir = await mkdtemp(join(tmpRoot, "bin-"));
-  const receiptPath = join(dir, "receipt.json");
-  for (const name of names) {
-    await writeFile(join(dir, name), stubSource, { mode: 0o755 });
-  }
-  const previousPath = process.env.PATH;
-  const previousReceipt = process.env.READYRUN_SPAWN_RECEIPT;
-  process.env.PATH = `${dir}${delimiter}${previousPath ?? ""}`;
-  process.env.READYRUN_SPAWN_RECEIPT = receiptPath;
-  try {
-    await fn({ bin: join(dir, names[0] ?? "stub"), receiptPath });
-  } finally {
-    process.env.PATH = previousPath;
-    if (previousReceipt === undefined) {
-      delete process.env.READYRUN_SPAWN_RECEIPT;
-    } else {
-      process.env.READYRUN_SPAWN_RECEIPT = previousReceipt;
-    }
-    await rm(dir, { recursive: true, force: true });
-  }
-}
-
-async function readReceipt(receiptPath: string): Promise<SpawnReceipt> {
-  return JSON.parse(await readFile(receiptPath, "utf8")) as SpawnReceipt;
-}
 
 describe("Worker Adapters", { concurrency: false }, () => {
   test("a custom Worker Adapter Run spawns that binary with the prompt, model, and Worktree as cwd", async () => {
@@ -1058,7 +1007,7 @@ describe("Worker Adapters", { concurrency: false }, () => {
     }
   });
 
-  test("Doctor does not spawn a custom Worker Adapter with no probe defined", async () => {
+  test("a custom Worker Adapter with no auth probe is still spawned once by Doctor's cwd-fidelity probe, inside the probe Worktree", async () => {
     const repo = await throwawayRepo();
     try {
       await withRecordingPath(["readyrun-worker"], async ({ bin, receiptPath }) => {
@@ -1076,10 +1025,65 @@ describe("Worker Adapters", { concurrency: false }, () => {
           stdout: silent,
         });
         assert.equal(doctorExit, 0);
-        assert.equal(existsSync(receiptPath), false);
+        const receipt = await readReceipt(receiptPath);
+        assert.match(
+          receipt.argv.at(-1) ?? "",
+          /git rev-parse --show-toplevel/,
+        );
+        assert.notEqual(receipt.cwd, repo.cwd);
+        assert.match(receipt.cwd, /readyrun-cwd-probe-/);
       });
     } finally {
       await repo.cleanup();
+    }
+  });
+
+  test("spawnWorkerBinary with capture pipes the Worker's stdout back instead of inheriting it", async () => {
+    const previousStdout = process.env.READYRUN_STUB_STDOUT;
+    process.env.READYRUN_STUB_STDOUT = "auth ok\n";
+    try {
+      await withRecordingPath(["readyrun-worker"], async ({ bin }) => {
+        const result = await spawnWorkerBinary(
+          bin,
+          ["--model", "composer-2", "hello"],
+          process.cwd(),
+          { capture: true },
+        );
+        assert.equal(result.exitCode, 0);
+        assert.equal(result.stdout, "auth ok\n");
+      });
+    } finally {
+      if (previousStdout === undefined) {
+        delete process.env.READYRUN_STUB_STDOUT;
+      } else {
+        process.env.READYRUN_STUB_STDOUT = previousStdout;
+      }
+    }
+  });
+
+  test("spawnWorkerBinary with capture and a timeout kills a Worker that never exits and reports timedOut", async () => {
+    const previousHang = process.env.READYRUN_PROBE_HANG;
+    process.env.READYRUN_PROBE_HANG = "1";
+    try {
+      await withRecordingPath(["readyrun-worker"], async ({ bin }) => {
+        const started = Date.now();
+        const result = await spawnWorkerBinary(
+          bin,
+          ["Print the output of `git rev-parse --show-toplevel` and nothing else."],
+          process.cwd(),
+          { capture: true, timeoutMs: 300 },
+        );
+        assert.equal(result.timedOut, true);
+        assert.equal(result.stdout, process.cwd());
+        const elapsed = Date.now() - started;
+        assert.ok(elapsed < 5_000, `expected a kill, took ${elapsed}ms`);
+      });
+    } finally {
+      if (previousHang === undefined) {
+        delete process.env.READYRUN_PROBE_HANG;
+      } else {
+        process.env.READYRUN_PROBE_HANG = previousHang;
+      }
     }
   });
 });

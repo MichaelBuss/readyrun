@@ -374,6 +374,31 @@ export async function removeTicketWorktree(
   await git(cwd, ["worktree", "remove", worktreePath]);
 }
 
+// The Doctor cwd-fidelity probe (ADR 0037) cuts its throwaway Worktree with
+// these, not with createTicketWorktree: no Ticket-branch rules, no dependency
+// install, and a path outside the Consumer's checkout entirely.
+export async function addDetachedWorktree(
+  cwd: string,
+  worktreePath: string,
+): Promise<void> {
+  // Detached, so the probe creates no Branch at all — the Ticket-branch
+  // namespace stays untouched by definition.
+  await exec("git", ["-C", cwd, "worktree", "add", "--detach", worktreePath, "HEAD"]);
+}
+
+export async function removeWorktree(
+  cwd: string,
+  worktreePath: string,
+): Promise<void> {
+  // `--force` because the probe Worker may have left the Worktree dirty; what
+  // it did there is the probe's answer, nothing worth keeping.
+  await exec("git", ["-C", cwd, "worktree", "remove", "--force", worktreePath]);
+}
+
+export async function pruneWorktrees(cwd: string): Promise<void> {
+  await exec("git", ["-C", cwd, "worktree", "prune"]);
+}
+
 async function installWorktreeDependencies(worktreePath: string): Promise<void> {
   const command = await detectInstallCommand(worktreePath);
   if (command === undefined) {

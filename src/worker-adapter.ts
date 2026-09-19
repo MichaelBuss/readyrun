@@ -20,6 +20,20 @@ export type SpawnRequest = {
   permissions: Permissions;
   effort?: Effort;
   prompt: string;
+  // Set only by Doctor's cwd-fidelity probe (ADR 0037): the Adapter must pipe
+  // the Worker's output back instead of inheriting the terminal, and kill it
+  // after timeoutMs. A Run's spawns set neither.
+  capture?: true;
+  timeoutMs?: number;
+};
+
+// A capture spawn answers with what the Worker printed; an inherit spawn
+// (a Run's) answers with the exit code alone.
+export type SpawnResult = {
+  exitCode: number;
+  timedOut?: true;
+  stdout?: string;
+  stderr?: string;
 };
 
 export type ProbeResult = { ok: true } | { ok: false; detail: string };
@@ -33,7 +47,7 @@ export type WorkerAdapter = {
   readonly printMode?: true;
   readonly probe?: () => Promise<ProbeResult>;
   readonly staticArgv?: StaticArgv;
-  spawn(request: SpawnRequest): Promise<{ exitCode: number }>;
+  spawn(request: SpawnRequest): Promise<SpawnResult>;
 };
 
 export function createWorkerAdapter(
@@ -70,12 +84,49 @@ export function spawnWorkerBinary(
   bin: string,
   args: string[],
   cwd: string,
-): Promise<{ exitCode: number }> {
+  options: { capture?: boolean; timeoutMs?: number } = {},
+): Promise<SpawnResult> {
+  const { capture, timeoutMs } = options;
   return new Promise((resolve, reject) => {
-    const child = spawn(bin, args, { cwd, stdio: "inherit" });
-    child.on("error", reject);
+    const child = spawn(bin, args, {
+      cwd,
+      stdio: capture ? ["ignore", "pipe", "pipe"] : "inherit",
+    });
+    let stdout = "";
+    let stderr = "";
+    if (capture) {
+      child.stdout?.on("data", (chunk: Buffer) => {
+        stdout += chunk.toString();
+      });
+      child.stderr?.on("data", (chunk: Buffer) => {
+        stderr += chunk.toString();
+      });
+    }
+    let timedOut = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    if (capture && timeoutMs !== undefined) {
+      timer = setTimeout(() => {
+        timedOut = true;
+        // A probe Worker that ignores its exit has no say: Doctor must not
+        // hang on it. SIGKILL because the child never agreed to be asked.
+        child.kill("SIGKILL");
+      }, timeoutMs);
+    }
+    child.on("error", (error) => {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
+      reject(error);
+    });
     child.on("close", (code) => {
-      resolve({ exitCode: code ?? 1 });
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
+      resolve({
+        exitCode: code ?? 1,
+        ...(timedOut ? { timedOut: true as const } : {}),
+        ...(capture ? { stdout, stderr } : {}),
+      });
     });
   });
 }
@@ -139,7 +190,10 @@ export function printModeWorker(
         args.push(unattendedFlag);
       }
       args.push(request.prompt);
-      return spawnWorkerBinary(bin, args, request.cwd);
+      return spawnWorkerBinary(bin, args, request.cwd, {
+        capture: request.capture === true,
+        timeoutMs: request.timeoutMs,
+      });
     },
   });
 }

@@ -1,6 +1,6 @@
 export { defineConfig } from "./config.ts";
 export type { ReadyRunConfig } from "./config.ts";
-export { doctor } from "./doctor.ts";
+export { doctor, collectDoctorFailures, writeDoctorFailures } from "./doctor.ts";
 export type { DoctorOptions } from "./doctor.ts";
 export { init } from "./init.ts";
 export type { InitAnswers, InitOptions } from "./init.ts";
