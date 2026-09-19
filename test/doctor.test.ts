@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
 import { cli } from "../src/cli.ts";
+import { collectDoctorFailures, writeDoctorFailures } from "../src/doctor.ts";
 import {
   createTrackerAdapter,
   custom,
@@ -18,7 +20,8 @@ import { memoryTracker, recordingWorker } from "../src/testing/mod.ts";
 import { createWorkerAdapter } from "../src/worker-adapter.ts";
 import { githubFromWorld } from "./github-http-fixture.ts";
 import { ticket } from "./tracker-adapter-contract.ts";
-import { commitNpmConsumer, throwawayRepo } from "./throwaway-repo.ts";
+import { commitNpmConsumer, git, runBranches, throwawayRepo } from "./throwaway-repo.ts";
+import { readReceipt, withRecordingPath } from "./stub-worker.ts";
 
 const exec = promisify(execFile);
 const silent = { write(_chunk?: string) { return true; } };
@@ -695,6 +698,239 @@ test("a Worker Adapter with no probe defined keeps today's existence-only check"
     });
     assert.equal(doctorExit, 0);
     assert.doesNotMatch(chunks.join(""), /probe/);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+const probePromptRe = /git rev-parse --show-toplevel/;
+
+// The probe's own receipt names the Worktree it ran in; its parent is the
+// throwaway temp dir, which must be gone after every outcome.
+async function assertProbeWorktreeGone(
+  repoCwd: string,
+  receiptPath: string,
+): Promise<void> {
+  const receipt = await readReceipt(receiptPath);
+  const parent = dirname(receipt.cwd);
+  assert.equal(existsSync(parent), false, `expected ${parent} to be gone`);
+  assert.doesNotMatch(
+    await git(repoCwd, ["worktree", "list", "--porcelain"]),
+    /readyrun-cwd-probe-/,
+  );
+}
+
+test("Doctor proves cwd fidelity: a Worker that answers with its Worktree passes, and the receipt shows it ran inside the throwaway Worktree", async () => {
+  const repo = await throwawayRepo();
+  try {
+    await withRecordingPath(["readyrun-worker"], async ({ bin, receiptPath }) => {
+      const chunks: string[] = [];
+      const doctorExit = await doctor({
+        config: defineConfig({
+          tracker: memoryTracker({
+            tickets: [ticket({ id: "52" })],
+            ready: "unblocked",
+            labels: ["ready-for-agent"],
+          }),
+          worker: custom({ bin, unattendedFlag: "--go" }),
+          model: "composer-2",
+        }),
+        cwd: repo.cwd,
+        stdout: {
+          write(chunk: string) {
+            chunks.push(chunk);
+            return true;
+          },
+        },
+      });
+      assert.equal(doctorExit, 0);
+      assert.match(chunks.join(""), /Probing Worker cwd fidelity/);
+      assert.match(chunks.join(""), /runs the Worker once/);
+
+      const receipt = await readReceipt(receiptPath);
+      assert.match(receipt.argv.at(-1) ?? "", probePromptRe);
+      assert.match(receipt.cwd, /readyrun-cwd-probe-/);
+      assert.match(receipt.cwd, /worktree$/);
+      assert.notEqual(receipt.cwd, repo.cwd);
+      await assertProbeWorktreeGone(repo.cwd, receiptPath);
+    });
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("a Worker Adapter that re-roots linked worktrees fails Doctor with the fix-naming message, and a Run does not start", async () => {
+  const repo = await throwawayRepo();
+  try {
+    await withRecordingPath(["readyrun-worker"], async ({ bin, receiptPath }) => {
+      const previousStdout = process.env.READYRUN_PROBE_STDOUT;
+      process.env.READYRUN_PROBE_STDOUT = repo.cwd;
+      try {
+        const chunks: string[] = [];
+        const config = defineConfig({
+          tracker: memoryTracker({
+            tickets: [ticket({ id: "52" })],
+            ready: "unblocked",
+            labels: ["ready-for-agent"],
+          }),
+          worker: custom({ bin, unattendedFlag: "--go" }),
+          model: "composer-2",
+        });
+        const doctorExit = await doctor({
+          config,
+          cwd: repo.cwd,
+          stdout: {
+            write(chunk: string) {
+              chunks.push(chunk);
+              return true;
+            },
+          },
+        });
+        assert.equal(doctorExit, 1);
+        const output = chunks.join("");
+        assert.match(output, /Doctor: Worker Adapter re-roots linked worktrees/);
+        assert.match(output, /Worktree anchor \(\{cwd\} or its equivalent\)/);
+
+        const runExit = await run({
+          config,
+          cap: 1,
+          cwd: repo.cwd,
+          stdout: silent,
+        });
+        assert.equal(runExit, 1);
+        assert.deepEqual(await runBranches(repo.cwd), []);
+        await assertProbeWorktreeGone(repo.cwd, receiptPath);
+      } finally {
+        if (previousStdout === undefined) {
+          delete process.env.READYRUN_PROBE_STDOUT;
+        } else {
+          process.env.READYRUN_PROBE_STDOUT = previousStdout;
+        }
+      }
+    });
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("a Worker Adapter that never exits fails Doctor's cwd-fidelity probe via timeout, not a hang", async () => {
+  const repo = await throwawayRepo();
+  try {
+    await withRecordingPath(["readyrun-worker"], async ({ bin, receiptPath }) => {
+      const previousHang = process.env.READYRUN_PROBE_HANG;
+      process.env.READYRUN_PROBE_HANG = "1";
+      try {
+        const failures = await collectDoctorFailures(
+          defineConfig({
+            tracker: memoryTracker({
+              tickets: [ticket({ id: "52" })],
+              ready: "unblocked",
+              labels: ["ready-for-agent"],
+            }),
+            worker: custom({ bin, unattendedFlag: "--go" }),
+            model: "composer-2",
+          }),
+          repo.cwd,
+          undefined,
+          "ask",
+          undefined,
+          { probeTimeoutMs: 300 },
+        );
+        const output: string[] = [];
+        writeDoctorFailures(
+          {
+            write(chunk: string) {
+              output.push(chunk);
+              return true;
+            },
+          },
+          failures,
+        );
+        assert.match(output.join(""), /Doctor: Worker Adapter cwd-fidelity probe timed out/);
+        assert.match(output.join(""), /without exiting/);
+        await assertProbeWorktreeGone(repo.cwd, receiptPath);
+      } finally {
+        if (previousHang === undefined) {
+          delete process.env.READYRUN_PROBE_HANG;
+        } else {
+          process.env.READYRUN_PROBE_HANG = previousHang;
+        }
+      }
+    });
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("a missing Worker binary skips the cwd-fidelity check rather than spawning anything", async () => {
+  const repo = await throwawayRepo();
+  try {
+    const chunks: string[] = [];
+    const doctorExit = await doctor({
+      config: defineConfig({
+        tracker: memoryTracker({
+          tickets: [ticket({ id: "52" })],
+          ready: "unblocked",
+          labels: ["ready-for-agent"],
+        }),
+        worker: custom({
+          bin: "/no/such/readyrun-worker",
+          unattendedFlag: "--go",
+        }),
+        model: "composer-2",
+      }),
+      cwd: repo.cwd,
+      stdout: {
+        write(chunk: string) {
+          chunks.push(chunk);
+          return true;
+        },
+      },
+    });
+    assert.equal(doctorExit, 1);
+    const output = chunks.join("");
+    assert.match(output, /Doctor: Worker binary "\/no\/such\/readyrun-worker" is missing/);
+    assert.doesNotMatch(output, /re-roots linked worktrees/);
+    assert.doesNotMatch(output, /Probing Worker cwd fidelity/);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("the cwd-fidelity check composes with the auth probe: both run and both failures report", async () => {
+  const repo = await throwawayRepo();
+  try {
+    await withRecordingPath(["readyrun-worker"], async ({ bin }) => {
+      const chunks: string[] = [];
+      const config = defineConfig({
+        tracker: memoryTracker({
+          tickets: [ticket({ id: "52" })],
+          ready: "unblocked",
+          labels: ["ready-for-agent"],
+        }),
+        worker: createWorkerAdapter({
+          bin,
+          probe: () => Promise.resolve({ ok: false, detail: "not logged in" }),
+          spawn: () =>
+            Promise.resolve({ exitCode: 0, stdout: "/somewhere/else\n" }),
+        }),
+        model: "composer-2",
+      });
+      const doctorExit = await doctor({
+        config,
+        cwd: repo.cwd,
+        stdout: {
+          write(chunk: string) {
+            chunks.push(chunk);
+            return true;
+          },
+        },
+      });
+      assert.equal(doctorExit, 1);
+      const output = chunks.join("");
+      assert.match(output, /Doctor: Worker Adapter re-roots linked worktrees/);
+      assert.match(output, /Doctor: Worker Adapter probe failed: not logged in/);
+    });
   } finally {
     await repo.cleanup();
   }

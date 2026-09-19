@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { delimiter, isAbsolute, join } from "node:path";
+import { probeCwdFidelity } from "./cwd-fidelity.ts";
 import { defineConfig, type ReadyRunConfig } from "./config.ts";
 import {
   normalizeRepository,
@@ -29,16 +30,44 @@ export type DoctorOptions = {
   stdout?: DoctorStdout;
 };
 
+export type DoctorCheckOptions = {
+  // Doctor discloses that the fidelity probe runs the Worker once (ADR 0037).
+  stdout?: DoctorStdout;
+  probeTimeoutMs?: number;
+};
+
 async function check(
   config: ReadyRunConfig,
   cwd: string,
   effort: Effort | undefined,
   permissions: Permissions,
   root: FrontierRoot | undefined,
+  options: DoctorCheckOptions = {},
 ): Promise<string[]> {
   const failures: string[] = [];
-  if (typeof config.model !== "string" || config.model.length === 0) {
+  const modelOk = typeof config.model === "string" && config.model.length > 0;
+  if (!modelOk) {
     failures.push("missing model default. Set model in config or pass --model.");
+  }
+  // The Worker argv's honesty is checked before any spawn: the cwd-fidelity
+  // probe below must not run for a config whose spawn cannot be believed.
+  let argvPlaceholderLies = false;
+  if (config.worker.staticArgv !== undefined) {
+    const { option, args } = config.worker.staticArgv;
+    for (const arg of args) {
+      for (const token of unknownPlaceholdersIn(arg)) {
+        argvPlaceholderLies = true;
+        failures.push(
+          `Worker Adapter option "${option}" has unknown placeholder "${token}". Only {cwd} is available.`,
+        );
+      }
+    }
+  }
+  const askPrintMode = config.worker.printMode === true && permissions === "ask";
+  if (askPrintMode) {
+    failures.push(
+      "print-mode spawn cannot use permissions ask; pass --permissions unattended",
+    );
   }
   let inspect;
   try {
@@ -90,30 +119,34 @@ async function check(
     failures.push(
       `Worker binary "${config.worker.bin}" is missing. Install it or fix worker.bin.`,
     );
-  } else if (config.worker.probe !== undefined) {
-    const probeResult = await config.worker.probe();
-    if (!probeResult.ok) {
-      failures.push(`Worker Adapter probe failed: ${probeResult.detail}`);
+  } else {
+    if (
+      modelOk &&
+      config.worker.bin !== undefined &&
+      !argvPlaceholderLies &&
+      !askPrintMode
+    ) {
+      options.stdout?.write(
+        "Probing Worker cwd fidelity in a throwaway Worktree (runs the Worker once)\n",
+      );
+      const failure = await probeCwdFidelity(config.worker, cwd, {
+        model: config.model,
+        timeoutMs: options.probeTimeoutMs,
+      });
+      if (failure !== undefined) {
+        failures.push(failure);
+      }
+    }
+    if (config.worker.probe !== undefined) {
+      const probeResult = await config.worker.probe();
+      if (!probeResult.ok) {
+        failures.push(`Worker Adapter probe failed: ${probeResult.detail}`);
+      }
     }
   }
   if (effort !== undefined && config.worker.effortFlag === undefined) {
     failures.push(
       "effort is set but this Worker Adapter does not map it. Unset effort or pick a Worker Adapter that maps it.",
-    );
-  }
-  if (config.worker.staticArgv !== undefined) {
-    const { option, args } = config.worker.staticArgv;
-    for (const arg of args) {
-      for (const token of unknownPlaceholdersIn(arg)) {
-        failures.push(
-          `Worker Adapter option "${option}" has unknown placeholder "${token}". Only {cwd} is available.`,
-        );
-      }
-    }
-  }
-  if (config.worker.printMode === true && permissions === "ask") {
-    failures.push(
-      "print-mode spawn cannot use permissions ask; pass --permissions unattended",
     );
   }
   const installOutput = await unignoredInstallOutput(cwd);
@@ -195,8 +228,9 @@ export async function collectDoctorFailures(
   effort: Effort | undefined = config.effort,
   permissions: Permissions = config.permissions ?? "ask",
   root: FrontierRoot | undefined = undefined,
+  options: DoctorCheckOptions = {},
 ): Promise<string[]> {
-  return check(config, cwd, effort, permissions, root);
+  return check(config, cwd, effort, permissions, root, options);
 }
 
 export function writeDoctorFailures(
@@ -225,6 +259,7 @@ export async function doctor(options: DoctorOptions): Promise<number> {
       config.effort,
       config.permissions,
       options.root,
+      { stdout },
     );
     live.stop();
     if (writeDoctorFailures(stdout, failures) === 1) {

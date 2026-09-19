@@ -36,7 +36,10 @@ export function custom(options: CustomWorkerOptions): CustomWorkerAdapter {
           ...(request.permissions === "unattended" ? [options.unattendedFlag] : []),
           request.prompt,
         ];
-        return spawnWorkerBinary(options.bin, args, request.cwd);
+        return spawnWorkerBinary(options.bin, args, request.cwd, {
+          capture: request.capture,
+          timeoutMs: request.timeoutMs,
+        });
       },
     }),
     { options },

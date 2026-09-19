@@ -222,6 +222,7 @@ async function runWithLiveness(
     options.effort ?? config.effort,
     options.permissions ?? config.permissions,
     options.root,
+    { stdout },
   );
   live.stop();
   if (writeDoctorFailures(stdout, failures) === 1) {
