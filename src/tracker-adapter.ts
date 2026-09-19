@@ -22,6 +22,29 @@ export type TrackerInspect = {
   readonly canExpressBlocking: boolean;
 };
 
+// ADR 0016's optional root, named per Run on the command line (ADR 0038): a
+// parent, whose children become the Frontier, or an explicit list of Tickets,
+// which bypasses the Consumer selector but never `ready: "unblocked"`.
+export type FrontierRoot =
+  | { readonly kind: "parent"; readonly id: string }
+  | { readonly kind: "list"; readonly ids: readonly string[] };
+
+// The root a Tracker Adapter's own options stand in with when a Run names
+// none on the call (ADR 0038): the explicit list wins over the parent, as
+// only one root names a Frontier.
+export function optionalRoot(
+  parent: string | undefined,
+  ids: string[] | undefined,
+): FrontierRoot | undefined {
+  if (ids !== undefined) {
+    return { kind: "list", ids };
+  }
+  if (parent !== undefined) {
+    return { kind: "parent", id: parent };
+  }
+  return undefined;
+}
+
 // Where a finished Ticket's work went. The Run Branch and the merge commit are
 // the only durable pointers to it, since the Ticket's own Branch is deleted as
 // it merges (ADR 0028), and a Ticket that names them says nothing a Tracker
@@ -33,7 +56,7 @@ export type Landing = {
 
 export type TrackerAdapter = {
   readonly [brand]: true;
-  frontier(): Promise<Ticket[]>;
+  frontier(root?: FrontierRoot): Promise<Ticket[]>;
   branchName(ticket: Ticket): string;
   leaveFrontier(ticket: Ticket, landing: Landing): Promise<void>;
   promptCopy(ticket: Ticket): string;
@@ -44,7 +67,17 @@ const defaults: Pick<
   TrackerAdapter,
   "frontier" | "branchName" | "leaveFrontier" | "promptCopy" | "inspect"
 > = {
-  frontier() {
+  // A root reaches the Adapter as an argument (ADR 0038), so an Adapter that
+  // has not implemented it must refuse rather than answer as if none was
+  // named — an empty answer would pass as a Frontier that is merely blocked.
+  frontier(root) {
+    if (root !== undefined) {
+      return Promise.reject(
+        new Error(
+          "This Tracker Adapter does not honor a root, so a rooted Run cannot start. Drop the root flags or pick a Tracker Adapter that names a root.",
+        ),
+      );
+    }
     return Promise.resolve([]);
   },
   branchName(ticket) {

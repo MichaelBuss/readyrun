@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import { landingComment } from "../landing-comment.ts";
 import {
   createTrackerAdapter,
+  optionalRoot,
   type TrackerAdapter,
 } from "../tracker-adapter.ts";
 import type { Ticket } from "../ticket.ts";
@@ -97,6 +98,12 @@ const frontierQuery = `query Frontier($owner: String!, $name: String!, $cursor: 
   }
 }`;
 
+const ticketQuery = `query Ticket($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    issue(number: $number) { number state }
+  }
+}`;
+
 type SchemaProbeData = {
   __type: { fields: { name: string }[] | null } | null;
 };
@@ -110,6 +117,12 @@ type LabelsData = {
 type FrontierData = {
   repository: {
     issues: { pageInfo: PageInfo; nodes: (IssueNode | null)[] };
+  } | null;
+};
+
+type TicketData = {
+  repository: {
+    issue: { number: number; state: "OPEN" | "CLOSED" } | null;
   } | null;
 };
 
@@ -231,13 +244,50 @@ export function github(
     };
   }
 
+  async function probeTicket(id: string): Promise<"OPEN" | "CLOSED" | null> {
+    const number = Number(id);
+    if (!Number.isInteger(number)) {
+      return null;
+    }
+    const data = await graphql<TicketData>("Ticket", ticketQuery, {
+      owner,
+      name,
+      number,
+    });
+    return data.repository?.issue?.state ?? null;
+  }
+
+  // The Frontier query only answers open issues, so a named Ticket missing
+  // from it is probed: a closed Ticket is a lie, and so is a nonexistent one.
+  // An open probe result stands — a parent may simply have no open children.
+  async function refuseClosedOrMissing(id: string): Promise<void> {
+    const probed = await probeTicket(id);
+    if (probed === "OPEN") {
+      return;
+    }
+    if (probed === "CLOSED") {
+      throw new Error(
+        `Ticket ${id} is closed on GitHub repository ${options.repo}`,
+      );
+    }
+    throw new Error(
+      `Ticket ${id} does not exist on GitHub repository ${options.repo}`,
+    );
+  }
+
   return Object.assign(
     createTrackerAdapter({
-      async frontier() {
+      async frontier(root) {
         const blocking = await canExpressBlocking();
         if (!blocking) {
           throw new Error("GitHub cannot express blocking");
         }
+        // The root named per Run reaches the Adapter as an argument (ADR 0038); a
+      // config-level root is what stands in when none is named on the call.
+      const effective = root ?? optionalRoot(options.parent, options.ids);
+        // A bypassed selector must not judge its own blockers, so a list's
+        // Tickets are read with no selector labels at all.
+        const bypass = effective?.kind === "list";
         const tickets: Ticket[] = [];
         let cursor: string | null = null;
         while (true) {
@@ -252,7 +302,7 @@ export function github(
           }
           for (const node of connection.nodes) {
             if (node !== null) {
-              tickets.push(toTicket(node, options.labels));
+              tickets.push(toTicket(node, bypass ? [] : options.labels));
             }
           }
           if (!connection.pageInfo.hasNextPage) {
@@ -260,8 +310,33 @@ export function github(
           }
           cursor = connection.pageInfo.endCursor;
         }
-        return tickets
-          .filter((ticket) => matchesFrontier(ticket, options))
+        let frontier: Ticket[];
+        if (effective?.kind === "list") {
+          // The list bypasses the selector but never `ready: "unblocked"`.
+          frontier = tickets.filter((ticket) =>
+            effective.ids.includes(ticket.id) && ticket.blockedBy.length === 0
+          );
+          const answered = new Set(frontier.map((ticket) => ticket.id));
+          for (const id of effective.ids) {
+            if (!answered.has(id)) {
+              await refuseClosedOrMissing(id);
+            }
+          }
+        } else if (effective?.kind === "parent") {
+          // The parent narrows the selector's Frontier, so its children are
+          // still selector Tickets: labels and unblocked both apply.
+          frontier = tickets.filter((ticket) =>
+            ticket.parent === effective.id &&
+            options.labels.every((label) => ticket.labels.includes(label)) &&
+            ticket.blockedBy.length === 0
+          );
+          // A closed parent can still hold open children, so the parent is
+          // probed even when children answered.
+          await refuseClosedOrMissing(effective.id);
+        } else {
+          frontier = tickets.filter((ticket) => matchesFrontier(ticket, options));
+        }
+        return frontier
           .sort((a, b) =>
             a.id.localeCompare(b.id, undefined, { numeric: true }),
           );

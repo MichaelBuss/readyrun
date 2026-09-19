@@ -1,6 +1,7 @@
 import { landingComment } from "../landing-comment.ts";
 import {
   createTrackerAdapter,
+  optionalRoot,
   type TrackerAdapter,
 } from "../tracker-adapter.ts";
 import type { Ticket } from "../ticket.ts";
@@ -279,24 +280,75 @@ export function linear(
     };
   }
 
+  // The Frontier query answers every Ticket regardless of state, so a named
+  // Ticket's absence or state is a lie the Adapter can see directly.
+  function refuseTicketLie(id: string, node: IssueNode | undefined): void {
+    if (node === undefined) {
+      throw new Error(`Ticket ${id} does not exist on Linear`);
+    }
+    if (node.state.type === "completed" || node.state.type === "canceled") {
+      throw new Error(`Ticket ${id} is closed on Linear`);
+    }
+    if (hasLeftFrontier(node.state)) {
+      throw new Error(
+        `Ticket ${id} has left the Frontier (${node.state.name})`,
+      );
+    }
+  }
+
   return Object.assign(
     createTrackerAdapter({
-      async frontier() {
+      async frontier(root) {
         const blocking = await canExpressBlocking();
         if (!blocking) {
           throw new Error("Linear cannot express blocking");
         }
+        // The root named per Run reaches the Adapter as an argument (ADR 0038); a
+      // config-level root is what stands in when none is named on the call.
+      const effective = root ?? optionalRoot(options.parent, options.ids);
         suggestedBranches.clear();
         const issues = await paginate<FrontierData, IssueNode>(
           "Frontier",
           frontierQuery,
           (data) => data.issues,
         );
-        const tickets: Ticket[] = [];
-        for (const node of issues) {
-          if (!matchesFrontier(node, options)) {
-            continue;
+        const matched: IssueNode[] = [];
+        if (effective?.kind === "list") {
+          const byId = new Map(issues.map((node) => [node.identifier, node]));
+          for (const id of effective.ids) {
+            const node = byId.get(id);
+            refuseTicketLie(id, node);
+            if (node !== undefined && blockedBy(node).length === 0) {
+              matched.push(node);
+            }
           }
+        } else {
+          for (const node of issues) {
+            if (effective?.kind === "parent") {
+              // The parent narrows the selector's Frontier, so its children
+              // are still selector Tickets: labels and unblocked both apply.
+              if (
+                node.parent === null ||
+                node.parent.identifier !== effective.id ||
+                !matchesSelector(node, options) ||
+                blockedBy(node).length > 0
+              ) {
+                continue;
+              }
+            } else if (!matchesFrontier(node, options)) {
+              continue;
+            }
+            matched.push(node);
+          }
+          if (effective?.kind === "parent") {
+            const parent = issues.find((node) =>
+              node.identifier === effective.id
+            );
+            refuseTicketLie(effective.id, parent);
+          }
+        }
+        const tickets: Ticket[] = [];
+        for (const node of matched) {
           const ticket = toTicket(node);
           tickets.push(ticket);
           if (node.branchName !== null && node.branchName.length > 0) {
@@ -347,6 +399,25 @@ function matchesFrontier(
   node: IssueNode,
   options: LinearTrackerOptions,
 ): boolean {
+  if (!matchesSelector(node, options)) {
+    return false;
+  }
+  if (
+    options.parent !== undefined &&
+    (node.parent === null || node.parent.identifier !== options.parent)
+  ) {
+    return false;
+  }
+  if (options.ids !== undefined && !options.ids.includes(node.identifier)) {
+    return false;
+  }
+  return blockedBy(node).length === 0;
+}
+
+function matchesSelector(
+  node: IssueNode,
+  options: LinearTrackerOptions,
+): boolean {
   if (options.state === undefined && hasLeftFrontier(node.state)) {
     return false;
   }
@@ -365,16 +436,7 @@ function matchesFrontier(
   ) {
     return false;
   }
-  if (
-    options.parent !== undefined &&
-    (node.parent === null || node.parent.identifier !== options.parent)
-  ) {
-    return false;
-  }
-  if (options.ids !== undefined && !options.ids.includes(node.identifier)) {
-    return false;
-  }
-  return blockedBy(node).length === 0;
+  return true;
 }
 
 function blockedBy(node: IssueNode): string[] {

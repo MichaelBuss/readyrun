@@ -10,13 +10,21 @@ import {
   type RunBase,
 } from "./git.ts";
 import { startLiveness, type LivenessStdout } from "./liveness.ts";
+import {
+  rootViolationMessages,
+  warnWaitingRootTickets,
+} from "./frontier-root.ts";
 import type { Ticket } from "./ticket.ts";
+import type { FrontierRoot } from "./tracker-adapter.ts";
 import type { Effort, Permissions } from "./worker-adapter.ts";
 
 type DoctorStdout = LivenessStdout;
 
 export type DoctorOptions = {
   config: ReadyRunConfig;
+  // The Frontier's root to lie-check (ADR 0038): the same flags `run` takes,
+  // so a rooted Run can be pre-flighted without starting it.
+  root?: FrontierRoot;
   cwd?: string;
   stdout?: DoctorStdout;
 };
@@ -26,6 +34,7 @@ async function check(
   cwd: string,
   effort: Effort | undefined,
   permissions: Permissions,
+  root: FrontierRoot | undefined,
 ): Promise<string[]> {
   const failures: string[] = [];
   if (typeof config.model !== "string" || config.model.length === 0) {
@@ -103,6 +112,16 @@ async function check(
       `install output ${installOutput} is neither tracked nor ignored; add it to .gitignore`,
     );
   }
+  if (root !== undefined) {
+    let rooted;
+    try {
+      rooted = await config.tracker.frontier(root);
+    } catch (error) {
+      failures.push(error instanceof Error ? error.message : String(error));
+      return failures;
+    }
+    failures.push(...rootViolationMessages(rooted, root));
+  }
   return failures;
 }
 
@@ -165,8 +184,9 @@ export async function collectDoctorFailures(
   cwd: string,
   effort: Effort | undefined = config.effort,
   permissions: Permissions = config.permissions ?? "ask",
+  root: FrontierRoot | undefined = undefined,
 ): Promise<string[]> {
-  return check(config, cwd, effort, permissions);
+  return check(config, cwd, effort, permissions, root);
 }
 
 export function writeDoctorFailures(
@@ -194,6 +214,7 @@ export async function doctor(options: DoctorOptions): Promise<number> {
       cwd,
       config.effort,
       config.permissions,
+      options.root,
     );
     live.stop();
     if (writeDoctorFailures(stdout, failures) === 1) {
@@ -206,8 +227,16 @@ export async function doctor(options: DoctorOptions): Promise<number> {
       // Has no base to disclose. A Run hard-stops at git there, which is where that gets reported.
     }
     live.stage("Frontier");
-    const frontier = await config.tracker.frontier();
+    const frontier = await config.tracker.frontier(options.root);
     live.stop();
+    const root = options.root;
+    if (root !== undefined) {
+      const violations = rootViolationMessages(frontier, root);
+      if (writeDoctorFailures(stdout, violations) === 1) {
+        return 1;
+      }
+      warnWaitingRootTickets(stdout, root, frontier);
+    }
     warnUnusedModelsByLabel(stdout, config.modelsByLabel, frontier);
     const next = frontier[0];
     if (next === undefined) {

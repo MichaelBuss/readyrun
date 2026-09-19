@@ -88,6 +88,15 @@ readyrun doctor
 readyrun run --max 5
 ```
 
+A **Run** works the top of the **Frontier** your selector names: `ready: "unblocked"` plus your labels or Linear state. To name which **Tickets** a Run should work, root the Frontier on the command line ([ADR 0038](./docs/adr/0038-run-names-the-frontier-root.md)): `--ticket <id-or-url>` (repeatable) runs exactly those Tickets — re-driving a failed Ticket, or a hand-picked slice, without touching the config — and `--root <parent>` runs that parent's children, the parent never worked itself. A blocked named Ticket is waiting work, not an error: it warns and joins when its blocker lands. Naming is not sequencing; the Tracker still picks in its stable order, and an explicit list defaults the cap to its length. `doctor` takes the same root flags, so a rooted lie-check can be pre-flighted without starting a Run:
+
+```sh
+readyrun run --ticket 53
+readyrun run --max 3 --ticket 52 --ticket https://github.com/acme/widgets/issues/57
+readyrun run --max 5 --root 131
+readyrun doctor --root 131
+```
+
 A **Run** cuts every **Worktree** from your checkout unless `--base <commit-ish>` names another commit; either way it leaves your checkout where it is. Hitting the cap ends a **Run**, so carrying on is a *new* **Run** based on the **Run Branch** the last one built ([ADR 0034](./docs/adr/0034-continuing-a-capped-run-is-a-new-run-with-an-explicit-base.md)) — and a cap stop prints that command, so there is no timestamp to remember:
 
 ```

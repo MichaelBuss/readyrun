@@ -161,6 +161,118 @@ test("Doctor fails when GitHub cannot express blocking", async () => {
   }
 });
 
+test("a parent root named on the frontier call narrows GitHub to that parent's children", async () => {
+  const { adapter } = githubFromWorld({
+    tickets: [
+      ticket({ id: "11", parent: "8" }),
+      ticket({ id: "12", parent: "9" }),
+      ticket({ id: "8" }),
+    ],
+    ready: "unblocked",
+    labels: ["ready-for-agent"],
+  });
+
+  const frontier = await adapter.frontier({ kind: "parent", id: "8" });
+  assert.deepEqual(
+    frontier.map((ticket) => ticket.id),
+    ["11"],
+  );
+});
+
+test("a list root named on the frontier call bypasses the selector but not unblocked", async () => {
+  const { adapter } = githubFromWorld({
+    tickets: [
+      ticket({ id: "52", labels: ["ready-for-agent"] }),
+      ticket({ id: "99", labels: ["other"] }),
+      ticket({ id: "53", labels: ["other"], blockedBy: ["99"] }),
+    ],
+    ready: "unblocked",
+    labels: ["ready-for-agent"],
+  });
+
+  const frontier = await adapter.frontier({ kind: "list", ids: ["99", "53"] });
+  assert.deepEqual(
+    frontier.map((ticket) => ticket.id),
+    ["99"],
+  );
+});
+
+test("a bypassed selector does not judge the named Ticket's blockers", async () => {
+  const { adapter } = githubFromWorld({
+    tickets: [
+      ticket({ id: "52", labels: ["other"] }),
+      ticket({ id: "53", blockedBy: ["52"] }),
+    ],
+    ready: "unblocked",
+    labels: ["ready-for-agent"],
+  });
+
+  const frontier = await adapter.frontier({ kind: "list", ids: ["53"] });
+  assert.deepEqual(frontier.map((ticket) => ticket.id), []);
+});
+
+test("a named Ticket that does not exist on GitHub is refused as a lie", async () => {
+  const { adapter } = githubFromWorld(world);
+  await assert.rejects(
+    () => adapter.frontier({ kind: "list", ids: ["52", "999"] }),
+    (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.match(
+        error.message,
+        /Ticket 999 does not exist on GitHub repository acme\/widgets/,
+      );
+      return true;
+    },
+  );
+});
+
+test("a named Ticket that is closed on GitHub is refused as a lie", async () => {
+  const fixture = githubHttpFixture({
+    repo: "acme/widgets",
+    tickets: [ticket({ id: "53" })],
+    ready: "unblocked",
+    labels: ["ready-for-agent"],
+    closedIds: ["53"],
+  });
+  const adapter = github(
+    { repo: "acme/widgets", ready: "unblocked", labels: ["ready-for-agent"] },
+    { token: "test-token", fetch: fixture.fetch },
+  );
+  await assert.rejects(
+    () => adapter.frontier({ kind: "list", ids: ["53"] }),
+    /Ticket 53 is closed on GitHub repository acme\/widgets/,
+  );
+});
+
+test("a parent root that does not exist on GitHub is refused as a lie", async () => {
+  const { adapter } = githubFromWorld(world);
+  await assert.rejects(
+    () => adapter.frontier({ kind: "parent", id: "999" }),
+    /Ticket 999 does not exist on GitHub repository acme\/widgets/,
+  );
+});
+
+test("a parent root that is closed on GitHub is refused as a lie", async () => {
+  const fixture = githubHttpFixture({
+    repo: "acme/widgets",
+    tickets: [
+      ticket({ id: "8" }),
+      ticket({ id: "11", parent: "8" }),
+    ],
+    ready: "unblocked",
+    labels: ["ready-for-agent"],
+    closedIds: ["8"],
+  });
+  const adapter = github(
+    { repo: "acme/widgets", ready: "unblocked", labels: ["ready-for-agent"] },
+    { token: "test-token", fetch: fixture.fetch },
+  );
+  await assert.rejects(
+    () => adapter.frontier({ kind: "parent", id: "8" }),
+    /Ticket 8 is closed on GitHub repository acme\/widgets/,
+  );
+});
+
 test("an explicit runtime token is used even when an account is configured", async () => {
   const fixture = githubHttpFixture({ repo: "acme/widgets", ...world });
   const adapter = github(
