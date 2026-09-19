@@ -37,6 +37,14 @@ defineConfig({
 claude({ extraArgs: ["--verbose"] });
 ```
 
+`custom()`'s `args` and print-mode `extraArgs` may reference the Worker's Worktree with a `{cwd}` token, interpolated per spawn with the Worktree's absolute path — the anchor for CLIs that resolve their own project root instead of process cwd:
+
+```ts
+custom({ bin: "opencode", args: ["run", "--dir", "{cwd}"], unattendedFlag: "--auto" });
+```
+
+The token is reserved: any other `{...}` placeholder is a Doctor failure, and a literal `{cwd}` cannot be passed through.
+
 `cursor()` shells out to `agent`, `claude()` shells out to `claude`; both must already be installed and authenticated before `run` — ReadyRun does not manage CLI auth.
 
 Both spawn print-mode (`-p`). `permissions: "ask"` (the default) is a Doctor failure — print-mode is not a chat. Pass `--permissions unattended`, or set `permissions: "unattended"` in config. `custom()` does not force print-mode, so ask remains valid there.

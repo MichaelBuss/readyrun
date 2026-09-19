@@ -16,7 +16,7 @@ import {
 } from "./frontier-root.ts";
 import type { Ticket } from "./ticket.ts";
 import type { FrontierRoot } from "./tracker-adapter.ts";
-import type { Effort, Permissions } from "./worker-adapter.ts";
+import { unknownPlaceholdersIn, type Effort, type Permissions } from "./worker-adapter.ts";
 
 type DoctorStdout = LivenessStdout;
 
@@ -100,6 +100,16 @@ async function check(
     failures.push(
       "effort is set but this Worker Adapter does not map it. Unset effort or pick a Worker Adapter that maps it.",
     );
+  }
+  if (config.worker.staticArgv !== undefined) {
+    const { option, args } = config.worker.staticArgv;
+    for (const arg of args) {
+      for (const token of unknownPlaceholdersIn(arg)) {
+        failures.push(
+          `Worker Adapter option "${option}" has unknown placeholder "${token}". Only {cwd} is available.`,
+        );
+      }
+    }
   }
   if (config.worker.printMode === true && permissions === "ask") {
     failures.push(

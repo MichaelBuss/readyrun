@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { delimiter, join } from "node:path";
+import { delimiter, isAbsolute, join } from "node:path";
 import { describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { claude, cursor, custom, defineConfig, doctor, run } from "../src/mod.ts";
@@ -187,6 +187,228 @@ describe("Worker Adapters", { concurrency: false }, () => {
           "--model",
           "composer-2",
         ]);
+      });
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("a custom Worker Adapter's {cwd} arg is interpolated with the Worktree path", async () => {    const repo = await throwawayRepo();
+    try {
+      await withRecordingPath(["readyrun-worker"], async ({ bin, receiptPath }) => {
+        await run({
+          config: defineConfig({
+            tracker: memoryTracker({
+              tickets: [ticket({ id: "52" })],
+              ready: "unblocked",
+              labels: ["ready-for-agent"],
+            }),
+            worker: custom({
+              bin,
+              args: ["run", "--dir", "{cwd}"],
+              unattendedFlag: "--go",
+            }),
+            model: "composer-2",
+          }),
+          cap: 1,
+          cwd: repo.cwd,
+          stdout: silent,
+        });
+
+        const receipt = await readReceipt(receiptPath);
+        assert.equal(receipt.argv[0], "run");
+        assert.equal(receipt.argv[1], "--dir");
+        assert.notEqual(receipt.argv[2], "{cwd}");
+        assert.ok(isAbsolute(receipt.argv[2] ?? ""));
+        assert.match(receipt.argv[2] ?? "", /worktrees/);
+        assert.deepEqual(receipt.argv.slice(3, 5), ["--model", "composer-2"]);
+        assert.notEqual(receipt.cwd, repo.cwd);
+        assert.equal(receipt.cwd, receipt.argv[2]);
+      });
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("a print-mode Worker Adapter's {cwd} extraArg is interpolated with the Worktree path", async () => {
+    await withRecordingPath(["claude"], async ({ receiptPath }) => {
+      const repo = await throwawayRepo();
+      try {
+        await run({
+          config: defineConfig({
+            tracker: memoryTracker({
+              tickets: [ticket({ id: "52" })],
+              ready: "unblocked",
+              labels: ["ready-for-agent"],
+            }),
+            worker: claude({ extraArgs: ["--dir", "{cwd}"] }),
+            model: "opus",
+            permissions: "unattended",
+          }),
+          cap: 1,
+          cwd: repo.cwd,
+          stdout: silent,
+        });
+
+        const receipt = await readReceipt(receiptPath);
+        assert.deepEqual(receipt.argv.slice(0, 5), [
+          "-p",
+          "--dir",
+          receipt.cwd,
+          "--model",
+          "opus",
+        ]);
+        assert.notEqual(receipt.argv[2], "{cwd}");
+        assert.ok(isAbsolute(receipt.argv[2] ?? ""));
+        assert.match(receipt.argv[2] ?? "", /worktrees/);
+      } finally {
+        await repo.cleanup();
+      }
+    });
+  });
+
+  test("a custom Worker Adapter's {cwd} interpolates in the first position and inside a larger token", async () => {
+    const repo = await throwawayRepo();
+    try {
+      await withRecordingPath(["readyrun-worker"], async ({ bin, receiptPath }) => {
+        await run({
+          config: defineConfig({
+            tracker: memoryTracker({
+              tickets: [ticket({ id: "52" })],
+              ready: "unblocked",
+              labels: ["ready-for-agent"],
+            }),
+            worker: custom({
+              bin,
+              args: ["{cwd}", "--dir={cwd}"],
+              unattendedFlag: "--go",
+            }),
+            model: "composer-2",
+          }),
+          cap: 1,
+          cwd: repo.cwd,
+          stdout: silent,
+        });
+
+        const receipt = await readReceipt(receiptPath);
+        assert.equal(receipt.argv[0], receipt.cwd);
+        assert.equal(receipt.argv[1], `--dir=${receipt.cwd}`);
+      });
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("an unknown {token} embedded in a larger argv token fails Doctor", async () => {
+    const repo = await throwawayRepo();
+    const chunks: string[] = [];
+    try {
+      await withRecordingPath(["readyrun-worker"], async () => {
+        const doctorExit = await doctor({
+          config: defineConfig({
+            tracker: memoryTracker({
+              tickets: [ticket({ id: "52" })],
+              ready: "unblocked",
+              labels: ["ready-for-agent"],
+            }),
+            worker: custom({
+              bin: "readyrun-worker",
+              args: ["--dir={dir}"],
+              unattendedFlag: "--go",
+            }),
+            model: "composer-2",
+          }),
+          cwd: repo.cwd,
+          stdout: {
+            write(chunk: string) {
+              chunks.push(chunk);
+              return true;
+            },
+          },
+        });
+        assert.equal(doctorExit, 1);
+        assert.match(
+          chunks.join(""),
+          /Doctor: Worker Adapter option "args" has unknown placeholder "\{dir\}"\. Only \{cwd\} is available\./,
+        );
+      });
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("an unknown {token} placeholder in a custom Worker Adapter's args fails Doctor and a Run does not start", async () => {
+    const repo = await throwawayRepo();
+    const chunks: string[] = [];
+    try {
+      await withRecordingPath(["readyrun-worker"], async ({ bin, receiptPath }) => {
+        const config = defineConfig({
+          tracker: memoryTracker({
+            tickets: [ticket({ id: "52" })],
+            ready: "unblocked",
+            labels: ["ready-for-agent"],
+          }),
+          worker: custom({
+            bin,
+            args: ["run", "--dir", "{dir}"],
+            unattendedFlag: "--go",
+          }),
+          model: "composer-2",
+        });
+        const stdout = {
+          write(chunk: string) {
+            chunks.push(chunk);
+            return true;
+          },
+        };
+        const doctorExit = await doctor({ config, cwd: repo.cwd, stdout });
+        assert.equal(doctorExit, 1);
+        assert.match(
+          chunks.join(""),
+          /Doctor: Worker Adapter option "args" has unknown placeholder "\{dir\}"\. Only \{cwd\} is available\./,
+        );
+        chunks.length = 0;
+        const runExit = await run({ config, cap: 1, cwd: repo.cwd, stdout });
+        assert.equal(runExit, 1);
+        assert.match(chunks.join(""), /unknown placeholder "\{dir\}"/);
+        assert.equal(existsSync(receiptPath), false);
+      });
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("an unknown {token} placeholder in a print-mode Worker Adapter's extraArgs fails Doctor", async () => {
+    const repo = await throwawayRepo();
+    const chunks: string[] = [];
+    try {
+      await withRecordingPath(["claude"], async ({ receiptPath }) => {
+        const doctorExit = await doctor({
+          config: defineConfig({
+            tracker: memoryTracker({
+              tickets: [ticket({ id: "52" })],
+              ready: "unblocked",
+              labels: ["ready-for-agent"],
+            }),
+            worker: claude({ extraArgs: ["--dir", "{cw}"] }),
+            model: "opus",
+            permissions: "unattended",
+          }),
+          cwd: repo.cwd,
+          stdout: {
+            write(chunk: string) {
+              chunks.push(chunk);
+              return true;
+            },
+          },
+        });
+        assert.equal(doctorExit, 1);
+        assert.match(
+          chunks.join(""),
+          /Doctor: Worker Adapter option "extraArgs" has unknown placeholder "\{cw\}"\. Only \{cwd\} is available\./,
+        );
+        const receipt = await readReceipt(receiptPath);
+        assert.deepEqual(receipt.argv, ["auth", "status"]);
       });
     } finally {
       await repo.cleanup();
