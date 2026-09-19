@@ -461,8 +461,43 @@ test("the Worker prompt tells the Worker to commit its work, because ReadyRun ch
 
     const prompt = worker.spawns[0]?.prompt;
     assert.ok(prompt);
-    assert.match(prompt, /Commit your work on the Branch/);
+    assert.match(prompt, /Commit your work on branch/);
     assert.match(prompt, /uncommitted changes|tree matching the base/);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("the Worker prompt names the Worktree's absolute path and the Ticket's Branch, not 'this directory'", async () => {
+  const repo = await throwawayRepo();
+  const worker = recordingWorker({ exitCode: 0 });
+  try {
+    await run({
+      config: defineConfig({
+        tracker: memoryTracker({
+          tickets: [ticket],
+          ready: "unblocked",
+          labels: ["ready-for-agent"],
+        }),
+        worker,
+        model: "composer-2",
+      }),
+      cap: 1,
+      cwd: repo.cwd,
+      stdout: silent,
+    });
+
+    const prompt = worker.spawns[0]?.prompt;
+    assert.ok(prompt);
+    const worktreePath = join(
+      repo.cwd,
+      ".readyrun",
+      "worktrees",
+      "readyrun-52",
+    );
+    assert.ok(prompt.includes(`Your working directory is ${worktreePath}`));
+    assert.ok(prompt.includes("Commit your work on branch readyrun/52."));
+    assert.ok(!prompt.includes("this directory"));
   } finally {
     await repo.cleanup();
   }
