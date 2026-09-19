@@ -24,17 +24,20 @@ export type SpawnRequest = {
 
 export type ProbeResult = { ok: true } | { ok: false; detail: string };
 
+export type StaticArgv = { option: string; args: string[] };
+
 export type WorkerAdapter = {
   readonly [brand]: true;
   readonly bin?: string;
   readonly effortFlag?: string;
   readonly printMode?: true;
   readonly probe?: () => Promise<ProbeResult>;
+  readonly staticArgv?: StaticArgv;
   spawn(request: SpawnRequest): Promise<{ exitCode: number }>;
 };
 
 export function createWorkerAdapter(
-  methods: Partial<Pick<WorkerAdapter, "spawn" | "bin" | "effortFlag" | "printMode" | "probe">> = {},
+  methods: Partial<Pick<WorkerAdapter, "spawn" | "bin" | "effortFlag" | "printMode" | "probe" | "staticArgv">> = {},
 ): WorkerAdapter {
   return {
     [brand]: true,
@@ -43,6 +46,24 @@ export function createWorkerAdapter(
     },
     ...methods,
   };
+}
+
+const cwdPlaceholder = "{cwd}";
+
+const placeholderShape = /\{[^{}]+\}/g;
+
+export function interpolateCwdArgs(args: string[], cwd: string): string[] {
+  return args.map((arg) => arg.replaceAll(cwdPlaceholder, cwd));
+}
+
+export function unknownPlaceholdersIn(arg: string): string[] {
+  const unknown: string[] = [];
+  for (const match of arg.matchAll(placeholderShape)) {
+    if (match[0] !== cwdPlaceholder) {
+      unknown.push(match[0]);
+    }
+  }
+  return unknown;
 }
 
 export function spawnWorkerBinary(
@@ -107,8 +128,10 @@ export function printModeWorker(
     effortFlag,
     printMode: true,
     probe: probeArgs === undefined ? undefined : () => execProbe(bin, probeArgs),
+    staticArgv:
+      extraArgs === undefined ? undefined : { option: "extraArgs", args: extraArgs },
     spawn(request: SpawnRequest) {
-      const args = ["-p", ...(extraArgs ?? []), "--model", request.model];
+      const args = ["-p", ...interpolateCwdArgs(extraArgs ?? [], request.cwd), "--model", request.model];
       if (request.effort !== undefined && effortFlag !== undefined) {
         args.push(effortFlag, request.effort);
       }

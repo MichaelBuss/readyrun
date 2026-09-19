@@ -1,5 +1,6 @@
 import {
   createWorkerAdapter,
+  interpolateCwdArgs,
   spawnWorkerBinary,
   type SpawnRequest,
   type WorkerAdapter,
@@ -24,9 +25,11 @@ export function custom(options: CustomWorkerOptions): CustomWorkerAdapter {
     createWorkerAdapter({
       bin: options.bin,
       effortFlag: "--effort",
+      staticArgv:
+        options.args === undefined ? undefined : { option: "args", args: options.args },
       spawn(request: SpawnRequest) {
         const args = [
-          ...(options.args ?? []),
+          ...interpolateCwdArgs(options.args ?? [], request.cwd),
           "--model",
           request.model,
           ...(request.effort !== undefined ? ["--effort", request.effort] : []),
