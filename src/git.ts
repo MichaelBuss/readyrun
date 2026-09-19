@@ -33,20 +33,21 @@ export class WorktreeInstallError extends Error {
   }
 }
 
-async function git(cwd: string, args: string[]): Promise<string> {
+async function gitOut(cwd: string, args: string[]): Promise<string> {
   const { stdout } = await exec("git", ["-C", cwd, ...args], {
     encoding: "utf8",
   });
-  return stdout.trim();
+  return stdout;
+}
+
+async function git(cwd: string, args: string[]): Promise<string> {
+  return (await gitOut(cwd, args)).trim();
 }
 
 // git() trims, which would eat the status field off porcelain lines like
 // ` M README`. Reads that care about line-exact output come through here.
 async function gitLines(cwd: string, args: string[]): Promise<string[]> {
-  const { stdout } = await exec("git", ["-C", cwd, ...args], {
-    encoding: "utf8",
-  });
-  return stdout.split("\n").filter((line) => line !== "");
+  return (await gitOut(cwd, args)).split("\n").filter((line) => line !== "");
 }
 
 async function defaultBranch(cwd: string): Promise<string> {
@@ -333,7 +334,7 @@ export async function captureRepoSnapshot(
   ]);
   for (const line of listed) {
     const at = line.indexOf(" ");
-    const refname = line.slice((at ?? -1) + 1);
+    const refname = line.slice(at + 1);
     if (refname !== `refs/heads/${ticketBranch}`) {
       refs.set(refname, line.slice(0, at));
     }
@@ -350,7 +351,7 @@ export async function captureRepoSnapshot(
 // or undefined when nothing did. Every clause names what moved with before
 // and after values, so a hard stop can point at the escape instead of
 // claiming the Ticket produced nothing (ADR 0037).
-export function escapeDetail(
+export function describeEscape(
   before: RepoSnapshot,
   after: RepoSnapshot,
 ): string | undefined {

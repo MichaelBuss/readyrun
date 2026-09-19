@@ -8,7 +8,7 @@ import {
   captureRepoSnapshot,
   collectOntoRunBranch,
   createTicketWorktree,
-  escapeDetail,
+  describeEscape,
   removeTicketWorktree,
   resolveRunBase,
   shortCommit,
@@ -381,7 +381,7 @@ async function runWithLiveness(
     } catch (error) {
       return stop("git", ticket.id, caughtMessage(error));
     }
-    const escaped = escapeDetail(beforeSpawn, afterSpawn);
+    const escaped = describeEscape(beforeSpawn, afterSpawn);
     if (escaped !== undefined) {
       return stop(
         "worker",

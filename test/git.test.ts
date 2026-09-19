@@ -4,7 +4,7 @@ import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
-import { captureRepoSnapshot, collectOntoRunBranch, createTicketWorktree, escapeDetail, headCommit, originRepository, WorktreeExistsError, WorktreeInstallError } from "../src/git.ts";
+import { captureRepoSnapshot, collectOntoRunBranch, createTicketWorktree, describeEscape, headCommit, originRepository, WorktreeExistsError, WorktreeInstallError } from "../src/git.ts";
 import { commitMismatchedNpmLockfile, commitNpmConsumer, commitRepoFiles, git, throwawayRepo } from "./throwaway-repo.ts";
 
 const exec = promisify(execFile);
@@ -333,7 +333,7 @@ test("captureRepoSnapshot leaves the branch undefined on a detached checkout", a
   }
 });
 
-test("escapeDetail is undefined when only the excluded Ticket Branch moved", async () => {
+test("describeEscape is undefined when only the excluded Ticket Branch moved", async () => {
   const repo = await throwawayRepo();
   try {
     await git(repo.cwd, ["branch", "readyrun/52"]);
@@ -344,7 +344,7 @@ test("escapeDetail is undefined when only the excluded Ticket Branch moved", asy
     await git(repo.cwd, ["branch", "-f", "readyrun/52", "elsewhere"]);
 
     assert.equal(
-      escapeDetail(before, await captureRepoSnapshot(repo.cwd, "readyrun/52")),
+      describeEscape(before, await captureRepoSnapshot(repo.cwd, "readyrun/52")),
       undefined,
     );
   } finally {
@@ -352,13 +352,13 @@ test("escapeDetail is undefined when only the excluded Ticket Branch moved", asy
   }
 });
 
-test("escapeDetail names an advanced Consumer HEAD with both shas and the branch", async () => {
+test("describeEscape names an advanced Consumer HEAD with both shas and the branch", async () => {
   const repo = await throwawayRepo();
   try {
     const before = await captureRepoSnapshot(repo.cwd, "readyrun/52");
     await git(repo.cwd, ["commit", "--allow-empty", "-m", "escape"]);
 
-    const detail = escapeDetail(
+    const detail = describeEscape(
       before,
       await captureRepoSnapshot(repo.cwd, "readyrun/52"),
     );
@@ -372,14 +372,14 @@ test("escapeDetail names an advanced Consumer HEAD with both shas and the branch
   }
 });
 
-test("escapeDetail omits the branch on an advanced detached checkout", async () => {
+test("describeEscape omits the branch on an advanced detached checkout", async () => {
   const repo = await throwawayRepo();
   try {
     const before = await captureRepoSnapshot(repo.cwd, "readyrun/52");
     await git(repo.cwd, ["checkout", "--detach"]);
     await git(repo.cwd, ["commit", "--allow-empty", "-m", "escape"]);
 
-    const detail = escapeDetail(
+    const detail = describeEscape(
       before,
       await captureRepoSnapshot(repo.cwd, "readyrun/52"),
     );
@@ -393,7 +393,7 @@ test("escapeDetail omits the branch on an advanced detached checkout", async () 
   }
 });
 
-test("escapeDetail names porcelain entries that appeared, changed, or were cleared", async () => {
+test("describeEscape names porcelain entries that appeared, changed, or were cleared", async () => {
   const repo = await throwawayRepo();
   try {
     await writeFile(join(repo.cwd, "cleared.txt"), "dirt\n");
@@ -402,7 +402,7 @@ test("escapeDetail names porcelain entries that appeared, changed, or were clear
     await writeFile(join(repo.cwd, "README"), "changed\n");
     await writeFile(join(repo.cwd, "appeared.txt"), "new\n");
 
-    const detail = escapeDetail(
+    const detail = describeEscape(
       before,
       await captureRepoSnapshot(repo.cwd, "readyrun/52"),
     );
@@ -420,7 +420,7 @@ test("escapeDetail names porcelain entries that appeared, changed, or were clear
   }
 });
 
-test("escapeDetail names refs that were created or deleted, including remote-tracking refs", async () => {
+test("describeEscape names refs that were created or deleted, including remote-tracking refs", async () => {
   const repo = await throwawayRepo();
   try {
     await git(repo.cwd, ["branch", "elsewhere"]);
@@ -429,7 +429,7 @@ test("escapeDetail names refs that were created or deleted, including remote-tra
     await git(repo.cwd, ["branch", "-D", "elsewhere"]);
     await git(repo.cwd, ["update-ref", "refs/remotes/origin/main", "HEAD"]);
 
-    const detail = escapeDetail(
+    const detail = describeEscape(
       before,
       await captureRepoSnapshot(repo.cwd, "readyrun/52"),
     );
