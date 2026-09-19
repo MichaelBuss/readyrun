@@ -157,7 +157,7 @@ test("a Worker exiting 0 with a clean Worktree and a commit on its Branch takes 
   }
 });
 
-test("a Worker that commits on another Branch leaves its Branch's tree matching the base and hard-stops the Run", async () => {
+test("a Worker that commits on another Branch hard-stops the Run naming the created ref", async () => {
   const repo = await throwawayRepo();
   const worker = createWorkerAdapter({
     async spawn(request) {
@@ -193,9 +193,114 @@ test("a Worker that commits on another Branch leaves its Branch's tree matching 
     );
     assert.match(
       chunks.join(""),
-      /Hard stop: Ticket 52 failed at worker: produced nothing on readyrun\/52/,
+      /Hard stop: Ticket 52 failed at worker: ref refs\/heads\/somewhere-else was created at [0-9a-f]{7}/,
     );
+    assert.doesNotMatch(chunks.join(""), /produced nothing/);
     assert.match(chunks.join(""), /The Ticket remains on the Frontier/);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("a Worker that commits in the Consumer's checkout hard-stops the Run naming the checkout's advance", async () => {
+  const repo = await throwawayRepo();
+  const worker = createWorkerAdapter({
+    async spawn() {
+      await git(repo.cwd, ["commit", "--allow-empty", "-m", "not the Worktree"]);
+      return { exitCode: 0 };
+    },
+  });
+  const frontier = tracker();
+  const chunks: string[] = [];
+  try {
+    const exitCode = await run({
+      config: defineConfig({ tracker: frontier, worker, model: "composer-2" }),
+      cap: 2,
+      cwd: repo.cwd,
+      stdout: {
+        write(chunk: string) {
+          chunks.push(chunk);
+          return true;
+        },
+      },
+    });
+
+    assert.equal(exitCode, 1);
+    assert.deepEqual(
+      (await frontier.frontier()).map((item) => item.id),
+      ["52", "57"],
+    );
+    assert.match(
+      chunks.join(""),
+      /Hard stop: Ticket 52 failed at worker: the Consumer's checkout advanced from [0-9a-f]{7} to [0-9a-f]{7} on main/,
+    );
+    assert.doesNotMatch(chunks.join(""), /produced nothing/);
+    assert.match(chunks.join(""), /The Ticket remains on the Frontier/);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("a Worker that leaves an untracked file in the Consumer's checkout hard-stops the Run naming the path", async () => {
+  const repo = await throwawayRepo();
+  const worker = createWorkerAdapter({
+    async spawn() {
+      await writeFile(join(repo.cwd, "escaped.txt"), "not the Worktree\n");
+      return { exitCode: 0 };
+    },
+  });
+  const frontier = tracker();
+  const chunks: string[] = [];
+  try {
+    const exitCode = await run({
+      config: defineConfig({ tracker: frontier, worker, model: "composer-2" }),
+      cap: 2,
+      cwd: repo.cwd,
+      stdout: {
+        write(chunk: string) {
+          chunks.push(chunk);
+          return true;
+        },
+      },
+    });
+
+    assert.equal(exitCode, 1);
+    assert.deepEqual(
+      (await frontier.frontier()).map((item) => item.id),
+      ["52", "57"],
+    );
+    assert.match(
+      chunks.join(""),
+      /Hard stop: Ticket 52 failed at worker: uncommitted changes appeared in the Consumer's checkout \(.*escaped\.txt\)/,
+    );
+    assert.doesNotMatch(chunks.join(""), /produced nothing/);
+    assert.match(chunks.join(""), /The Ticket remains on the Frontier/);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("a Run whose Consumer checkout starts dirty does not trip the escape check when the Worker stays in its Worktree", async () => {
+  const repo = await throwawayRepo();
+  await writeFile(
+    join(repo.cwd, "consumer-dirt.txt"),
+    "the Consumer's, not ReadyRun's\n",
+  );
+  const worker = recordingWorker({ exitCode: 0, work: "committed" });
+  const frontier = tracker();
+  try {
+    const base = await git(repo.cwd, ["rev-parse", "HEAD"]);
+
+    const exitCode = await run({
+      config: defineConfig({ tracker: frontier, worker, model: "composer-2" }),
+      cap: 2,
+      cwd: repo.cwd,
+      stdout: silent,
+    });
+
+    assert.equal(exitCode, 0);
+    assert.deepEqual(await frontier.frontier(), []);
+    assert.equal((await runBranchMerges(repo.cwd, base)).length, 2);
   } finally {
     await repo.cleanup();
   }

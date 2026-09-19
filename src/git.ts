@@ -33,11 +33,21 @@ export class WorktreeInstallError extends Error {
   }
 }
 
-async function git(cwd: string, args: string[]): Promise<string> {
+async function gitOut(cwd: string, args: string[]): Promise<string> {
   const { stdout } = await exec("git", ["-C", cwd, ...args], {
     encoding: "utf8",
   });
-  return stdout.trim();
+  return stdout;
+}
+
+async function git(cwd: string, args: string[]): Promise<string> {
+  return (await gitOut(cwd, args)).trim();
+}
+
+// git() trims, which would eat the status field off porcelain lines like
+// ` M README`. Reads that care about line-exact output come through here.
+async function gitLines(cwd: string, args: string[]): Promise<string[]> {
+  return (await gitOut(cwd, args)).split("\n").filter((line) => line !== "");
 }
 
 async function defaultBranch(cwd: string): Promise<string> {
@@ -277,6 +287,115 @@ export async function branchTreeDiffersFrom(
     }
     throw error;
   }
+}
+
+// The repo-global state an escape check diffs (ADR 0037): everything a Worker
+// could reach from inside its Worktree except the Worktree itself. The
+// Ticket's own Branch is left out, because its advance during healthy work is
+// success, not escape; the Run Branch ref is stable in the window, because it
+// is created at the first merge, after the check has run.
+export type RepoSnapshot = {
+  head: string;
+  // Undefined on a detached checkout, which is a HEAD without a branch name.
+  branch: string | undefined;
+  // `status --porcelain` lines, minus paths under `.readyrun/`, which the Run
+  // itself creates.
+  porcelain: string[];
+  // Every ref but the Ticket's own Branch, remote-tracking refs included, so
+  // a Worker that pushed or fetched is caught too.
+  refs: Map<string, string>;
+};
+
+// `status --porcelain` writes `XY <path>`, with a rename as `XY <old> ->
+// <new>`. Paths git finds exotic are quoted; the opening quote is stripped
+// only so the `.readyrun/` prefix check still sees the path under it.
+function porcelainPaths(line: string): string[] {
+  return line.slice(3).split(" -> ").map((path) =>
+    path.startsWith('"') ? path.slice(1) : path
+  );
+}
+
+// One read of where everything stands, taken per spawn and diffed after the
+// Worker exits. The snapshot is per spawn rather than per Run, so a future
+// concurrent Run needs no new mechanism (ADR 0007).
+export async function captureRepoSnapshot(
+  cwd: string,
+  ticketBranch: string,
+): Promise<RepoSnapshot> {
+  const branch = await git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]);
+  const porcelain = (await gitLines(cwd, ["status", "--porcelain"]))
+    .filter((line) =>
+      !porcelainPaths(line).some((path) => path.startsWith(".readyrun/"))
+    );
+  const refs = new Map<string, string>();
+  const listed = await gitLines(cwd, [
+    "for-each-ref",
+    "--format=%(objectname) %(refname)",
+  ]);
+  for (const line of listed) {
+    const at = line.indexOf(" ");
+    const refname = line.slice(at + 1);
+    if (refname !== `refs/heads/${ticketBranch}`) {
+      refs.set(refname, line.slice(0, at));
+    }
+  }
+  return {
+    head: await headCommit(cwd),
+    branch: branch === "HEAD" ? undefined : branch,
+    porcelain,
+    refs,
+  };
+}
+
+// What moved outside the Ticket's Worktree and Branch between two snapshots,
+// or undefined when nothing did. Every clause names what moved with before
+// and after values, so a hard stop can point at the escape instead of
+// claiming the Ticket produced nothing (ADR 0037).
+export function describeEscape(
+  before: RepoSnapshot,
+  after: RepoSnapshot,
+): string | undefined {
+  const findings: string[] = [];
+  if (before.head !== after.head) {
+    const on = after.branch === undefined ? "" : ` on ${after.branch}`;
+    findings.push(
+      `the Consumer's checkout advanced from ${shortCommit(before.head)} to ${
+        shortCommit(after.head)
+      }${on}`,
+    );
+  }
+  const appeared = after.porcelain.filter((line) =>
+    !before.porcelain.includes(line)
+  );
+  const cleared = before.porcelain.filter((line) =>
+    !after.porcelain.includes(line)
+  );
+  if (appeared.length > 0) {
+    findings.push(
+      `uncommitted changes appeared in the Consumer's checkout (${appeared.join(", ")})`,
+    );
+  }
+  if (cleared.length > 0) {
+    findings.push(
+      `uncommitted changes were cleared from the Consumer's checkout (${cleared.join(", ")})`,
+    );
+  }
+  for (const [refname, sha] of after.refs) {
+    const was = before.refs.get(refname);
+    if (was === undefined) {
+      findings.push(`ref ${refname} was created at ${shortCommit(sha)}`);
+    } else if (was !== sha) {
+      findings.push(
+        `ref ${refname} moved from ${shortCommit(was)} to ${shortCommit(sha)}`,
+      );
+    }
+  }
+  for (const [refname, sha] of before.refs) {
+    if (!after.refs.has(refname)) {
+      findings.push(`ref ${refname} was deleted (was ${shortCommit(sha)})`);
+    }
+  }
+  return findings.length === 0 ? undefined : findings.join("; ");
 }
 
 export async function createTicketWorktree(
