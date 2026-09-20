@@ -269,8 +269,11 @@ async function resolveCommitish(cwd: string, commitish: string): Promise<string>
   }
 }
 
-// Every Run Branch carries this prefix — one constant, because the name and
-// the HEAD trap that looks for it (ADR 0039) must not drift apart.
+// The Run Branch namespace. ReadyRun owns the prefix by convention — ref
+// naming belongs to the harness, never the author — and membership in it is
+// what makes a checkout's branch count as a Run Branch for HEAD-trap
+// detection (ADR 0039). One constant, because Run Branch naming and trap
+// detection must not drift apart.
 export const runBranchPrefix = "readyrun/run-";
 
 // The Run Branch is derived from the moment the Run starts, the way the
@@ -291,11 +294,15 @@ export function runBranchName(startedAt: Date): string {
 
 // The HEAD trap ADR 0039 names: standing on a Run Branch the default branch
 // does not contain, a Run with no --base cuts its next Run Branch from that
-// parked ref. Detection lives here; the disclosure that names the trap and
-// points at --base is the rendering layer's. Starting there on purpose remains
-// legitimate, so this warns, never gates. A commit-ish base was typed on
-// purpose and is measured against nothing, and a detached HEAD has no branch
-// name to be parked on.
+// parked ref. A branch counts as a Run Branch here by namespace membership —
+// the shared prefix above is the definition, not a heuristic approximating
+// Run state — so a Consumer branch squatting in the namespace warns though no
+// Run created it, and a Run Branch renamed out of the namespace escapes
+// detection; both are accepted. Detection lives here; the disclosure that
+// names the trap and points at --base is the rendering layer's. Starting
+// there on purpose remains legitimate, so this warns, never gates. A
+// commit-ish base was typed on purpose and is measured against nothing, and
+// a detached HEAD has no branch name to be parked on.
 export type HeadRunBranchTrap = {
   branch: string;
   defaultBranch: string;

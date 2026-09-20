@@ -47,7 +47,8 @@ export function resolveCap(
 
 // The Run Branch is derived from the moment the Run starts, the way the
 // Branch of a Ticket is; a Plan names the one its Run would collect onto.
-// The naming rule lives in git.ts beside the HEAD trap that matches its ref.
+// The naming rule lives in git.ts beside the HEAD trap that matches the
+// namespace it names into.
 export { runBranchName };
 
 // The Tickets waiting off the Frontier with what blocks each (ADR 0039) come
