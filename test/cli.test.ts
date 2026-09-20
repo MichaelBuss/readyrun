@@ -69,11 +69,61 @@ test("bare readyrun prints usage rather than opening a menu", async () => {
   const output = chunks.join("");
   assert.match(output, /Usage: readyrun/);
   assert.match(output, /init/);
-  assert.match(output, /run --max/);
+  assert.match(output, /run \[--preview\] --max/);
   assert.match(output, /--base <commit-ish>/);
   assert.match(output, /doctor/);
   assert.doesNotMatch(output, /menu|wizard|select/i);
   assert.equal(exitCode, 1);
+});
+
+test("readyrun run --preview routes to the preview entry with the same options object, and starts no Run", async () => {
+  const runs: RunOptions[] = [];
+  const previews: RunOptions[] = [];
+  const exitCode = await cli({
+    argv: ["run", "--preview", "--max", "3", "--model", "opus"],
+    cwd: "/consumer",
+    stdout: silent,
+    loadConfig: async () => config,
+    run: async (options) => {
+      runs.push(options);
+      return 0;
+    },
+    preview: async (options) => {
+      previews.push(options);
+      return 0;
+    },
+  });
+  assert.equal(exitCode, 0);
+  assert.equal(runs.length, 0);
+  assert.equal(previews.length, 1);
+  assert.equal(previews[0]?.cap, 3);
+  assert.equal(previews[0]?.model, "opus");
+});
+
+test("readyrun run --preview without a resolvable cap is refused by the same rule as a Run", async () => {
+  const chunks: string[] = [];
+  const exitCode = await cli({
+    argv: ["run", "--preview"],
+    cwd: "/consumer",
+    stdout: {
+      write(chunk: string) {
+        chunks.push(chunk);
+        return true;
+      },
+    },
+    loadConfig: async () => defineConfig({
+      tracker: memoryTracker({
+        tickets: [],
+        ready: "unblocked",
+        labels: ["ready-for-agent"],
+      }),
+      worker: recordingWorker(),
+      model: "composer-2",
+    }),
+    preview: undefined,
+  });
+  assert.equal(exitCode, 1);
+  assert.match(chunks.join(""), /A Run cannot start without a cap/);
 });
 
 test("readyrun run --max N hands the same options object the programmatic entry takes", async () => {

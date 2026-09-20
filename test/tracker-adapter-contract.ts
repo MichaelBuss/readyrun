@@ -73,6 +73,56 @@ export function trackerAdapterContract(
     );
   });
 
+  test(`${name}: a blocked selector Ticket answers as waiting, with its blockers`, async () => {
+    const adapter = await create({
+      tickets: [
+        ticket({ id: "52", labels: ["ready-for-agent"] }),
+        ticket({
+          id: "53",
+          labels: ["ready-for-agent"],
+          blockedBy: ["52"],
+        }),
+      ],
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+    });
+
+    const waiting = await adapter.waiting();
+    assert.deepEqual(
+      waiting.map((ticket) => ticket.id),
+      ["53"],
+    );
+    assert.deepEqual(waiting[0]?.blockedBy, ["52"]);
+  });
+
+  test(`${name}: the waiting set and the Frontier partition the selector's candidates`, async () => {
+    const adapter = await create({
+      tickets: [
+        ticket({ id: "52", labels: ["ready-for-agent"] }),
+        ticket({
+          id: "53",
+          labels: ["ready-for-agent"],
+          blockedBy: ["52"],
+        }),
+        ticket({ id: "99", labels: ["other"] }),
+      ],
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+    });
+
+    const frontier = await adapter.frontier();
+    const waiting = await adapter.waiting();
+    const frontierIds = frontier.map((ticket) => ticket.id);
+    const waitingIds = waiting.map((ticket) => ticket.id);
+    assert.deepEqual(
+      [...frontierIds, ...waitingIds].sort(),
+      ["52", "53"],
+    );
+    for (const id of waitingIds) {
+      assert.ok(!frontierIds.includes(id));
+    }
+  });
+
   test(`${name}: an optional parent root narrows the Frontier to that parent's children`, async () => {
     const adapter = await create({
       tickets: [
@@ -168,6 +218,48 @@ export function trackerAdapterContract(
       frontier.map((ticket) => ticket.id),
       ["99"],
     );
+  });
+
+  test(`${name}: a list root answers the named blocked Tickets as waiting, their blockers named`, async () => {
+    const adapter = await create({
+      tickets: [
+        ticket({ id: "52", labels: ["ready-for-agent"] }),
+        ticket({ id: "99", labels: ["other"] }),
+        ticket({ id: "53", labels: ["other"], blockedBy: ["52"] }),
+      ],
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+    });
+
+    const waiting = await adapter.waiting({
+      kind: "list",
+      ids: ["99", "53"],
+    });
+    assert.deepEqual(
+      waiting.map((ticket) => ticket.id),
+      ["53"],
+    );
+    assert.deepEqual(waiting[0]?.blockedBy, ["52"]);
+  });
+
+  test(`${name}: a parent root answers blocked children as waiting`, async () => {
+    const adapter = await create({
+      tickets: [
+        ticket({ id: "11", parent: "8" }),
+        ticket({ id: "13", parent: "8", blockedBy: ["12"] }),
+        ticket({ id: "12", parent: "9" }),
+        ticket({ id: "8" }),
+      ],
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+    });
+
+    const waiting = await adapter.waiting({ kind: "parent", id: "8" });
+    assert.deepEqual(
+      waiting.map((ticket) => ticket.id),
+      ["13"],
+    );
+    assert.deepEqual(waiting[0]?.blockedBy, ["12"]);
   });
 
   test(`${name}: a nonexistent named Ticket is a lie the adapter refuses`, async () => {

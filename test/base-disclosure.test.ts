@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
-import { defineConfig, doctor, run } from "../src/mod.ts";
+import { defineConfig, doctor, preview, run } from "../src/mod.ts";
 import { memoryTracker, recordingWorker } from "../src/testing/mod.ts";
 import { ticket } from "./tracker-adapter-contract.ts";
 import { commitRepoFiles, git, runBranch, runBranches, throwawayRepo } from "./throwaway-repo.ts";
@@ -287,6 +287,83 @@ test("a checkout with no commit to start from leaves Doctor with no base to disc
       "Frontier",
       "Next Ticket: 52",
     ]);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+const parkedBranch = "readyrun/run-20260101-000000";
+
+function headTrapLine(defaultBranch: string): string {
+  return `Warning: HEAD is the Run Branch ${parkedBranch}, and the default branch (${defaultBranch}) does not contain it; a Run without --base here cuts its Run Branch from this parked ref. To start from the default branch instead, pass --base ${defaultBranch}`;
+}
+
+test("a Run standing on a Run Branch the default branch does not contain names the HEAD trap and points at --base", async () => {
+  const repo = await throwawayRepo();
+  const out = capturing();
+  try {
+    await git(repo.cwd, ["branch", parkedBranch]);
+    await git(repo.cwd, ["checkout", parkedBranch]);
+    await commitRepoFiles(repo.cwd, { "parked.txt": "work on the parked ref\n" });
+
+    const exitCode = await run({
+      config: config(),
+      cap: 1,
+      cwd: repo.cwd,
+      stdout: out.stdout,
+    });
+
+    assert.equal(exitCode, 0);
+    assert.ok(lines(out.chunks).includes(headTrapLine("main")));
+    assert.ok(lines(out.chunks).includes("Ticket 52  Ticket 52  1/1  readyrun/52"));
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("the preview names the same HEAD trap, in the same words", async () => {
+  const repo = await throwawayRepo();
+  const out = capturing();
+  try {
+    await git(repo.cwd, ["branch", parkedBranch]);
+    await git(repo.cwd, ["checkout", parkedBranch]);
+    await commitRepoFiles(repo.cwd, { "parked.txt": "work on the parked ref\n" });
+
+    const exitCode = await preview({
+      config: config(),
+      cap: 1,
+      cwd: repo.cwd,
+      stdout: out.stdout,
+    });
+
+    assert.equal(exitCode, 0);
+    assert.ok(lines(out.chunks).includes(headTrapLine("main")));
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("a Run Branch the default branch contains is no trap", async () => {
+  const repo = await throwawayRepo();
+  const out = capturing();
+  try {
+    await git(repo.cwd, ["branch", parkedBranch]);
+    await git(repo.cwd, ["checkout", parkedBranch]);
+    await commitRepoFiles(repo.cwd, { "work.txt": "later merged\n" });
+    await git(repo.cwd, ["checkout", "main"]);
+    await git(repo.cwd, ["merge", "--no-ff", "-m", "land it", parkedBranch]);
+    await git(repo.cwd, ["branch", "-d", parkedBranch]);
+    await git(repo.cwd, ["branch", parkedBranch]);
+
+    const exitCode = await run({
+      config: config(),
+      cap: 1,
+      cwd: repo.cwd,
+      stdout: out.stdout,
+    });
+
+    assert.equal(exitCode, 0);
+    assert.doesNotMatch(out.chunks.join(""), /parked ref/);
   } finally {
     await repo.cleanup();
   }
