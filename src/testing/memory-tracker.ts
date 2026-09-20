@@ -62,20 +62,38 @@ export function memoryTracker(options: MemoryTrackerOptions): TrackerAdapter {
     [...tickets].sort((a, b) =>
       a.id.localeCompare(b.id, undefined, { numeric: true }),
     );
+  // A Tracker that cannot express blocking has no honest unblocked or
+  // waiting answer: it refuses, as the shipped Adapters do, rather than
+  // answer from `blockedBy` facts it could not know.
+  function refuseWhenBlockingUnexpressable(): void {
+    if (options.canExpressBlocking === false) {
+      throw new Error(
+        "This Tracker cannot express blocking, so no Frontier or waiting answer exists. Pick a Tracker Adapter that can.",
+      );
+    }
+  }
+  const unblocked = (ticket: Ticket): boolean =>
+    ticket.blockedBy.every((id) => ineligible.has(id));
   return createTrackerAdapter({
     async frontier(root) {
-      return pickOrder(
-        candidates(root).filter((ticket) =>
-          ticket.blockedBy.every((id) => ineligible.has(id))
-        ),
-      );
+      refuseWhenBlockingUnexpressable();
+      return pickOrder(candidates(root).filter(unblocked));
     },
     async waiting(root) {
-      return pickOrder(
-        candidates(root).filter((ticket) =>
-          !ticket.blockedBy.every((id) => ineligible.has(id))
-        ),
-      );
+      refuseWhenBlockingUnexpressable();
+      return pickOrder(candidates(root).filter((ticket) => !unblocked(ticket)));
+    },
+    async tree(root) {
+      refuseWhenBlockingUnexpressable();
+      const all = candidates(root);
+      const effective = root ?? optionalRoot(options.parent, options.ids);
+      return {
+        parent: effective?.kind === "parent"
+          ? options.tickets.find((ticket) => ticket.id === effective.id)
+          : undefined,
+        frontier: pickOrder(all.filter(unblocked)),
+        waiting: pickOrder(all.filter((ticket) => !unblocked(ticket))),
+      };
     },
     branchName(ticket) {
       return `readyrun/${ticket.id}`;

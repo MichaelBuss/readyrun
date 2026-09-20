@@ -393,6 +393,56 @@ export function github(
             a.id.localeCompare(b.id, undefined, { numeric: true }),
           );
       },
+      // One scan answers the whole tree: the same candidates `frontier` and
+      // `waiting` split, partitioned here, plus the named parent's own
+      // Ticket — open, or the lie above was already refused (#142).
+      async tree(root) {
+        const blocking = await canExpressBlocking();
+        if (!blocking) {
+          throw new Error("GitHub cannot express blocking");
+        }
+        const effective = root ?? optionalRoot(options.parent, options.ids);
+        const bypass = effective?.kind === "list";
+        const tickets = await scanOpenTickets(bypass ? [] : options.labels);
+        let candidates: Ticket[];
+        if (effective?.kind === "list") {
+          candidates = tickets.filter((ticket) =>
+            effective.ids.includes(ticket.id)
+          );
+          const answered = new Set(candidates.map((ticket) => ticket.id));
+          for (const id of effective.ids) {
+            if (!answered.has(id)) {
+              await refuseClosedOrMissing(id);
+            }
+          }
+        } else if (effective?.kind === "parent") {
+          // The parent narrows the selector's candidates, so its children
+          // are still selector Tickets: labels apply, unblocked does not.
+          candidates = tickets.filter((ticket) =>
+            ticket.parent === effective.id &&
+            options.labels.every((label) => ticket.labels.includes(label))
+          );
+          await refuseClosedOrMissing(effective.id);
+        } else {
+          candidates = tickets.filter((ticket) =>
+            matchesSelectorOptions(ticket, options)
+          );
+        }
+        const parent = effective?.kind === "parent"
+          ? tickets.find((ticket) => ticket.id === effective.id)
+          : undefined;
+        const byPickOrder = (a: Ticket, b: Ticket) =>
+          a.id.localeCompare(b.id, undefined, { numeric: true });
+        return {
+          parent,
+          frontier: candidates.filter((ticket) =>
+            ticket.blockedBy.length === 0
+          ).sort(byPickOrder),
+          waiting: candidates.filter((ticket) =>
+            ticket.blockedBy.length > 0
+          ).sort(byPickOrder),
+        };
+      },
       branchName(ticket) {
         return `readyrun/${ticket.id}`;
       },
