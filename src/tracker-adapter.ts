@@ -5,6 +5,7 @@ const brand = Symbol("TrackerAdapter");
 
 const knownTrackerAdapterKeys = new Set([
   "frontier",
+  "waiting",
   "branchName",
   "leaveFrontier",
   "promptCopy",
@@ -57,6 +58,10 @@ export type Landing = {
 export type TrackerAdapter = {
   readonly [brand]: true;
   frontier(root?: FrontierRoot): Promise<Ticket[]>;
+  // The Tickets that match the Frontier's selector and root but wait off it,
+  // each carrying its blockers on `blockedBy` (ADR 0039). With `frontier()`
+  // it partitions the root's candidates; it never mutates the Tracker.
+  waiting(root?: FrontierRoot): Promise<Ticket[]>;
   branchName(ticket: Ticket): string;
   leaveFrontier(ticket: Ticket, landing: Landing): Promise<void>;
   promptCopy(ticket: Ticket): string;
@@ -65,7 +70,12 @@ export type TrackerAdapter = {
 
 const defaults: Pick<
   TrackerAdapter,
-  "frontier" | "branchName" | "leaveFrontier" | "promptCopy" | "inspect"
+  | "frontier"
+  | "waiting"
+  | "branchName"
+  | "leaveFrontier"
+  | "promptCopy"
+  | "inspect"
 > = {
   // A root reaches the Adapter as an argument (ADR 0038), so an Adapter that
   // has not implemented it must refuse rather than answer as if none was
@@ -79,6 +89,16 @@ const defaults: Pick<
       );
     }
     return Promise.resolve([]);
+  },
+  // Waiting Tickets are answered by Tracker Adapters that compute them; one
+  // that has not must refuse rather than answer empty, which would read as
+  // "nothing waits" (ADR 0039).
+  waiting() {
+    return Promise.reject(
+      new Error(
+        "This Tracker Adapter does not answer waiting Tickets. Pick a Tracker Adapter that does.",
+      ),
+    );
   },
   branchName(ticket) {
     return `readyrun/${ticket.id}`;
@@ -102,7 +122,12 @@ export function createTrackerAdapter(
   methods: Partial<
     Pick<
       TrackerAdapter,
-      "frontier" | "branchName" | "leaveFrontier" | "promptCopy" | "inspect"
+      | "frontier"
+      | "waiting"
+      | "branchName"
+      | "leaveFrontier"
+      | "promptCopy"
+      | "inspect"
     >
   > = {},
 ): TrackerAdapter {

@@ -6,6 +6,8 @@ export { init } from "./init.ts";
 export type { InitAnswers, InitOptions } from "./init.ts";
 export { run, RunCapRequiredError } from "./run.ts";
 export type { RunOptions } from "./run.ts";
+export { computePlan, preview, renderPlan } from "./plan.ts";
+export type { Plan, PlanWaiting } from "./plan.ts";
 export {
   BaseNotFoundError,
   DefaultBranchError,

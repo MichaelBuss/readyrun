@@ -3,6 +3,7 @@ import { delimiter, isAbsolute, join } from "node:path";
 import { probeCwdFidelity } from "./cwd-fidelity.ts";
 import { defineConfig, type ReadyRunConfig } from "./config.ts";
 import {
+  headRunBranchTrap,
   normalizeRepository,
   originRepository,
   resolveRunBase,
@@ -34,6 +35,9 @@ export type DoctorCheckOptions = {
   // Doctor discloses that the fidelity probe runs the Worker once (ADR 0037).
   stdout?: DoctorStdout;
   probeTimeoutMs?: number;
+  // The Plan's preview reads Doctor's verdict without the probe (ADR 0039):
+  // proving cwd fidelity is the Run's, at start. Default runs it.
+  probe?: boolean;
 };
 
 async function check(
@@ -124,7 +128,8 @@ async function check(
       modelOk &&
       config.worker.bin !== undefined &&
       !argvPlaceholderLies &&
-      !askPrintMode
+      !askPrintMode &&
+      options.probe !== false
     ) {
       options.stdout?.write(
         "Probing Worker cwd fidelity in a throwaway Worktree (runs the Worker once)\n",
@@ -194,12 +199,26 @@ function baseLine(base: RunBase): string {
 }
 
 // Disclosure, not a gate: a base off the default branch and a dirty checkout
-// are both things a Consumer may have meant, so neither stops a Run.
-export function discloseBase(stdout: DoctorStdout, base: RunBase): void {
+// are both things a Consumer may have meant, so neither stops a Run. The same
+// words render the base wherever a human looks — Run start, Doctor, and the
+// Plan's preview — including the HEAD trap (ADR 0039): HEAD parked on a Run
+// Branch the default branch does not contain would cut a new Run Branch from
+// that ref unless the Consumer passes --base.
+export async function discloseBase(
+  stdout: DoctorStdout,
+  base: RunBase,
+  cwd: string,
+): Promise<void> {
   stdout.write(`${baseLine(base)}\n`);
   if (base.dirty) {
     stdout.write(
       "Warning: uncommitted changes in the primary checkout reach no Worktree\n",
+    );
+  }
+  const trap = await headRunBranchTrap(cwd, base);
+  if (trap !== undefined) {
+    stdout.write(
+      `Warning: HEAD is the Run Branch ${trap.branch}, and the default branch (${trap.defaultBranch}) does not contain it; a Run without --base here cuts its Run Branch from this parked ref. To start from the default branch instead, pass --base ${trap.defaultBranch}\n`,
     );
   }
 }
@@ -266,7 +285,7 @@ export async function doctor(options: DoctorOptions): Promise<number> {
       return 1;
     }
     try {
-      discloseBase(stdout, await resolveRunBase(cwd));
+      await discloseBase(stdout, await resolveRunBase(cwd), cwd);
     } catch {
       // A checkout git cannot answer for — no commit yet, or no repository.
       // Has no base to disclose. A Run hard-stops at git there, which is where that gets reported.

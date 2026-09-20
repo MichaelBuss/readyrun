@@ -113,6 +113,24 @@ Run complete: cap of 2 Tickets reached; the Frontier may still hold work
 Continue with: readyrun run --max 2 --base readyrun/run-20260904-152033
 ```
 
+Before committing to a **Run**, `run --preview` prints the **Plan** ([ADR 0039](./docs/adr/0039-the-plan-computed-once-rendered-read-only.md)) — Doctor's verdict, the **Frontier** in pick order, which **Tickets** wait and on what, the resolved base, the **Run Branch**, and the cap with where it came from — and closes with the exact equivalent `readyrun run …` command. It starts nothing: no Worker, no Worktree, no Run Branch, and it skips Doctor's cwd-fidelity probe (the **Run** proves that at start):
+
+```
+$ readyrun run --preview --max 3
+Run preview: nothing starts; this Plan is read-only
+Doctor: pass
+Frontier: 2 Tickets in pick order
+  1. 52 First up
+  2. 54 Second up
+Waiting: 1 Ticket off the Frontier
+  57 waits on 52
+Base: 68a6987 on main
+Run Branch: readyrun/run-20260920-101500 (named when the Run starts)
+Cap: 3 Tickets from --max
+Cwd-fidelity probe: not run; the Run proves it at start
+Run with: readyrun run --max 3
+```
+
 JSR does not put `readyrun` on PATH. Run the `cli` export as a program (Deno):
 
 ```sh

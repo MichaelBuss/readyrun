@@ -8,6 +8,7 @@ import { parseTicketRef } from "./frontier-root.ts";
 import type { FrontierRoot } from "./tracker-adapter.ts";
 import { init as initEntry, parseInitAnswers, type InitAnswers, type InitOptions } from "./init.ts";
 import { run as runEntry, RunCapRequiredError, type RunOptions } from "./run.ts";
+import { preview as previewEntry } from "./plan.ts";
 import type { ReadyRunConfig } from "./config.ts";
 import { isEffort, type Effort, type Permissions } from "./worker-adapter.ts";
 
@@ -17,10 +18,10 @@ const usage = `Usage: readyrun <command>
 
 Commands:
   init [--answers <file>]
-  run --max <n> [--base <commit-ish>] [--ticket <id-or-url> ...] [--root <parent>] [--model <id>] [--permissions ask|unattended] [--effort low|medium|high|xhigh|max]
+  run [--preview] --max <n> [--base <commit-ish>] [--ticket <id-or-url> ...] [--root <parent>] [--model <id>] [--permissions ask|unattended] [--effort low|medium|high|xhigh|max]
   doctor [--ticket <id-or-url> ...] [--root <parent>]
 
-A Run cannot start without a cap; an explicit --ticket list defaults the cap to its length. --root runs a parent's children; the parent is never worked.
+A Run cannot start without a cap; an explicit --ticket list defaults the cap to its length. --root runs a parent's children; the parent is never worked. run --preview prints the Plan — Doctor's verdict, the Frontier in pick order, the base, the Run Branch, the cap, the Tickets waiting — and the equivalent run command; nothing starts.
 `;
 
 const configNames = [
@@ -95,6 +96,7 @@ export type CliOptions = {
   stdout?: Writer;
   loadConfig?: (cwd: string) => Promise<ReadyRunConfig>;
   run?: (options: RunOptions) => Promise<number>;
+  preview?: (options: RunOptions) => Promise<number>;
   doctor?: (options: DoctorOptions) => Promise<number>;
   init?: (options: InitOptions) => Promise<number>;
   answers?: InitAnswers;
@@ -108,6 +110,7 @@ type RunFlags = {
   effort?: Effort;
   tickets: string[];
   root?: string;
+  preview?: boolean;
 };
 
 // The root flags `run` and `doctor` both take (ADR 0038): a repeatable
@@ -177,6 +180,7 @@ function parseRunFlags(args: string[]):
   let permissions: Permissions | undefined;
   let model: string | undefined;
   let effort: Effort | undefined;
+  let preview = false;
   let sawMax = false;
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
@@ -184,6 +188,8 @@ function parseRunFlags(args: string[]):
       sawMax = true;
       cap = Number(args[i + 1]);
       i += 1;
+    } else if (arg === "--preview") {
+      preview = true;
     } else if (arg === "--base") {
       const value = args[i + 1];
       if (value === undefined || value.length === 0) {
@@ -227,6 +233,7 @@ function parseRunFlags(args: string[]):
     effort,
     tickets: roots.tickets,
     root: roots.root,
+    preview,
   };
 }
 
@@ -323,7 +330,9 @@ export async function cli(options: CliOptions): Promise<number> {
     return 1;
   }
   if (runFlags !== undefined) {
-    const invoke = options.run ?? runEntry;
+    const invoke = runFlags.preview
+      ? options.preview ?? previewEntry
+      : options.run ?? runEntry;
     try {
       return await invoke({
         config,

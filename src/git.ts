@@ -269,6 +269,105 @@ async function resolveCommitish(cwd: string, commitish: string): Promise<string>
   }
 }
 
+// Every Run Branch carries this prefix — one constant, because the name and
+// the HEAD trap that looks for it (ADR 0039) must not drift apart.
+export const runBranchPrefix = "readyrun/run-";
+
+// The Run Branch is derived from the moment the Run starts, the way the
+// Branch of a Ticket is; a Plan names the one its Run would collect onto.
+export function runBranchName(startedAt: Date): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const stamp = [
+    startedAt.getFullYear(),
+    pad(startedAt.getMonth() + 1),
+    pad(startedAt.getDate()),
+    "-",
+    pad(startedAt.getHours()),
+    pad(startedAt.getMinutes()),
+    pad(startedAt.getSeconds()),
+  ].join("");
+  return `${runBranchPrefix}${stamp}`;
+}
+
+// The HEAD trap ADR 0039 names: standing on a Run Branch the default branch
+// does not contain, a Run with no --base cuts its next Run Branch from that
+// parked ref. Detection lives here; the disclosure that names the trap and
+// points at --base is the rendering layer's. Starting there on purpose remains
+// legitimate, so this warns, never gates. A commit-ish base was typed on
+// purpose and is measured against nothing, and a detached HEAD has no branch
+// name to be parked on.
+export type HeadRunBranchTrap = {
+  branch: string;
+  defaultBranch: string;
+};
+
+export async function headRunBranchTrap(
+  cwd: string,
+  base: RunBase,
+): Promise<HeadRunBranchTrap | undefined> {
+  if (base.kind !== "checkout" || base.branch === undefined) {
+    return undefined;
+  }
+  if (!base.branch.startsWith(runBranchPrefix)) {
+    return undefined;
+  }
+  if (await defaultBranchContains(cwd, base.defaultBranch, base.commit)) {
+    return undefined;
+  }
+  return { branch: base.branch, defaultBranch: base.defaultBranch };
+}
+
+// The local default branch if the checkout has one, else its remote-tracking
+// ref, else nothing to measure against — a repo with no default-branch ref
+// anywhere cannot be read as containing anything.
+async function defaultBranchContains(
+  cwd: string,
+  defaultBranch: string,
+  commit: string,
+): Promise<boolean> {
+  const ref = await firstExistingRef(cwd, [
+    `refs/heads/${defaultBranch}`,
+    `refs/remotes/origin/${defaultBranch}`,
+  ]);
+  if (ref === undefined) {
+    return false;
+  }
+  return await mergeBaseIsAncestor(cwd, commit, ref);
+}
+
+async function firstExistingRef(
+  cwd: string,
+  refs: string[],
+): Promise<string | undefined> {
+  for (const ref of refs) {
+    try {
+      await git(cwd, ["rev-parse", "--verify", "--quiet", ref]);
+      return ref;
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
+}
+
+// git answers ancestry in the exit code: 0 contained, 1 not. Any other exit is
+// a checkout git cannot answer for, and no trap can be named from it.
+async function mergeBaseIsAncestor(
+  cwd: string,
+  commit: string,
+  ref: string,
+): Promise<boolean> {
+  try {
+    await exec("git", ["-C", cwd, "merge-base", "--is-ancestor", commit, ref]);
+    return true;
+  } catch (error) {
+    if (execExitCode(error) === 1) {
+      return false;
+    }
+    throw error;
+  }
+}
+
 // Read the Branch ref, not the Worktree's HEAD: a Worker that committed
 // somewhere else left the Ticket's Branch's tree matching the base, same as
 // one that did nothing. Tree identity, not commit count: an empty commit is

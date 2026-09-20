@@ -304,8 +304,8 @@ export function linear(
           throw new Error("Linear cannot express blocking");
         }
         // The root named per Run reaches the Adapter as an argument (ADR 0038); a
-      // config-level root is what stands in when none is named on the call.
-      const effective = root ?? optionalRoot(options.parent, options.ids);
+        // config-level root is what stands in when none is named on the call.
+        const effective = root ?? optionalRoot(options.parent, options.ids);
         suggestedBranches.clear();
         const issues = await paginate<FrontierData, IssueNode>(
           "Frontier",
@@ -359,6 +359,51 @@ export function linear(
           a.id.localeCompare(b.id, undefined, { numeric: true }),
         );
       },
+      async waiting(root) {
+        const blocking = await canExpressBlocking();
+        if (!blocking) {
+          throw new Error("Linear cannot express blocking");
+        }
+        const effective = root ?? optionalRoot(options.parent, options.ids);
+        const issues = await paginate<FrontierData, IssueNode>(
+          "Frontier",
+          frontierQuery,
+          (data) => data.issues,
+        );
+        let waiting: IssueNode[];
+        if (effective?.kind === "list") {
+          const byId = new Map(issues.map((node) => [node.identifier, node]));
+          waiting = [];
+          for (const id of effective.ids) {
+            const node = byId.get(id);
+            // A named Ticket is unblocked (the Frontier's), waiting here, or
+            // a lie — closed or missing is refused as `frontier` does.
+            refuseTicketLie(id, node);
+            if (node !== undefined && blockedBy(node).length > 0) {
+              waiting.push(node);
+            }
+          }
+        } else if (effective?.kind === "parent") {
+          waiting = issues.filter((node) =>
+            node.parent !== null &&
+            node.parent.identifier === effective.id &&
+            matchesSelector(node, options) &&
+            blockedBy(node).length > 0
+          );
+          const parent = issues.find((node) =>
+            node.identifier === effective.id
+          );
+          refuseTicketLie(effective.id, parent);
+        } else {
+          waiting = issues.filter((node) =>
+            matchesSelectorOptions(node, options) &&
+            blockedBy(node).length > 0
+          );
+        }
+        return waiting.map(toTicket).sort((a, b) =>
+          a.id.localeCompare(b.id, undefined, { numeric: true }),
+        );
+      },
       branchName(ticket) {
         return suggestedBranches.get(ticket.id) ?? `readyrun/${ticket.id}`;
       },
@@ -399,6 +444,17 @@ function matchesFrontier(
   node: IssueNode,
   options: LinearTrackerOptions,
 ): boolean {
+  return matchesSelectorOptions(node, options) &&
+    blockedBy(node).length === 0;
+}
+
+// The selector's own facts — state, label, project, config parent, config
+// ids — without the unblocked clause, so `frontier` and `waiting` split the
+// same candidates.
+function matchesSelectorOptions(
+  node: IssueNode,
+  options: LinearTrackerOptions,
+): boolean {
   if (!matchesSelector(node, options)) {
     return false;
   }
@@ -411,7 +467,7 @@ function matchesFrontier(
   if (options.ids !== undefined && !options.ids.includes(node.identifier)) {
     return false;
   }
-  return blockedBy(node).length === 0;
+  return true;
 }
 
 function matchesSelector(

@@ -16,6 +16,11 @@ import {
 } from "./git.ts";
 import { composeWorkerPrompt } from "./prompt.ts";
 import {
+  resolveCap,
+  runBranchName,
+  RunCapRequiredError,
+} from "./plan.ts";
+import {
   describeRoot,
   rootViolationMessages,
   warnWaitingRootTickets,
@@ -46,12 +51,7 @@ export type RunOptions = {
   effort?: Effort;
 };
 
-export class RunCapRequiredError extends Error {
-  constructor() {
-    super("A Run cannot start without a cap");
-    this.name = "RunCapRequiredError";
-  }
-}
+export { RunCapRequiredError };
 
 function resolveModel(
   ticket: Ticket,
@@ -62,20 +62,6 @@ function resolveModel(
     .map((label) => config.modelsByLabel?.[label])
     .find((model) => model !== undefined);
   return mapped ?? runModel ?? config.model;
-}
-
-function runBranchName(startedAt: Date): string {
-  const pad = (value: number) => String(value).padStart(2, "0");
-  const stamp = [
-    startedAt.getFullYear(),
-    pad(startedAt.getMonth() + 1),
-    pad(startedAt.getDate()),
-    "-",
-    pad(startedAt.getHours()),
-    pad(startedAt.getMinutes()),
-    pad(startedAt.getSeconds()),
-  ].join("");
-  return `readyrun/run-${stamp}`;
 }
 
 // The merge is the only commit ReadyRun writes, so its message is derived from
@@ -191,13 +177,7 @@ function completionReport(
 
 export async function run(options: RunOptions): Promise<number> {
   const config = defineConfig(options.config);
-  // The cap resolves --max, then config, then an explicit list's length
-  // (ADR 0038), so a single-Ticket invocation is a Run with cap 1.
-  const cap = options.cap ?? config.cap ??
-    (options.root?.kind === "list" ? options.root.ids.length : undefined);
-  if (cap === undefined) {
-    throw new RunCapRequiredError();
-  }
+  const { cap } = resolveCap(options, config);
 
   const cwd = options.cwd ?? process.cwd();
   const stdout = options.stdout ?? process.stdout;
@@ -261,7 +241,7 @@ async function runWithLiveness(
       caughtMessage(error),
     );
   }
-  discloseBase(stdout, base);
+  await discloseBase(stdout, base, cwd);
   stdout.write(`Run Branch: ${runBranch}\n`);
   const complete = (reason: CleanStop): 0 => {
     live.stop();

@@ -275,6 +275,37 @@ export function github(
     );
   }
 
+  // Every open Issue with its blocking facts, in one paged scan. A list root
+  // reads its Tickets with no selector labels at all, so a bypassed selector
+  // does not judge its own blockers.
+  async function scanOpenTickets(
+    selectorLabels: readonly string[],
+  ): Promise<Ticket[]> {
+    const tickets: Ticket[] = [];
+    let cursor: string | null = null;
+    while (true) {
+      const data: FrontierData = await graphql<FrontierData>(
+        "Frontier",
+        frontierQuery,
+        { owner, name, cursor },
+      );
+      const connection = data.repository?.issues;
+      if (connection === undefined) {
+        throw new Error(`GitHub repository ${options.repo} was not found`);
+      }
+      for (const node of connection.nodes) {
+        if (node !== null) {
+          tickets.push(toTicket(node, selectorLabels));
+        }
+      }
+      if (!connection.pageInfo.hasNextPage) {
+        break;
+      }
+      cursor = connection.pageInfo.endCursor;
+    }
+    return tickets;
+  }
+
   return Object.assign(
     createTrackerAdapter({
       async frontier(root) {
@@ -283,33 +314,12 @@ export function github(
           throw new Error("GitHub cannot express blocking");
         }
         // The root named per Run reaches the Adapter as an argument (ADR 0038); a
-      // config-level root is what stands in when none is named on the call.
-      const effective = root ?? optionalRoot(options.parent, options.ids);
+        // config-level root is what stands in when none is named on the call.
+        const effective = root ?? optionalRoot(options.parent, options.ids);
         // A bypassed selector must not judge its own blockers, so a list's
         // Tickets are read with no selector labels at all.
         const bypass = effective?.kind === "list";
-        const tickets: Ticket[] = [];
-        let cursor: string | null = null;
-        while (true) {
-          const data: FrontierData = await graphql<FrontierData>(
-            "Frontier",
-            frontierQuery,
-            { owner, name, cursor },
-          );
-          const connection = data.repository?.issues;
-          if (connection === undefined) {
-            throw new Error(`GitHub repository ${options.repo} was not found`);
-          }
-          for (const node of connection.nodes) {
-            if (node !== null) {
-              tickets.push(toTicket(node, bypass ? [] : options.labels));
-            }
-          }
-          if (!connection.pageInfo.hasNextPage) {
-            break;
-          }
-          cursor = connection.pageInfo.endCursor;
-        }
+        const tickets = await scanOpenTickets(bypass ? [] : options.labels);
         let frontier: Ticket[];
         if (effective?.kind === "list") {
           // The list bypasses the selector but never `ready: "unblocked"`.
@@ -337,6 +347,48 @@ export function github(
           frontier = tickets.filter((ticket) => matchesFrontier(ticket, options));
         }
         return frontier
+          .sort((a, b) =>
+            a.id.localeCompare(b.id, undefined, { numeric: true }),
+          );
+      },
+      async waiting(root) {
+        const blocking = await canExpressBlocking();
+        if (!blocking) {
+          throw new Error("GitHub cannot express blocking");
+        }
+        const effective = root ?? optionalRoot(options.parent, options.ids);
+        const bypass = effective?.kind === "list";
+        const tickets = await scanOpenTickets(bypass ? [] : options.labels);
+        let waiting: Ticket[];
+        if (effective?.kind === "list") {
+          // A named Ticket is either unblocked (the Frontier's), waiting
+          // here, or a lie: closed or missing is refused as `frontier` does.
+          waiting = tickets.filter((ticket) =>
+            effective.ids.includes(ticket.id) && ticket.blockedBy.length > 0
+          );
+          const answered = new Set(
+            tickets.filter((ticket) => effective.ids.includes(ticket.id))
+              .map((ticket) => ticket.id),
+          );
+          for (const id of effective.ids) {
+            if (!answered.has(id)) {
+              await refuseClosedOrMissing(id);
+            }
+          }
+        } else if (effective?.kind === "parent") {
+          waiting = tickets.filter((ticket) =>
+            ticket.parent === effective.id &&
+            options.labels.every((label) => ticket.labels.includes(label)) &&
+            ticket.blockedBy.length > 0
+          );
+          await refuseClosedOrMissing(effective.id);
+        } else {
+          waiting = tickets.filter((ticket) =>
+            matchesSelectorOptions(ticket, options) &&
+            ticket.blockedBy.length > 0
+          );
+        }
+        return waiting
           .sort((a, b) =>
             a.id.localeCompare(b.id, undefined, { numeric: true }),
           );
@@ -370,6 +422,16 @@ function matchesFrontier(
   ticket: Ticket,
   options: GitHubTrackerOptions,
 ): boolean {
+  return matchesSelectorOptions(ticket, options) &&
+    ticket.blockedBy.length === 0;
+}
+
+// The selector's own facts — labels, config parent, config ids — without the
+// unblocked clause, so `frontier` and `waiting` split the same candidates.
+function matchesSelectorOptions(
+  ticket: Ticket,
+  options: GitHubTrackerOptions,
+): boolean {
   if (!options.labels.every((label) => ticket.labels.includes(label))) {
     return false;
   }
@@ -379,7 +441,7 @@ function matchesFrontier(
   if (options.ids !== undefined && !options.ids.includes(ticket.id)) {
     return false;
   }
-  return ticket.blockedBy.length === 0;
+  return true;
 }
 
 function toTicket(node: IssueNode, selectorLabels: readonly string[]): Ticket {
