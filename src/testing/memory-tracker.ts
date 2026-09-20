@@ -62,13 +62,14 @@ export function memoryTracker(options: MemoryTrackerOptions): TrackerAdapter {
     [...tickets].sort((a, b) =>
       a.id.localeCompare(b.id, undefined, { numeric: true }),
     );
-  // A Tracker that cannot express blocking has no honest unblocked or
-  // waiting answer: it refuses, as the shipped Adapters do, rather than
-  // answer from `blockedBy` facts it could not know.
+  // A Tracker that cannot express blocking has no honest waiting or tree
+  // answer: it refuses, as the shipped Adapters do, rather than answer from
+  // `blockedBy` facts it could not know. `frontier` is untouched: it shipped
+  // answering, and Doctor is the authority that refuses a Tracker like this.
   function refuseWhenBlockingUnexpressable(): void {
     if (options.canExpressBlocking === false) {
       throw new Error(
-        "This Tracker cannot express blocking, so no Frontier or waiting answer exists. Pick a Tracker Adapter that can.",
+        "This Tracker cannot express blocking, so no waiting or tree answer exists. Pick a Tracker Adapter that can.",
       );
     }
   }
@@ -76,7 +77,6 @@ export function memoryTracker(options: MemoryTrackerOptions): TrackerAdapter {
     ticket.blockedBy.every((id) => ineligible.has(id));
   return createTrackerAdapter({
     async frontier(root) {
-      refuseWhenBlockingUnexpressable();
       return pickOrder(candidates(root).filter(unblocked));
     },
     async waiting(root) {

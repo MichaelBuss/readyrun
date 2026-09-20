@@ -62,9 +62,11 @@ export type TrackerAdapter = {
   // The Tickets that match the Frontier's selector and root but wait off it,
   // each carrying its blockers on `blockedBy` (ADR 0039). With `frontier()`
   // it partitions the root's candidates; it never mutates the Tracker.
-  // Answered in stable pick order. An Adapter refuses — rather than answer
-  // empty, which would read as "nothing waits" — when blocking cannot be
-  // expressed or a named root is a lie.
+  // Answered in stable pick order. With no root it answers for the
+  // selector's candidates — a Tracker that cannot enumerate them refuses.
+  // An Adapter refuses — rather than answer empty, which would read as
+  // "nothing waits" — when blocking cannot be expressed or a named root is
+  // a lie.
   waiting(root?: FrontierRoot): Promise<Ticket[]>;
   // The parent/children facts a tree rendering needs, in one read-only look
   // at the same root flags `frontier` takes (ADR 0039): the parent root's own
@@ -72,9 +74,9 @@ export type TrackerAdapter = {
   // root's open candidates split into the Frontier half and the waiting half,
   // each Ticket carrying its `parent` and `blockedBy`. The halves are the
   // same answers `frontier(root)` and `waiting(root)` give and partition the
-  // root's candidates. An Adapter that cannot answer it — blocking not
-  // expressible, a root it does not honor, a lie — refuses, never answers
-  // empty.
+  // root's candidates; with no root, the selector's. An Adapter that cannot
+  // answer it — blocking not expressible, a root it does not honor, a lie,
+  // or candidates it cannot enumerate — refuses, never answers empty.
   tree(root?: FrontierRoot): Promise<TreeAnswer>;
   branchName(ticket: Ticket): string;
   leaveFrontier(ticket: Ticket, landing: Landing): Promise<void>;
