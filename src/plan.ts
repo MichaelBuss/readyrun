@@ -166,17 +166,21 @@ function waitingLine(ticket: Ticket): string {
   return `  ${ticket.id} waits on ${blockers}`;
 }
 
-// The opt-in rendering of the Plan (ADR 0039), read-only end to end. The
-// always-on rendering — Run-start and Doctor disclosure — says the same words
-// about the base; this adds the Frontier in pick order, the cap and its
-// source, the waiting Tickets, and closes with the exact equivalent command,
-// so the flag surface is learned by reading rather than by failing a Run.
+// The Plan's rendering (ADR 0039), read-only end to end, under whatever
+// header the surface names. The always-on rendering — Run-start and Doctor
+// disclosure — says the same words about the base; this adds the Frontier in
+// pick order, the cap and its source, the waiting Tickets, and closes with
+// the exact equivalent command, so the flag surface is learned by reading
+// rather than by failing a Run. `run --preview` renders it under the
+// preview's header; the Launcher renders the same Plan under its own before
+// the Run it confirmed starts.
 export async function renderPlan(
   stdout: { write(chunk: string): unknown },
   plan: Plan,
   cwd: string,
+  header = "Run preview: nothing starts; this Plan is read-only\n",
 ): Promise<void> {
-  stdout.write("Run preview: nothing starts; this Plan is read-only\n");
+  stdout.write(header);
   if (plan.doctorFailures.length === 0) {
     stdout.write("Doctor: pass\n");
   } else {

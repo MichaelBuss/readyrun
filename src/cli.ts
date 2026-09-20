@@ -1,16 +1,26 @@
 #!/usr/bin/env node
-import { existsSync, realpathSync } from "node:fs";
+import { realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import type { ReadyRunConfig } from "./config.ts";
+import {
+  AmbiguousConfigError,
+  ConfigExportError,
+  ConfigNotFoundError,
+  configLoadFailure,
+  loadConfig,
+} from "./consumer-config.ts";
 import { doctor as doctorEntry, type DoctorOptions } from "./doctor.ts";
 import { parseTicketRef } from "./frontier-root.ts";
+import { launcher as launcherEntry, type LauncherOptions } from "./launcher.ts";
 import type { FrontierRoot } from "./tracker-adapter.ts";
 import { init as initEntry, parseInitAnswers, type InitAnswers, type InitOptions } from "./init.ts";
 import { run as runEntry, RunCapRequiredError, type RunOptions } from "./run.ts";
 import { preview as previewEntry } from "./plan.ts";
-import type { ReadyRunConfig } from "./config.ts";
 import { isEffort, type Effort, type Permissions } from "./worker-adapter.ts";
+
+export { AmbiguousConfigError, ConfigExportError, ConfigNotFoundError, loadConfig };
 
 type Writer = { write(chunk: string): unknown };
 
@@ -24,81 +34,19 @@ Commands:
 A Run cannot start without a cap; an explicit --ticket list defaults the cap to its length. --root runs a parent's children; the parent is never worked. run --preview prints the Plan — Doctor's verdict, the Frontier in pick order, the base, the Run Branch, the cap, the Tickets waiting — and the equivalent run command; nothing starts.
 `;
 
-const configNames = [
-  "readyrun.config.ts",
-  "readyrun.config.js",
-  "readyrun.config.mjs",
-] as const;
-
-export class ConfigNotFoundError extends Error {
-  constructor() {
-    super(
-      "No readyrun.config.ts, readyrun.config.js, or readyrun.config.mjs at the Consumer root. Run `readyrun init`.",
-    );
-    this.name = "ConfigNotFoundError";
-  }
-}
-
-export class AmbiguousConfigError extends Error {
-  constructor(names: readonly string[]) {
-    super(
-      `Multiple config files at the Consumer root: ${names.join(", ")}. Leave one file.`,
-    );
-    this.name = "AmbiguousConfigError";
-  }
-}
-
-export class ConfigExportError extends Error {
-  constructor(name: string) {
-    super(
-      `${name} must default-export defineConfig(...). Default-export defineConfig(...) from that file.`,
-    );
-    this.name = "ConfigExportError";
-  }
-}
-
-function configLoadFailure(error: unknown): string {
-  if (
-    error instanceof ConfigNotFoundError ||
-    error instanceof AmbiguousConfigError ||
-    error instanceof ConfigExportError
-  ) {
-    return error.message;
-  }
-  const detail = error instanceof Error ? error.message : String(error);
-  return `Could not load the ReadyRun config. Fix the config file. ${detail}`;
-}
-
-export async function loadConfig(cwd: string): Promise<ReadyRunConfig> {
-  const found = configNames.filter((name) => existsSync(join(cwd, name)));
-  if (found.length === 0) {
-    throw new ConfigNotFoundError();
-  }
-  if (found.length > 1) {
-    throw new AmbiguousConfigError(found);
-  }
-  const name = found[0];
-  if (name === undefined) {
-    throw new ConfigNotFoundError();
-  }
-  const mod: { default?: ReadyRunConfig } = await import(
-    pathToFileURL(join(cwd, name)).href
-  );
-  if (mod.default === undefined) {
-    throw new ConfigExportError(name);
-  }
-  return mod.default;
-}
-
 export type CliOptions = {
   argv: string[];
   cwd?: string;
   stdout?: Writer;
+  // Whether the terminal can host the Launcher (ADR 0040): a TTY on both
+  // ends. Only the bare command reads it; every flag path is unchanged.
+  tty?: boolean;
   loadConfig?: (cwd: string) => Promise<ReadyRunConfig>;
   run?: (options: RunOptions) => Promise<number>;
   preview?: (options: RunOptions) => Promise<number>;
   doctor?: (options: DoctorOptions) => Promise<number>;
   init?: (options: InitOptions) => Promise<number>;
+  launcher?: (options: LauncherOptions) => Promise<number>;
   answers?: InitAnswers;
 };
 
@@ -278,6 +226,22 @@ async function answersFromFile(
 export async function cli(options: CliOptions): Promise<number> {
   const stdout = options.stdout ?? process.stdout;
   const command = options.argv[0];
+  if (command === undefined) {
+    const tty = options.tty ??
+      (process.stdin.isTTY === true && process.stdout.isTTY === true);
+    if (!tty) {
+      stdout.write(usage);
+      return 1;
+    }
+    const invoke = options.launcher ?? launcherEntry;
+    return invoke({
+      cwd: options.cwd ?? process.cwd(),
+      stdout,
+      loadConfig: options.loadConfig ?? loadConfig,
+      run: options.run ?? runEntry,
+      init: options.init ?? initEntry,
+    });
+  }
   if (command === "init") {
     const invoke = options.init ?? initEntry;
     const cwd = options.cwd ?? process.cwd();

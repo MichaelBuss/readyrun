@@ -292,6 +292,70 @@ export function runBranchName(startedAt: Date): string {
   return `${runBranchPrefix}${stamp}`;
 }
 
+// A local Run Branch as enumeration answers it: its name, its tip, and
+// whether the default branch already contains that tip — the merged state a
+// continue offer must never contradict (a merged Run Branch holds nothing
+// left to review).
+export type ListedRunBranch = {
+  name: string;
+  tip: string;
+  mergedIntoDefault: boolean;
+};
+
+// The local Run Branches, newest first by tip committerdate. Enumeration
+// reads the namespace — membership in `readyrun/run-` is what makes a branch
+// a Run Branch (ADR 0039), so a Worktree is never listed (ADR 0029). Merged
+// state is measured against the default branch's local ref when the checkout
+// has one, else its remote-tracking ref; a checkout with neither cannot be
+// read as containing anything, so nothing counts as merged there.
+export async function listRunBranches(
+  cwd: string,
+): Promise<ListedRunBranch[]> {
+  const defaultRef = await defaultBranchRef(cwd);
+  const lines = await gitLines(cwd, [
+    "for-each-ref",
+    "--sort=-committerdate",
+    "--format=%(objectname) %(refname:short)",
+    `refs/heads/${runBranchPrefix}*`,
+  ]);
+  const branches: ListedRunBranch[] = [];
+  for (const line of lines) {
+    const at = line.indexOf(" ");
+    if (at <= 0) {
+      continue;
+    }
+    const tip = line.slice(0, at);
+    const name = line.slice(at + 1);
+    const mergedIntoDefault = defaultRef !== undefined &&
+      await mergeBaseIsAncestor(cwd, tip, defaultRef);
+    branches.push({ name, tip, mergedIntoDefault });
+  }
+  return branches;
+}
+
+// Whether HEAD's commit contains a tip as an ancestor — the fact that says a
+// fresh Run needs no continue offer even though an older Run Branch sits
+// unmerged.
+export async function headContainsCommit(
+  cwd: string,
+  commit: string,
+): Promise<boolean> {
+  return await mergeBaseIsAncestor(cwd, commit, "HEAD");
+}
+
+// The default branch's ref in this checkout — its local branch when there is
+// one, else its remote-tracking ref — as the measure of whether a Run Branch
+// tip is already contained. Undefined when neither ref exists: a checkout
+// with no default-branch ref anywhere cannot be read as containing anything.
+async function defaultBranchRef(cwd: string): Promise<string | undefined> {
+  const branch = await defaultBranch(cwd);
+  return await firstExistingRef(cwd, [
+    `refs/heads/${branch}`,
+    `refs/remotes/origin/${branch}`,
+  ]);
+}
+
+
 // The HEAD trap ADR 0039 names: standing on a Run Branch the default branch
 // does not contain, a Run with no --base cuts its next Run Branch from that
 // parked ref. A branch counts as a Run Branch here by namespace membership —

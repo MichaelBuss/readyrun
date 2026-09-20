@@ -55,10 +55,21 @@ async function withConsumerRoot(
   }
 }
 
-test("bare readyrun prints usage rather than opening a menu", async () => {
+const usageText = `Usage: readyrun <command>
+
+Commands:
+  init [--answers <file>]
+  run [--preview] --max <n> [--base <commit-ish>] [--ticket <id-or-url> ...] [--root <parent>] [--model <id>] [--permissions ask|unattended] [--effort low|medium|high|xhigh|max]
+  doctor [--ticket <id-or-url> ...] [--root <parent>]
+
+A Run cannot start without a cap; an explicit --ticket list defaults the cap to its length. --root runs a parent's children; the parent is never worked. run --preview prints the Plan — Doctor's verdict, the Frontier in pick order, the base, the Run Branch, the cap, the Tickets waiting — and the equivalent run command; nothing starts.
+`;
+
+test("bare readyrun prints usage rather than opening the Launcher", async () => {
   const chunks: string[] = [];
   const exitCode = await cli({
     argv: [],
+    tty: false,
     stdout: {
       write(chunk: string) {
         chunks.push(chunk);
@@ -67,12 +78,52 @@ test("bare readyrun prints usage rather than opening a menu", async () => {
     },
   });
   const output = chunks.join("");
-  assert.match(output, /Usage: readyrun/);
-  assert.match(output, /init/);
-  assert.match(output, /run \[--preview\] --max/);
-  assert.match(output, /--base <commit-ish>/);
-  assert.match(output, /doctor/);
+  assert.equal(output, usageText);
   assert.doesNotMatch(output, /menu|wizard|select/i);
+  assert.equal(exitCode, 1);
+});
+
+test("bare readyrun on a TTY routes to the Launcher with the flag path's dependencies", async () => {
+  const launched: unknown[] = [];
+  const exitCode = await cli({
+    argv: [],
+    tty: true,
+    cwd: "/consumer",
+    stdout: silent,
+    loadConfig: async () => config,
+    run: async () => 0,
+    init: async () => 0,
+    launcher: async (options) => {
+      launched.push(options);
+      return 7;
+    },
+  });
+  assert.equal(exitCode, 7);
+  const options = launched[0] as {
+    cwd?: string;
+    loadConfig?: unknown;
+    run?: unknown;
+    init?: unknown;
+  };
+  assert.equal(options?.cwd, "/consumer");
+  assert.equal(typeof options?.loadConfig, "function");
+  assert.equal(typeof options?.run, "function");
+  assert.equal(typeof options?.init, "function");
+});
+
+test("an unknown command prints usage on a TTY too; the Launcher is the bare command only", async () => {
+  const chunks: string[] = [];
+  const exitCode = await cli({
+    argv: ["bogus"],
+    tty: true,
+    stdout: {
+      write(chunk: string) {
+        chunks.push(chunk);
+        return true;
+      },
+    },
+  });
+  assert.equal(chunks.join(""), usageText);
   assert.equal(exitCode, 1);
 });
 
