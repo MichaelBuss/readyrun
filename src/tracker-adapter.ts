@@ -6,6 +6,7 @@ const brand = Symbol("TrackerAdapter");
 const knownTrackerAdapterKeys = new Set([
   "frontier",
   "waiting",
+  "tree",
   "branchName",
   "leaveFrontier",
   "promptCopy",
@@ -61,17 +62,41 @@ export type TrackerAdapter = {
   // The Tickets that match the Frontier's selector and root but wait off it,
   // each carrying its blockers on `blockedBy` (ADR 0039). With `frontier()`
   // it partitions the root's candidates; it never mutates the Tracker.
+  // Answered in stable pick order. With no root it answers for the
+  // selector's candidates — a Tracker that cannot enumerate them refuses.
+  // An Adapter refuses — rather than answer empty, which would read as
+  // "nothing waits" — when blocking cannot be expressed or a named root is
+  // a lie.
   waiting(root?: FrontierRoot): Promise<Ticket[]>;
+  // The parent/children facts a tree rendering needs, in one read-only look
+  // at the same root flags `frontier` takes (ADR 0039): the parent root's own
+  // Ticket as the tree's root node — a parent is never worked — and the
+  // root's open candidates split into the Frontier half and the waiting half,
+  // each Ticket carrying its `parent` and `blockedBy`. The halves are the
+  // same answers `frontier(root)` and `waiting(root)` give and partition the
+  // root's candidates; with no root, the selector's. An Adapter that cannot
+  // answer it — blocking not expressible, a root it does not honor, a lie,
+  // or candidates it cannot enumerate — refuses, never answers empty.
+  tree(root?: FrontierRoot): Promise<TreeAnswer>;
   branchName(ticket: Ticket): string;
   leaveFrontier(ticket: Ticket, landing: Landing): Promise<void>;
   promptCopy(ticket: Ticket): string;
   inspect(): Promise<TrackerInspect>;
 };
 
+// The answer `tree()` owes: who roots the tree, and its open candidates as
+// the two halves every renderer needs — pickable now, and waiting on what.
+export type TreeAnswer = {
+  readonly parent: Ticket | undefined;
+  readonly frontier: readonly Ticket[];
+  readonly waiting: readonly Ticket[];
+};
+
 const defaults: Pick<
   TrackerAdapter,
   | "frontier"
   | "waiting"
+  | "tree"
   | "branchName"
   | "leaveFrontier"
   | "promptCopy"
@@ -100,6 +125,16 @@ const defaults: Pick<
       ),
     );
   },
+  // The tree is answered by Tracker Adapters that compute it; one that has
+  // not must refuse rather than answer empty, which would read as a Tracker
+  // with no parent, no Frontier, and nothing waiting (ADR 0039).
+  tree() {
+    return Promise.reject(
+      new Error(
+        "This Tracker Adapter does not answer the tree. Pick a Tracker Adapter that does.",
+      ),
+    );
+  },
   branchName(ticket) {
     return `readyrun/${ticket.id}`;
   },
@@ -124,6 +159,7 @@ export function createTrackerAdapter(
       TrackerAdapter,
       | "frontier"
       | "waiting"
+      | "tree"
       | "branchName"
       | "leaveFrontier"
       | "promptCopy"

@@ -38,6 +38,10 @@ _Avoid_: queue, backlog, sprint
 What a **Frontier** is rooted at, named on the command line per **Run**: a parent **Ticket**, whose children become the **Frontier**, or an explicit list of **Tickets**. The list bypasses the Consumer selector but never `ready: "unblocked"`; the parent narrows the selector's **Frontier** to its children, and is itself never worked.
 _Avoid_: scope, focus, target list, allowlist
 
+**Tree**:
+What a tree rendering reads from a **Tracker Adapter** in one read-only look: the parent **Root**'s own **Ticket** — a parent is never worked — when a parent **Root** is named, and the **Root**'s open candidates split into the **Frontier** and the **Tickets** waiting off it, each waiting **Ticket** carrying its blockers. `frontier` and `waiting` answer the halves; `tree` answers both together, or refuses when the Adapter cannot answer it honestly.
+_Avoid_: hierarchy (unqualified), forest
+
 **Branch**:
 The git ref created for a **Ticket** when its **Worker** starts. The name is derived by the harness / **Tracker Adapter**, not authored on the **Ticket**.
 _Avoid_: main

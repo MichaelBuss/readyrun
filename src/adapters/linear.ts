@@ -404,6 +404,68 @@ export function linear(
           a.id.localeCompare(b.id, undefined, { numeric: true }),
         );
       },
+      // One scan answers the whole tree: the same candidates `frontier` and
+      // `waiting` split, partitioned here, plus the named parent's own
+      // Ticket — refuseTicketLie has already refused one that is not a
+      // live candidate (#142). Read-only: unlike `frontier`, it seeds no
+      // suggested Branch names.
+      async tree(root) {
+        const blocking = await canExpressBlocking();
+        if (!blocking) {
+          throw new Error("Linear cannot express blocking");
+        }
+        const effective = root ?? optionalRoot(options.parent, options.ids);
+        const issues = await paginate<FrontierData, IssueNode>(
+          "Frontier",
+          frontierQuery,
+          (data) => data.issues,
+        );
+        let candidates: IssueNode[];
+        let parent: Ticket | undefined;
+        if (effective?.kind === "list") {
+          const byId = new Map(issues.map((node) => [node.identifier, node]));
+          candidates = [];
+          for (const id of effective.ids) {
+            const node = byId.get(id);
+            // A named Ticket is unblocked (the Frontier's), waiting, or a
+            // lie — closed or missing is refused as `frontier` does.
+            refuseTicketLie(id, node);
+            if (node !== undefined) {
+              candidates.push(node);
+            }
+          }
+        } else if (effective?.kind === "parent") {
+          // The parent narrows the selector's candidates, so its children
+          // are still selector Tickets: the selector applies, unblocked
+          // does not.
+          candidates = issues.filter((node) =>
+            node.parent !== null &&
+            node.parent.identifier === effective.id &&
+            matchesSelector(node, options)
+          );
+          const parentNode = issues.find((node) =>
+            node.identifier === effective.id
+          );
+          refuseTicketLie(effective.id, parentNode);
+          parent = parentNode === undefined ? undefined : toTicket(parentNode);
+        } else {
+          candidates = issues.filter((node) =>
+            matchesSelectorOptions(node, options)
+          );
+        }
+        const byPickOrder = (a: Ticket, b: Ticket) =>
+          a.id.localeCompare(b.id, undefined, { numeric: true });
+        const tickets = candidates.map(toTicket);
+        return {
+          parent,
+          frontier: tickets.filter((ticket) =>
+            ticket.blockedBy.length === 0
+          ).sort(byPickOrder),
+          waiting: tickets.filter((ticket) =>
+            ticket.blockedBy.length > 0
+          ).sort(byPickOrder),
+        };
+      },
       branchName(ticket) {
         return suggestedBranches.get(ticket.id) ?? `readyrun/${ticket.id}`;
       },

@@ -123,6 +123,87 @@ export function trackerAdapterContract(
     }
   });
 
+  test(`${name}: with a parent root, the Frontier and the waiting set partition that parent's open selector children`, async () => {
+    const adapter = await create({
+      tickets: [
+        ticket({ id: "11", parent: "8" }),
+        ticket({ id: "13", parent: "8", blockedBy: ["12"] }),
+        ticket({ id: "14", parent: "8", labels: ["other"] }),
+        ticket({ id: "12", parent: "9" }),
+        ticket({ id: "8" }),
+      ],
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+    });
+
+    const root = { kind: "parent", id: "8" } as const;
+    const frontier = await adapter.frontier(root);
+    const waiting = await adapter.waiting(root);
+    const frontierIds = frontier.map((ticket) => ticket.id);
+    const waitingIds = waiting.map((ticket) => ticket.id);
+    // Every open child matching the selector is on one side, and the child
+    // that does not match the selector is on neither.
+    assert.deepEqual([...frontierIds, ...waitingIds].sort(), ["11", "13"]);
+    assert.deepEqual(waiting.find((ticket) => ticket.id === "13")?.blockedBy, [
+      "12",
+    ]);
+  });
+
+  test(`${name}: with a list root, the Frontier and the waiting set partition exactly the named Tickets`, async () => {
+    const adapter = await create({
+      tickets: [
+        ticket({ id: "52", labels: ["ready-for-agent"] }),
+        ticket({ id: "99", labels: ["other"] }),
+        ticket({ id: "53", labels: ["other"], blockedBy: ["52"] }),
+      ],
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+    });
+
+    const root = { kind: "list", ids: ["99", "53"] } as const;
+    const frontier = await adapter.frontier(root);
+    const waiting = await adapter.waiting(root);
+    // The named Tickets split; the selector Ticket nobody named is on neither
+    // side, and a blocked named Ticket is waiting work, not a lie.
+    assert.deepEqual(
+      [...frontier.map((ticket) => ticket.id), ...waiting.map((ticket) => ticket.id)]
+        .sort(),
+      ["53", "99"],
+    );
+    assert.deepEqual(waiting.find((ticket) => ticket.id === "53")?.blockedBy, [
+      "52",
+    ]);
+  });
+
+  test(`${name}: the waiting answer is in stable pick order, whatever order the root named`, async () => {
+    const adapter = await create({
+      tickets: [
+        ticket({ id: "52" }),
+        ticket({ id: "57", blockedBy: ["52"] }),
+        ticket({ id: "53", blockedBy: ["52"] }),
+      ],
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+    });
+
+    const waiting = await adapter.waiting({ kind: "list", ids: ["57", "53"] });
+    assert.deepEqual(
+      waiting.map((ticket) => ticket.id),
+      ["53", "57"],
+    );
+  });
+
+  test(`${name}: a Tracker that cannot express blocking refuses the waiting answer rather than answering empty`, async () => {
+    const adapter = await create({
+      tickets: [ticket({ id: "52" })],
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+      canExpressBlocking: false,
+    });
+
+    await assert.rejects(() => adapter.waiting(), /cannot express blocking/);
+  });
+
   test(`${name}: an optional parent root narrows the Frontier to that parent's children`, async () => {
     const adapter = await create({
       tickets: [
@@ -323,6 +404,89 @@ export function trackerAdapterContract(
       frontier.map((ticket) => ticket.id),
       ["52", "57"],
     );
+  });
+
+  test(`${name}: the tree answers the parent root's own Ticket and both halves of its children`, async () => {
+    const adapter = await create({
+      tickets: [
+        ticket({ id: "8" }),
+        ticket({ id: "11", parent: "8" }),
+        ticket({ id: "13", parent: "8", blockedBy: ["12"] }),
+        ticket({ id: "12" }),
+      ],
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+    });
+
+    const answer = await adapter.tree({ kind: "parent", id: "8" });
+    assert.equal(answer.parent?.id, "8");
+    assert.deepEqual(
+      answer.frontier.map((ticket) => ticket.id),
+      ["11"],
+    );
+    assert.deepEqual(
+      answer.waiting.map((ticket) => ticket.id),
+      ["13"],
+    );
+    assert.deepEqual(answer.waiting[0]?.blockedBy, ["12"]);
+  });
+
+  test(`${name}: with no root, the tree's halves partition the selector's candidates and no parent is named`, async () => {
+    const adapter = await create({
+      tickets: [
+        ticket({ id: "52" }),
+        ticket({ id: "53", blockedBy: ["52"] }),
+        ticket({ id: "99", labels: ["other"] }),
+      ],
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+    });
+
+    const answer = await adapter.tree();
+    assert.equal(answer.parent, undefined);
+    assert.deepEqual(
+      answer.frontier.map((ticket) => ticket.id),
+      ["52"],
+    );
+    assert.deepEqual(
+      answer.waiting.map((ticket) => ticket.id),
+      ["53"],
+    );
+  });
+
+  test(`${name}: a list root's tree carries no parent node and its halves partition the named Tickets`, async () => {
+    const adapter = await create({
+      tickets: [
+        ticket({ id: "52", labels: ["ready-for-agent"] }),
+        ticket({ id: "99", labels: ["other"] }),
+        ticket({ id: "53", labels: ["other"], blockedBy: ["52"] }),
+      ],
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+    });
+
+    const answer = await adapter.tree({ kind: "list", ids: ["99", "53"] });
+    assert.equal(answer.parent, undefined);
+    assert.deepEqual(
+      answer.frontier.map((ticket) => ticket.id),
+      ["99"],
+    );
+    assert.deepEqual(
+      answer.waiting.map((ticket) => ticket.id),
+      ["53"],
+    );
+    assert.deepEqual(answer.waiting[0]?.blockedBy, ["52"]);
+  });
+
+  test(`${name}: a Tracker that cannot express blocking refuses the tree rather than answering empty`, async () => {
+    const adapter = await create({
+      tickets: [ticket({ id: "52" })],
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+      canExpressBlocking: false,
+    });
+
+    await assert.rejects(() => adapter.tree(), /cannot express blocking/);
   });
 
   test(`${name}: leaveFrontier makes the Ticket ineligible and unblocks Tickets that were waiting on it`, async () => {

@@ -23,6 +23,7 @@ export type {
   Landing,
   TrackerAdapter,
   TrackerInspect,
+  TreeAnswer,
 } from "./tracker-adapter.ts";
 export type { Effort, Permissions, SpawnRequest, WorkerAdapter } from "./worker-adapter.ts";
 export { UnknownConfigKeyError } from "./unknown-keys.ts";

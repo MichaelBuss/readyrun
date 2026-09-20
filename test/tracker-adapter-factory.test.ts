@@ -82,6 +82,20 @@ test("createTrackerAdapter defaults branchName, leaveFrontier, promptCopy, and i
   assert.equal(inspected.canExpressBlocking, true);
 });
 
+test("createTrackerAdapter refuses waiting and the tree by default rather than answering empty", async () => {
+  const tracker = createTrackerAdapter({
+    frontier() {
+      return Promise.resolve([ticket({ id: "52" })]);
+    },
+  });
+
+  await assert.rejects(
+    () => tracker.waiting(),
+    /does not answer waiting Tickets/,
+  );
+  await assert.rejects(() => tracker.tree(), /does not answer the tree/);
+});
+
 test("unknown keys on createTrackerAdapter are an error, not a silently ignored typo", () => {
   const methods = {
     frontier() {
