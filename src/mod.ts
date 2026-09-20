@@ -4,6 +4,8 @@ export { doctor } from "./doctor.ts";
 export type { DoctorOptions } from "./doctor.ts";
 export { init } from "./init.ts";
 export type { InitAnswers, InitOptions } from "./init.ts";
+export { capAnswer, capSuggestion, defaultEffort, headBaseState, launcher } from "./launcher.ts";
+export type { HeadBaseState, LauncherIO, LauncherOptions } from "./launcher.ts";
 export { run, RunCapRequiredError } from "./run.ts";
 export type { RunOptions } from "./run.ts";
 export { computePlan, preview, renderPlan } from "./plan.ts";
