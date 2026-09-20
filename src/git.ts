@@ -311,7 +311,7 @@ export type ListedRunBranch = {
 export async function listRunBranches(
   cwd: string,
 ): Promise<ListedRunBranch[]> {
-  const defaultRef = await defaultRunBranchMeasure(cwd);
+  const defaultRef = await defaultBranchRef(cwd);
   const lines = await gitLines(cwd, [
     "for-each-ref",
     "--sort=-committerdate",
@@ -343,7 +343,11 @@ export async function headContainsCommit(
   return await mergeBaseIsAncestor(cwd, commit, "HEAD");
 }
 
-async function defaultRunBranchMeasure(cwd: string): Promise<string | undefined> {
+// The default branch's ref in this checkout — its local branch when there is
+// one, else its remote-tracking ref — as the measure of whether a Run Branch
+// tip is already contained. Undefined when neither ref exists: a checkout
+// with no default-branch ref anywhere cannot be read as containing anything.
+async function defaultBranchRef(cwd: string): Promise<string | undefined> {
   const branch = await defaultBranch(cwd);
   return await firstExistingRef(cwd, [
     `refs/heads/${branch}`,

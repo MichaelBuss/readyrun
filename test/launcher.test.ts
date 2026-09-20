@@ -420,6 +420,45 @@ test("a HEAD parked on an unmerged Run Branch preselects the default branch as t
   }
 });
 
+test("the steer picker still offers the parked Run Branch, as an explicit base", async () => {
+  const repo = await throwawayRepo();
+  const out = capturing();
+  const runs: RunOptions[] = [];
+  const { io, prompts } = scripted([
+    "1",
+    "ask",
+    "composer-2",
+    defaultEffort,
+    "readyrun/run-20260101-000000",
+    true,
+  ]);
+  try {
+    await git(repo.cwd, ["checkout", "-b", "readyrun/run-20260101-000000"]);
+    await commitRepoFiles(repo.cwd, { "parked.txt": "parked\n" });
+    const exitCode = await launcher({
+      cwd: repo.cwd,
+      stdout: out.stdout,
+      loadConfig: async () => launcherConfig(),
+      run: async (options) => {
+        runs.push(options);
+        return 0;
+      },
+      io,
+    });
+
+    assert.equal(exitCode, 0);
+    assert.equal(runs[0]?.base, "readyrun/run-20260101-000000");
+    const basePrompt = prompts.find((prompt) => prompt.kind === "select" && prompt.initial === "main");
+    const options = basePrompt?.options as Array<{ value: string }>;
+    assert.deepEqual(
+      options.map((option) => option.value),
+      ["main", "readyrun/run-20260101-000000"],
+    );
+  } finally {
+    await repo.cleanup();
+  }
+});
+
 test("the base picker offers unmerged Run Branches newest first and never a merged one", async () => {
   const repo = await throwawayRepo();
   const out = capturing();

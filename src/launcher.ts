@@ -219,6 +219,9 @@ export async function launcher(options: LauncherOptions = {}): Promise<number> {
     io.cancel("Launcher cancelled.");
     return 1;
   }
+  // An Adapter that maps no Effort flag — Cursor takes it as a model variant
+  // — would fail Doctor on any effort answer, so the question is not asked;
+  // the same skip Init makes for cursor.
   const effort = resolved.worker.effortFlag === undefined
     ? keptDefault
     : await collectEffort(io, resolved);
@@ -373,6 +376,8 @@ async function collectEffort(
 
 const freshRun = "__fresh__";
 
+// The picked base; `base: undefined` is a real answer (a fresh Run names no
+// --base), while the undefined return is a cancelled prompt.
 type BaseAnswer = { base: string | undefined };
 
 async function collectBase(

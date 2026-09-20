@@ -65,7 +65,7 @@ Commands:
 A Run cannot start without a cap; an explicit --ticket list defaults the cap to its length. --root runs a parent's children; the parent is never worked. run --preview prints the Plan — Doctor's verdict, the Frontier in pick order, the base, the Run Branch, the cap, the Tickets waiting — and the equivalent run command; nothing starts.
 `;
 
-test("bare readyrun prints usage rather than opening a menu", async () => {
+test("bare readyrun prints usage rather than opening the Launcher", async () => {
   const chunks: string[] = [];
   const exitCode = await cli({
     argv: [],
