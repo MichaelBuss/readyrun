@@ -39,7 +39,7 @@ What a **Frontier** is rooted at, named on the command line per **Run**: a paren
 _Avoid_: scope, focus, target list, allowlist
 
 **Tree**:
-What a tree rendering reads from a **Tracker Adapter** in one read-only look: the parent **Root**'s own **Ticket** — a parent is never worked — when a parent **Root** is named, and the **Root**'s open candidates split into the **Frontier** and the **Tickets** waiting off it, each waiting **Ticket** carrying its blockers. `frontier` and `waiting` answer the halves; `tree` answers both together, or refuses when the Adapter cannot answer it honestly.
+What a tree rendering reads from a **Tracker Adapter** in one read-only look: the parent **Root**'s own **Ticket** — a parent is never worked — when a parent **Root** is named, and the named **Root**'s open candidates — the selector's, when none is named — split into the **Frontier** and the **Tickets** waiting off it, each waiting **Ticket** carrying its blockers. `frontier` and `waiting` answer the halves; `tree` answers both together, or refuses when the Adapter cannot answer it honestly.
 _Avoid_: hierarchy (unqualified), forest
 
 **Branch**:
@@ -67,7 +67,7 @@ The command that writes a stub `readyrun.config.ts` in the **Consumer** root. In
 _Avoid_: setup-ralph, generated `ralph/` folder, command wizard
 
 **Launcher**:
-The Clack surface bare `readyrun` opens on a TTY; off a TTY, bare `readyrun` is usage. It assembles a **Run**: collects answers, renders the **Plan**, and on confirm hands the terminal to the **Run**'s own renderer. Everything it collects is flag-expressible; it never re-derives **Doctor**'s rules; it is never a prompt inside a **Run**, and an unattended **Run** never prompts.
+The Clack surface bare `readyrun` opens on a TTY; off a TTY, bare `readyrun` is usage. It assembles a **Run**: collects answers — naming the **Root** among them by rendering the **Tree**, where picking **Tickets** emits the explicit list and taking the **Frontier** from the top names none, and a picked waiting **Ticket** is confirmed before it lands in the **Root** — renders the **Plan**, and on confirm hands the terminal to the **Run**'s own renderer. Everything it collects is flag-expressible; it never re-derives **Doctor**'s rules; it is never a prompt inside a **Run**, and an unattended **Run** never prompts.
 _Avoid_: wizard, menu, TUI shell (around a live **Run**)
 
 **Consumer**:

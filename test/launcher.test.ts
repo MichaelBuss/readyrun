@@ -11,6 +11,7 @@ import {
   capAnswer,
   capSuggestion,
   defaultEffort,
+  goFromTop,
   headBaseState,
   launcher,
   type LauncherIO,
@@ -30,7 +31,7 @@ const exec = promisify(execFile);
 const cancelled = Symbol("cancel");
 
 type RecordedPrompt = {
-  kind: "text" | "select" | "confirm";
+  kind: "text" | "select" | "confirm" | "multiSelect";
   message: string;
   options?: unknown;
   initial?: unknown;
@@ -76,6 +77,20 @@ function scripted(answers: Array<string | boolean | symbol>): {
       });
       return next() as boolean | symbol;
     },
+    async multiSelect(options) {
+      prompts.push({
+        kind: "multiSelect",
+        message: options.message,
+        options: options.groups,
+        initial: options.initialValues,
+      });
+      const value = next();
+      // A multi-select answers an array; the script names the picks as one
+      // comma- or space-joined string, and a symbol passes through.
+      return (typeof value === "string"
+        ? value.split(/[,\s]+/).filter((pick) => pick.length > 0)
+        : value) as never;
+    },
   };
   return { io, prompts };
 }
@@ -108,6 +123,52 @@ function launcherConfig(
     worker: recordingWorker({ exitCode: 0 }),
     model: "composer-2",
     ...overrides,
+  });
+}
+
+// A tree worth rendering: one parent with pickable and waiting children, and
+// one pickable Ticket with no parent. 41 itself carries no selector label, so
+// it is never a candidate — a parent is never worked.
+function treeConfig(): ReadyRunConfig {
+  return defineConfig({
+    tracker: memoryTracker({
+      tickets: [
+        ticket({ id: "41", title: "The parent", labels: [] }),
+        ticket({ id: "42", title: "First up", parent: "41" }),
+        ticket({ id: "44", title: "Also ready", parent: "41" }),
+        ticket({
+          id: "54",
+          title: "Blocked behind 52",
+          blockedBy: ["52"],
+          parent: "41",
+        }),
+        ticket({ id: "52", title: "Standalone" }),
+      ],
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+    }),
+    worker: recordingWorker({ exitCode: 0 }),
+    model: "composer-2",
+  });
+}
+
+// The tree-refusing shape the fallback answers for: blocking cannot be
+// expressed, so `tree` and `waiting` refuse while `frontier` still answers.
+// 60 is off any named root, so the rootless and rooted Frontiers differ.
+function fallbackConfig(): ReadyRunConfig {
+  return defineConfig({
+    tracker: memoryTracker({
+      tickets: [
+        ticket({ id: "52", title: "First up" }),
+        ticket({ id: "54", title: "Blocked behind 52", blockedBy: ["52"] }),
+        ticket({ id: "60", title: "Unrelated" }),
+      ],
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+      canExpressBlocking: false,
+    }),
+    worker: recordingWorker({ exitCode: 0 }),
+    model: "composer-2",
   });
 }
 
@@ -145,6 +206,297 @@ test("capAnswer demands a whole number of at least 1", () => {
   assert.equal(capAnswer("2.5").ok, false);
   assert.equal(capAnswer(undefined).ok, false);
   assert.equal(capAnswer("").ok, false);
+});
+
+test("the tree question goes first, rendering the tree grouped by parent with both halves", async () => {
+  const repo = await throwawayRepo();
+  const out = capturing();
+  const runs: RunOptions[] = [];
+  const { io, prompts } = scripted([
+    goFromTop,
+    "1",
+    "ask",
+    "composer-2",
+    defaultEffort,
+    true,
+  ]);
+  try {
+    const exitCode = await launcher({
+      cwd: repo.cwd,
+      stdout: out.stdout,
+      loadConfig: async () => treeConfig(),
+      run: async (options) => {
+        runs.push(options);
+        return 0;
+      },
+      io,
+    });
+
+    assert.equal(exitCode, 0);
+    assert.equal(runs[0]?.root, undefined);
+    const treePrompt = prompts[0];
+    assert.equal(treePrompt?.kind, "multiSelect");
+    const groups = treePrompt?.options as Array<{
+      label: string;
+      options: Array<{ value: string; label: string; hint?: string }>;
+    }>;
+    assert.deepEqual(
+      groups.map((group) => group.label),
+      ["From the top", "Ticket 41", "No parent"],
+    );
+    assert.equal(groups[0]?.options[0]?.value, goFromTop);
+    assert.deepEqual(
+      groups[1]?.options.map((option) => option.value),
+      ["42", "44", "54"],
+    );
+    assert.deepEqual(
+      groups[2]?.options.map((option) => option.value),
+      ["52"],
+    );
+    const waiting = groups[1]?.options[2];
+    assert.equal(waiting?.label, "Blocked behind 52");
+    assert.equal(waiting?.hint, "waits on 52 — joins when it clears");
+    assert.equal(groups[1]?.options[0]?.hint, undefined);
+    const capPrompt = prompts[1];
+    assert.equal(capPrompt?.initial, "3");
+    assert.equal(
+      prompts.some((prompt) => prompt.kind === "confirm" && prompt.message.includes("waits on")),
+      false,
+    );
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("a multi-select across the tree emits the explicit --ticket list and confirms its waiting Tickets once", async () => {
+  const repo = await throwawayRepo();
+  const out = capturing();
+  const runs: RunOptions[] = [];
+  const { io, prompts } = scripted([
+    "42 44 54 52",
+    true,
+    "4",
+    "ask",
+    "composer-2",
+    defaultEffort,
+    true,
+  ]);
+  try {
+    const exitCode = await launcher({
+      cwd: repo.cwd,
+      stdout: out.stdout,
+      loadConfig: async () => treeConfig(),
+      run: async (options) => {
+        runs.push(options);
+        return 0;
+      },
+      io,
+    });
+
+    assert.equal(exitCode, 0);
+    assert.deepEqual(runs[0]?.root, {
+      kind: "list",
+      ids: ["42", "44", "54", "52"],
+    });
+    const waitingConfirm = prompts[1];
+    assert.equal(waitingConfirm?.kind, "confirm");
+    assert.equal(
+      waitingConfirm?.message,
+      "#54 waits on 52 — joins when it clears. Include it in this Run?",
+    );
+    assert.equal(waitingConfirm?.initial, true);
+    assert.equal(prompts[2]?.initial, "4");
+    const lines = out.chunks.join("").split("\n").filter(Boolean);
+    assert.ok(lines.includes("Run with: readyrun run --max 4 --ticket 42 44 54 52"));
+    assert.ok(lines.includes("Frontier: 3 Tickets in pick order"));
+    assert.ok(lines.includes("  54 waits on 52"));
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("declining the waiting confirm drops the waiting Tickets from the list", async () => {
+  const repo = await throwawayRepo();
+  const out = capturing();
+  const runs: RunOptions[] = [];
+  const { io, prompts } = scripted([
+    "42 54",
+    false,
+    "1",
+    "ask",
+    "composer-2",
+    defaultEffort,
+    true,
+  ]);
+  try {
+    const exitCode = await launcher({
+      cwd: repo.cwd,
+      stdout: out.stdout,
+      loadConfig: async () => treeConfig(),
+      run: async (options) => {
+        runs.push(options);
+        return 0;
+      },
+      io,
+    });
+
+    assert.equal(exitCode, 0);
+    assert.deepEqual(runs[0]?.root, { kind: "list", ids: ["42"] });
+    assert.equal(prompts[2]?.initial, "3");
+    const lines = out.chunks.join("").split("\n").filter(Boolean);
+    assert.ok(lines.includes("Run with: readyrun run --max 1 --ticket 42"));
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("declining every picked waiting Ticket re-asks the tree question", async () => {
+  const repo = await throwawayRepo();
+  const out = capturing();
+  const runs: RunOptions[] = [];
+  const { io, prompts } = scripted([
+    "54",
+    false,
+    goFromTop,
+    "1",
+    "ask",
+    "composer-2",
+    defaultEffort,
+    true,
+  ]);
+  try {
+    const exitCode = await launcher({
+      cwd: repo.cwd,
+      stdout: out.stdout,
+      loadConfig: async () => treeConfig(),
+      run: async (options) => {
+        runs.push(options);
+        return 0;
+      },
+      io,
+    });
+
+    assert.equal(exitCode, 0);
+    assert.equal(runs[0]?.root, undefined);
+    assert.deepEqual(
+      prompts.map((prompt) => prompt.kind),
+      [
+        "multiSelect",
+        "confirm",
+        "multiSelect",
+        "text",
+        "select",
+        "text",
+        "select",
+        "confirm",
+      ],
+    );
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("a Tracker Adapter that refuses the tree falls back to the root flags as text prompts", async () => {
+  const repo = await throwawayRepo();
+  const out = capturing();
+  const runs: RunOptions[] = [];
+  const { io, prompts } = scripted([
+    "",
+    "https://example.test/54",
+    "1",
+    "ask",
+    "composer-2",
+    defaultEffort,
+    true,
+  ]);
+  try {
+    const exitCode = await launcher({
+      cwd: repo.cwd,
+      stdout: out.stdout,
+      loadConfig: async () => fallbackConfig(),
+      run: async (options) => {
+        runs.push(options);
+        return 0;
+      },
+      io,
+    });
+
+    assert.equal(exitCode, 0);
+    assert.deepEqual(runs[0]?.root, { kind: "list", ids: ["54"] });
+    assert.deepEqual(
+      prompts.map((prompt) => prompt.kind),
+      ["text", "text", "text", "select", "text", "select", "confirm"],
+    );
+    assert.equal(prompts[2]?.initial, "1");
+    const output = out.chunks.join("");
+    assert.ok(output.includes("does not answer the tree"));
+    assert.ok(output.includes("cannot express blocking"));
+    assert.ok(output.includes("Run with: readyrun run --max 1 --ticket 54"));
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("the fallback names a parent with --root when one is given", async () => {
+  const repo = await throwawayRepo();
+  const out = capturing();
+  const runs: RunOptions[] = [];
+  const { io, prompts } = scripted([
+    "41",
+    "",
+    "1",
+    "ask",
+    "composer-2",
+    defaultEffort,
+    true,
+  ]);
+  try {
+    const exitCode = await launcher({
+      cwd: repo.cwd,
+      stdout: out.stdout,
+      loadConfig: async () =>
+        defineConfig({
+          tracker: memoryTracker({
+            tickets: [
+              ticket({ id: "41", title: "The parent", labels: [] }),
+              ticket({ id: "42", title: "First up", parent: "41" }),
+              ticket({
+                id: "44",
+                title: "Blocked behind 42",
+                blockedBy: ["42"],
+                parent: "41",
+              }),
+              ticket({ id: "60", title: "Unrelated" }),
+            ],
+            ready: "unblocked",
+            labels: ["ready-for-agent"],
+            canExpressBlocking: false,
+          }),
+          worker: recordingWorker({ exitCode: 0 }),
+          model: "composer-2",
+        }),
+      run: async (options) => {
+        runs.push(options);
+        return 0;
+      },
+      io,
+    });
+
+    assert.equal(exitCode, 0);
+    assert.deepEqual(runs[0]?.root, { kind: "parent", id: "41" });
+    assert.equal(prompts[0]?.kind, "text");
+    assert.equal(
+      prompts[0]?.message.includes("parent"),
+      true,
+    );
+    // The suggestion is the named parent's Frontier (42), not the rootless
+    // one (42 and 60).
+    assert.equal(prompts[2]?.initial, "1");
+    const lines = out.chunks.join("").split("\n").filter(Boolean);
+    assert.ok(lines.includes("Run with: readyrun run --max 1 --root 41"));
+  } finally {
+    await repo.cleanup();
+  }
 });
 
 test("headBaseState: a checkout with no Run Branches is a fresh Run", async () => {
@@ -249,6 +601,7 @@ test("the launcher collects answers, renders the Plan, and hands the Run its opt
   const out = capturing();
   const runs: RunOptions[] = [];
   const { io, prompts } = scripted([
+    goFromTop,
     "4",
     "unattended",
     "opus",
@@ -279,13 +632,14 @@ test("the launcher collects answers, renders the Plan, and hands the Run its opt
     assert.deepEqual(handed?.cwd, repo.cwd);
     assert.deepEqual(
       prompts.map((prompt) => prompt.kind),
-      ["text", "select", "text", "select", "confirm"],
+      ["multiSelect", "text", "select", "text", "select", "confirm"],
     );
-    assert.equal(prompts[0]?.initial, "1");
-    assert.equal(prompts[0]?.message.includes("Cap"), true);
-    assert.equal(prompts[1]?.initial, "ask");
-    assert.equal(prompts[2]?.initial, "composer-2");
-    assert.equal(prompts[4]?.message.includes("Start this Run"), true);
+    assert.equal(prompts[0]?.kind, "multiSelect");
+    assert.equal(prompts[1]?.initial, "1");
+    assert.equal(prompts[1]?.message.includes("Cap"), true);
+    assert.equal(prompts[2]?.initial, "ask");
+    assert.equal(prompts[3]?.initial, "composer-2");
+    assert.equal(prompts[5]?.message.includes("Start this Run"), true);
     const plan = out.chunks.join("");
     const lines = plan.split("\n").filter(Boolean);
     assert.equal(lines[0], "Plan for this Run");
@@ -307,7 +661,7 @@ test("answers kept at their config defaults carry no flag", async () => {
   const repo = await throwawayRepo();
   const out = capturing();
   const runs: RunOptions[] = [];
-  const { io } = scripted(["1", "ask", "composer-2", defaultEffort, true]);
+  const { io } = scripted([goFromTop, "1", "ask", "composer-2", defaultEffort, true]);
   try {
     const exitCode = await launcher({
       cwd: repo.cwd,
@@ -337,7 +691,7 @@ test("a declined confirm starts no Run", async () => {
   const repo = await throwawayRepo();
   const out = capturing();
   const runs: RunOptions[] = [];
-  const { io } = scripted(["1", "ask", "composer-2", defaultEffort, false]);
+  const { io } = scripted([goFromTop, "1", "ask", "composer-2", defaultEffort, false]);
   try {
     const exitCode = await launcher({
       cwd: repo.cwd,
@@ -385,6 +739,7 @@ test("a HEAD parked on an unmerged Run Branch preselects the default branch as t
   const out = capturing();
   const runs: RunOptions[] = [];
   const { io, prompts } = scripted([
+    goFromTop,
     "1",
     "ask",
     "composer-2",
@@ -425,6 +780,7 @@ test("the steer picker still offers the parked Run Branch, as an explicit base",
   const out = capturing();
   const runs: RunOptions[] = [];
   const { io, prompts } = scripted([
+    goFromTop,
     "1",
     "ask",
     "composer-2",
@@ -464,6 +820,7 @@ test("the base picker offers unmerged Run Branches newest first and never a merg
   const out = capturing();
   const runs: RunOptions[] = [];
   const { io, prompts } = scripted([
+    goFromTop,
     "2",
     "unattended",
     "composer-2",
@@ -495,7 +852,13 @@ test("the base picker offers unmerged Run Branches newest first and never a merg
 
     assert.equal(exitCode, 0);
     assert.equal(runs[0]?.base, "readyrun/run-20260102-000000");
-    const basePrompt = prompts[4];
+    const basePrompt = prompts.find(
+      (prompt) =>
+        prompt.kind === "select" &&
+        (prompt.options as Array<{ value: string }>).some(
+          (option) => option.value === "__fresh__",
+        ),
+    );
     assert.equal(basePrompt?.kind, "select");
     const options = basePrompt?.options as Array<{ value: string }>;
     assert.deepEqual(
@@ -517,7 +880,7 @@ test("the base picker offers unmerged Run Branches newest first and never a merg
 test("a fresh Run with nothing to continue never asks for a base", async () => {
   const repo = await throwawayRepo();
   const runs: RunOptions[] = [];
-  const { io, prompts } = scripted(["1", "ask", "composer-2", defaultEffort, true]);
+  const { io, prompts } = scripted([goFromTop, "1", "ask", "composer-2", defaultEffort, true]);
   try {
     const exitCode = await launcher({
       cwd: repo.cwd,
@@ -546,7 +909,7 @@ test("with no config the launcher offers Init first, then continues", async () =
   const runs: RunOptions[] = [];
   const inits: number[] = [];
   let loads = 0;
-  const { io, prompts } = scripted([true, "1", "ask", "composer-2", defaultEffort, true]);
+  const { io, prompts } = scripted([true, goFromTop, "1", "ask", "composer-2", defaultEffort, true]);
   try {
     const exitCode = await launcher({
       cwd: repo.cwd,
@@ -613,7 +976,7 @@ test("a declined Init starts nothing", async () => {
 test("a real Init hand-off assembles a Run from the config Init wrote", async () => {
   const repo = await throwawayRepo();
   const runs: RunOptions[] = [];
-  const { io } = scripted([true, "1", "unattended", "composer-2", defaultEffort, true]);
+  const { io } = scripted([true, goFromTop, "1", "unattended", "composer-2", defaultEffort, true]);
   const href = (path: string): string =>
     pathToFileURL(
       join(fileURLToPath(new URL(".", import.meta.url)), path),
