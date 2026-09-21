@@ -14,8 +14,13 @@ import {
   text,
 } from "@clack/prompts";
 import { ensureReadyrunGitignored } from "./gitignore.ts";
+import { claude } from "./adapters/claude.ts";
 import { originRepository } from "./git.ts";
-import { isEffort, type Effort } from "./worker-adapter.ts";
+import {
+  effortLabel,
+  isEffort,
+  type Effort,
+} from "./worker-adapter.ts";
 
 const exec = promisify(execFile);
 const otherModel = "__other__";
@@ -184,10 +189,27 @@ export function parseInitAnswers(
   if (typeof value.effort !== "string" || !isEffort(value.effort)) {
     return { ok: false, message: "Effort must be low, medium, high, xhigh, or max" };
   }
+  // The chosen Worker Adapter's declared vocabulary is the truth (ADR 0042):
+  // an effort answer it cannot honestly map would write a config Doctor
+  // fails.
+  const vocabulary = initEffortVocabulary(worker.worker);
+  if (!vocabulary.includes(value.effort)) {
+    return {
+      ok: false,
+      message: `effort is set but the ${worker.worker.kind} Worker Adapter does not map it. Remove effort or pick a Worker Adapter that maps it.`,
+    };
+  }
   return {
     ok: true,
     answers: { tracker: tracker.tracker, worker: worker.worker, model, effort: value.effort },
   };
+}
+
+// The Effort vocabulary of the Adapter a kind of Init Worker writes, read
+// from the factory itself so Init never re-derives what the Adapter declares
+// (ADR 0042): only claude writes an Adapter that maps Effort.
+function initEffortVocabulary(worker: InitWorker): readonly Effort[] {
+  return worker.kind === "claude" ? claude().effortVocabulary ?? [] : [];
 }
 
 export type ListedModel = {
@@ -551,10 +573,15 @@ async function collectModel(worker: InitWorker): Promise<string | undefined> {
 
 const workerDefaultEffort = "default";
 
+// Only an Adapter that declares an Effort vocabulary is asked (ADR 0042):
+// cursor takes Effort as a model variant, and custom maps none until it
+// declares one — either answer would write a config the compile and Doctor
+// both refuse.
 async function collectEffort(
   worker: InitWorker,
 ): Promise<Effort | undefined | "cancelled"> {
-  if (worker.kind === "cursor") {
+  const vocabulary = initEffortVocabulary(worker);
+  if (vocabulary.length === 0) {
     return undefined;
   }
   const picked = unlessCancelled(
@@ -562,11 +589,10 @@ async function collectEffort(
       message: "Effort",
       options: [
         { value: workerDefaultEffort, label: "Worker default" },
-        { value: "low" as const, label: "Low" },
-        { value: "medium" as const, label: "Medium" },
-        { value: "high" as const, label: "High" },
-        { value: "xhigh" as const, label: "Extra high" },
-        { value: "max" as const, label: "Max" },
+        ...vocabulary.map((value) => ({
+          value,
+          label: effortLabel(value),
+        })),
       ],
       initialValue: "high",
     }),

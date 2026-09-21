@@ -18,6 +18,7 @@ import {
 } from "../src/launcher.ts";
 import { defineConfig, type RunOptions } from "../src/mod.ts";
 import { memoryTracker, recordingWorker } from "../src/testing/mod.ts";
+import { createWorkerAdapter } from "../src/worker-adapter.ts";
 import {
   commitRepoFiles,
   git,
@@ -682,6 +683,102 @@ test("answers kept at their config defaults carry no flag", async () => {
     assert.equal(handed?.effort, undefined);
     const lines = out.chunks.join("").split("\n").filter(Boolean);
     assert.ok(lines.includes("Run with: readyrun run --max 1"));
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("the Effort question offers exactly the values the Worker Adapter declares", async () => {
+  const repo = await throwawayRepo();
+  const out = capturing();
+  const runs: RunOptions[] = [];
+  const { io, prompts } = scripted([goFromTop, "1", "unattended", "composer-2", "high", true]);
+  try {
+    const exitCode = await launcher({
+      cwd: repo.cwd,
+      stdout: out.stdout,
+      loadConfig: async () =>
+        launcherConfig({
+          worker: recordingWorker({ exitCode: 0, effortVocabulary: ["high"] }),
+        }),
+      run: async (options) => {
+        runs.push(options);
+        return 0;
+      },
+      io,
+    });
+
+    assert.equal(exitCode, 0);
+    const effortPrompt = prompts.find((prompt) => prompt.message === "Effort");
+    assert.deepEqual(effortPrompt?.options, [
+      { value: defaultEffort, label: "Worker default" },
+      { value: "high", label: "High" },
+    ]);
+    assert.equal(runs[0]?.effort, "high");
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("a Worker Adapter that declares no Effort is not asked", async () => {
+  const repo = await throwawayRepo();
+  const out = capturing();
+  const runs: RunOptions[] = [];
+  const { io, prompts } = scripted([goFromTop, "1", "ask", "composer-2", true]);
+  try {
+    const exitCode = await launcher({
+      cwd: repo.cwd,
+      stdout: out.stdout,
+      loadConfig: async () =>
+        launcherConfig({
+          worker: recordingWorker({ exitCode: 0, effortVocabulary: [] }),
+        }),
+      run: async (options) => {
+        runs.push(options);
+        return 0;
+      },
+      io,
+    });
+
+    assert.equal(exitCode, 0);
+    assert.deepEqual(
+      prompts.map((prompt) => prompt.kind),
+      ["multiSelect", "text", "select", "text", "confirm"],
+    );
+    assert.equal(runs[0]?.effort, undefined);
+    const lines = out.chunks.join("").split("\n").filter(Boolean);
+    assert.ok(lines.includes("Run with: readyrun run --max 1"));
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("a Worker Adapter that declares a vocabulary but maps no flag is not asked either", async () => {
+  const repo = await throwawayRepo();
+  const out = capturing();
+  const runs: RunOptions[] = [];
+  const { io, prompts } = scripted([goFromTop, "1", "ask", "composer-2", true]);
+  try {
+    const exitCode = await launcher({
+      cwd: repo.cwd,
+      stdout: out.stdout,
+      loadConfig: async () =>
+        launcherConfig({
+          worker: createWorkerAdapter({ effortVocabulary: ["high"] }),
+        }),
+      run: async (options) => {
+        runs.push(options);
+        return 0;
+      },
+      io,
+    });
+
+    assert.equal(exitCode, 0);
+    assert.deepEqual(
+      prompts.map((prompt) => prompt.kind),
+      ["multiSelect", "text", "select", "text", "confirm"],
+    );
+    assert.equal(runs[0]?.effort, undefined);
   } finally {
     await repo.cleanup();
   }

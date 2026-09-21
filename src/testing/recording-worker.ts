@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import {
   createWorkerAdapter,
+  standardEffortVocabulary,
+  type Effort,
   type SpawnRequest,
   type WorkerAdapter,
 } from "../worker-adapter.ts";
@@ -19,6 +21,9 @@ export type LeftWork = "committed" | "uncommitted" | "none" | "empty-commit";
 export type RecordingWorkerOptions = {
   exitCode?: number;
   work?: LeftWork;
+  // The Effort values the double declares it can honestly map (ADR 0042),
+  // defaulting to the standard five like the standard CLIs.
+  effortVocabulary?: readonly Effort[];
 };
 
 export type RecordingWorker = WorkerAdapter & {
@@ -35,6 +40,7 @@ export function recordingWorker(
   return Object.assign(
     createWorkerAdapter({
       effortFlag: "--effort",
+      effortVocabulary: options.effortVocabulary ?? standardEffortVocabulary,
       async spawn(request: SpawnRequest) {
         spawns.push(request);
         await leaveWork(work, request);

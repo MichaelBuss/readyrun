@@ -26,6 +26,11 @@ export type {
   TreeAnswer,
 } from "./tracker-adapter.ts";
 export type { Effort, Permissions, SpawnRequest, WorkerAdapter } from "./worker-adapter.ts";
+export {
+  effortLabel,
+  standardEffortVocabulary,
+} from "./worker-adapter.ts";
+export type { StandardEffortVocabulary } from "./worker-adapter.ts";
 export { UnknownConfigKeyError } from "./unknown-keys.ts";
 export { github } from "./adapters/github.ts";
 export type { GitHubTrackerOptions } from "./adapters/github.ts";

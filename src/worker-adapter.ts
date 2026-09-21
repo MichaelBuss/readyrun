@@ -7,10 +7,39 @@ export type Permissions = "ask" | "unattended";
 
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 
-const efforts = new Set<string>(["low", "medium", "high", "xhigh", "max"]);
+// The transport vocabulary `--effort` speaks. The truth about which values a
+// CLI accepts lives with the Worker Adapter, which declares the values it can
+// honestly map (ADR 0042); the standard CLIs take all five, in this order.
+export const standardEffortVocabulary = [
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
+
+export type StandardEffortVocabulary = typeof standardEffortVocabulary;
+
+const efforts = new Set<string>(standardEffortVocabulary);
 
 export function isEffort(value: string): value is Effort {
   return efforts.has(value);
+}
+
+// The label the Launcher and Init render for a declared Effort value.
+export function effortLabel(value: Effort): string {
+  switch (value) {
+    case "low":
+      return "Low";
+    case "medium":
+      return "Medium";
+    case "high":
+      return "High";
+    case "xhigh":
+      return "Extra high";
+    case "max":
+      return "Max";
+  }
 }
 
 export type SpawnRequest = {
@@ -40,19 +69,37 @@ export type ProbeResult = { ok: true } | { ok: false; detail: string };
 
 export type StaticArgv = { option: string; args: string[] };
 
-export type WorkerAdapter = {
+// The Effort vocabulary an Adapter declares is part of its public shape
+// (ADR 0042): the values it can honestly map, typed so a Consumer config's
+// `effort` field is checked against exactly this declaration. Absent or empty
+// means the Adapter maps no Effort.
+export type WorkerAdapter<Vocabulary extends readonly Effort[] = readonly Effort[]> = {
   readonly [brand]: true;
   readonly bin?: string;
   readonly effortFlag?: string;
+  readonly effortVocabulary?: Vocabulary;
   readonly printMode?: true;
   readonly probe?: () => Promise<ProbeResult>;
   readonly staticArgv?: StaticArgv;
   spawn(request: SpawnRequest): Promise<SpawnResult>;
 };
 
-export function createWorkerAdapter(
-  methods: Partial<Pick<WorkerAdapter, "spawn" | "bin" | "effortFlag" | "printMode" | "probe" | "staticArgv">> = {},
-): WorkerAdapter {
+export function createWorkerAdapter<
+  Vocabulary extends readonly Effort[] = readonly Effort[],
+>(
+  methods: Partial<
+    Pick<
+      WorkerAdapter<Vocabulary>,
+      | "spawn"
+      | "bin"
+      | "effortFlag"
+      | "effortVocabulary"
+      | "printMode"
+      | "probe"
+      | "staticArgv"
+    >
+  > = {},
+): WorkerAdapter<Vocabulary> {
   return {
     [brand]: true,
     spawn() {
@@ -162,21 +209,23 @@ export function execProbe(bin: string, args: string[]): Promise<ProbeResult> {
   });
 }
 
-export type PrintModeWorkerOptions = {
+export type PrintModeWorkerOptions<Vocabulary extends readonly Effort[] = readonly Effort[]> = {
   effortFlag?: string;
+  effortVocabulary?: Vocabulary;
   extraArgs?: string[];
   probeArgs?: string[];
 };
 
-export function printModeWorker(
+export function printModeWorker<Vocabulary extends readonly Effort[] = readonly Effort[]>(
   bin: string,
   unattendedFlag: string,
-  options: PrintModeWorkerOptions = {},
-): WorkerAdapter {
-  const { effortFlag, extraArgs, probeArgs } = options;
+  options: PrintModeWorkerOptions<Vocabulary> = {},
+): WorkerAdapter<Vocabulary> {
+  const { effortFlag, effortVocabulary, extraArgs, probeArgs } = options;
   return createWorkerAdapter({
     bin,
     effortFlag,
+    effortVocabulary,
     printMode: true,
     probe: probeArgs === undefined ? undefined : () => execProbe(bin, probeArgs),
     staticArgv:

@@ -4,6 +4,7 @@ import { isAbsolute } from "node:path";
 import { describe, test } from "node:test";
 import { spawnWorkerBinary } from "../src/worker-adapter.ts";
 import { claude, cursor, custom, defineConfig, doctor, run } from "../src/mod.ts";
+import type { ReadyRunConfig, WorkerAdapter } from "../src/mod.ts";
 import { memoryTracker } from "../src/testing/mod.ts";
 import { ticket } from "./tracker-adapter-contract.ts";
 import { throwawayRepo } from "./throwaway-repo.ts";
@@ -496,7 +497,10 @@ describe("Worker Adapters", { concurrency: false }, () => {
       const repo = await throwawayRepo();
       const doctorChunks: string[] = [];
       const runChunks: string[] = [];
-      const config = defineConfig({
+      // Cursor declares no Effort vocabulary, so a typed config cannot carry
+      // one; the wide annotation is the runtime lie a JS config file (which
+      // TypeScript never checks) can still hand Doctor.
+      const raw: ReadyRunConfig = {
         tracker: memoryTracker({
           tickets: [ticket({ id: "52" })],
           ready: "unblocked",
@@ -506,7 +510,8 @@ describe("Worker Adapters", { concurrency: false }, () => {
         model: "composer-2.5-fast",
         effort: "high",
         permissions: "unattended",
-      });
+      };
+      const config = defineConfig(raw);
       try {
         const doctorExit = await doctor({
           config,
@@ -546,10 +551,16 @@ describe("Worker Adapters", { concurrency: false }, () => {
 
   test("print-mode spawn with ask permissions fails Doctor and a Run will not start", async () => {
     const askPrintMode = /Doctor: .*--permissions unattended/;
-    for (const { bin, worker, model, probeArgv } of [
+    const printModeAdapters: Array<{
+      bin: string;
+      worker: WorkerAdapter;
+      model: string;
+      probeArgv: string[];
+    }> = [
       { bin: "agent", worker: cursor(), model: "composer-2", probeArgv: ["status"] },
       { bin: "claude", worker: claude(), model: "opus", probeArgv: ["auth", "status"] },
-    ]) {
+    ];
+    for (const { bin, worker, model, probeArgv } of printModeAdapters) {
       await withRecordingPath([bin], async ({ receiptPath }) => {
         const repo = await throwawayRepo();
         const doctorChunks: string[] = [];
@@ -622,7 +633,44 @@ describe("Worker Adapters", { concurrency: false }, () => {
     });
   });
 
-  test("a custom Worker Adapter maps Effort to --effort", async () => {
+  test("a custom Worker Adapter maps Effort to the flag it declares, only for declared values", async () => {
+    const repo = await throwawayRepo();
+    try {
+      await withRecordingPath(["readyrun-worker"], async ({ bin, receiptPath }) => {
+        await run({
+          config: defineConfig({
+            tracker: memoryTracker({
+              tickets: [ticket({ id: "52" })],
+              ready: "unblocked",
+              labels: ["ready-for-agent"],
+            }),
+            worker: custom({
+              bin,
+              unattendedFlag: "--go",
+              effortFlag: "--thinking",
+              effortVocabulary: ["medium"],
+            }),
+            model: "local-model",
+            effort: "medium",
+          }),
+          cap: 1,
+          cwd: repo.cwd,
+          stdout: silent,
+        });
+        const receipt = await readReceipt(receiptPath);
+        assert.deepEqual(receipt.argv.slice(0, 4), [
+          "--model",
+          "local-model",
+          "--thinking",
+          "medium",
+        ]);
+      });
+    } finally {
+      await repo.cleanup();
+    }
+  });
+
+  test("a custom Worker Adapter that maps no Effort passes no effort flag", async () => {
     const repo = await throwawayRepo();
     try {
       await withRecordingPath(["readyrun-worker"], async ({ bin, receiptPath }) => {
@@ -638,19 +686,14 @@ describe("Worker Adapters", { concurrency: false }, () => {
               unattendedFlag: "--go",
             }),
             model: "local-model",
-            effort: "medium",
+            permissions: "unattended",
           }),
           cap: 1,
           cwd: repo.cwd,
           stdout: silent,
         });
         const receipt = await readReceipt(receiptPath);
-        assert.deepEqual(receipt.argv.slice(0, 4), [
-          "--model",
-          "local-model",
-          "--effort",
-          "medium",
-        ]);
+        assert.ok(!receipt.argv.includes("--effort"));
       });
     } finally {
       await repo.cleanup();

@@ -508,6 +508,169 @@ test("readyrun run --effort uses the same Doctor refusal as config Effort", asyn
   }
 });
 
+// The Adapter owns the Effort truth (ADR 0042), so the vocabulary a typed
+// config cannot violate is still violable by a JS config file or the wide
+// `--effort` parse; these tests hand Doctor exactly those lies.
+test("Doctor and a Run refuse an Effort outside the declared vocabulary, naming the Adapter and its vocabulary", async () => {
+  await withRecordingPath(["readyrun-worker"], async () => {
+    const repo = await throwawayRepo();
+    const doctorOut = capturing();
+    const runOut = capturing();
+    const raw: ReadyRunConfig = {
+      tracker: memoryTracker({
+        tickets: [ticket({ id: "52" })],
+        ready: "unblocked",
+        labels: ["ready-for-agent"],
+      }),
+      worker: custom({
+        bin: "readyrun-worker",
+        unattendedFlag: "--go",
+        effortFlag: "--effort",
+        effortVocabulary: ["high", "max"],
+      }),
+      model: "local-model",
+      effort: "medium",
+    };
+    const config = defineConfig(raw);
+    try {
+      const doctorExit = await doctor({
+        config,
+        cwd: repo.cwd,
+        stdout: doctorOut.stdout,
+      });
+      const runExit = await run({
+        config,
+        cap: 1,
+        cwd: repo.cwd,
+        stdout: runOut.stdout,
+      });
+      assert.equal(doctorExit, 1);
+      assert.equal(runExit, 1);
+      assert.equal(doctorOut.chunks.join(""), runOut.chunks.join(""));
+      assert.match(
+        doctorOut.chunks.join(""),
+        /effort "medium" is not in the Effort vocabulary Worker Adapter "readyrun-worker" declares \(high, max\)/,
+      );
+    } finally {
+      await repo.cleanup();
+    }
+  });
+});
+
+test("readyrun run --effort refuses a value outside the declared vocabulary the wide parse lets through", async () => {
+  await withRecordingPath(["readyrun-worker"], async () => {
+    const repo = await throwawayRepo();
+    const out = capturing();
+    const raw: ReadyRunConfig = {
+      tracker: memoryTracker({
+        tickets: [ticket({ id: "52" })],
+        ready: "unblocked",
+        labels: ["ready-for-agent"],
+      }),
+      worker: custom({
+        bin: "readyrun-worker",
+        unattendedFlag: "--go",
+        effortFlag: "--effort",
+        effortVocabulary: ["high", "max"],
+      }),
+      model: "local-model",
+    };
+    const config = defineConfig(raw);
+    try {
+      const exit = await cli({
+        argv: ["run", "--max", "1", "--effort", "medium"],
+        cwd: repo.cwd,
+        stdout: out.stdout,
+        loadConfig: async () => config,
+      });
+      assert.equal(exit, 1);
+      assert.match(
+        out.chunks.join(""),
+        /effort "medium" is not in the Effort vocabulary Worker Adapter "readyrun-worker" declares \(high, max\)/,
+      );
+    } finally {
+      await repo.cleanup();
+    }
+  });
+});
+
+test("a Worker Adapter that maps an effort flag without declaring a vocabulary is a Doctor config lie", async () => {
+  await withRecordingPath(["readyrun-worker"], async () => {
+    const repo = await throwawayRepo();
+    const doctorOut = capturing();
+    const runOut = capturing();
+    const raw: ReadyRunConfig = {
+      tracker: memoryTracker({
+        tickets: [ticket({ id: "52" })],
+        ready: "unblocked",
+        labels: ["ready-for-agent"],
+      }),
+      worker: custom({
+        bin: "readyrun-worker",
+        unattendedFlag: "--go",
+        effortFlag: "--effort",
+      }),
+      model: "local-model",
+    };
+    const config = defineConfig(raw);
+    try {
+      const doctorExit = await doctor({
+        config,
+        cwd: repo.cwd,
+        stdout: doctorOut.stdout,
+      });
+      const runExit = await run({
+        config,
+        cap: 1,
+        cwd: repo.cwd,
+        stdout: runOut.stdout,
+      });
+      assert.equal(doctorExit, 1);
+      assert.equal(runExit, 1);
+      assert.equal(doctorOut.chunks.join(""), runOut.chunks.join(""));
+      assert.match(
+        doctorOut.chunks.join(""),
+        /Worker Adapter "readyrun-worker" maps --effort but declares no Effort vocabulary/,
+      );
+    } finally {
+      await repo.cleanup();
+    }
+  });
+});
+
+test("a Worker Adapter that declares a vocabulary but maps no flag is a Doctor config lie", async () => {
+  const repo = await throwawayRepo();
+  const chunks: string[] = [];
+  const config = defineConfig({
+    tracker: memoryTracker({
+      tickets: [ticket({ id: "52" })],
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+    }),
+    worker: createWorkerAdapter({ effortVocabulary: ["high", "max"] }),
+    model: "composer-2",
+  });
+  try {
+    const doctorExit = await doctor({
+      config,
+      cwd: repo.cwd,
+      stdout: {
+        write(chunk: string) {
+          chunks.push(chunk);
+          return true;
+        },
+      },
+    });
+    assert.equal(doctorExit, 1);
+    assert.match(
+      chunks.join(""),
+      /declares an Effort vocabulary \(high, max\) but maps no effort flag/,
+    );
+  } finally {
+    await repo.cleanup();
+  }
+});
+
 test("Doctor reports an empty Frontier without failing", async () => {
   const repo = await throwawayRepo();
   const chunks: string[] = [];

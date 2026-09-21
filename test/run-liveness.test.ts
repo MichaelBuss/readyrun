@@ -72,6 +72,7 @@ function delaySpawn(
 ): WorkerAdapter {
   return createWorkerAdapter({
     effortFlag: inner.effortFlag,
+    effortVocabulary: inner.effortVocabulary,
     async spawn(request) {
       onStart();
       await wait;

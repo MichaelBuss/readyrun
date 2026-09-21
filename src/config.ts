@@ -15,19 +15,26 @@ const knownConfigKeys = new Set([
   "leaveFrontier",
 ]);
 
-export type ReadyRunConfig = {
+// The config's `effort` field is typed against the chosen Worker Adapter's
+// declared Effort vocabulary (ADR 0042): an out-of-vocabulary value is a
+// compile error before Doctor ever runs. The vocabulary rides on the
+// `worker` field's Adapter type, so it is inferred from the factory the
+// Consumer picked.
+export type ReadyRunConfig<Vocabulary extends readonly Effort[] = readonly Effort[]> = {
   tracker: TrackerAdapter;
-  worker: WorkerAdapter;
+  worker: WorkerAdapter<Vocabulary>;
   model: string;
   modelsByLabel?: Record<string, string>;
   permissions?: Permissions;
-  effort?: Effort;
+  effort?: Vocabulary[number];
   contextFile?: string;
   cap?: number;
   leaveFrontier?: (ticket: Ticket, landing: Landing) => void | Promise<void>;
 };
 
-export function defineConfig<T extends ReadyRunConfig>(config: T): T & {
+export function defineConfig<Vocabulary extends readonly Effort[] = readonly Effort[]>(
+  config: ReadyRunConfig<Vocabulary>,
+): ReadyRunConfig<Vocabulary> & {
   permissions: Permissions;
 } {
   assertKnownKeys(config, knownConfigKeys);
