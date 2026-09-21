@@ -56,17 +56,14 @@ export type LauncherIO = {
     initialValue?: boolean;
   }): Promise<boolean | symbol>;
   // The tree question's multi-select across one rendering (ADR 0041): the
-  // groups carry the forest — a parent per group, the parent node itself
-  // never selectable — and the answer is the picked values in the order the
+  // groups carry the tree — a parent per group, the parent node itself never
+  // selectable — and the answer is the picked Ticket ids in the order the
   // rendering listed them.
-  multiSelect<T extends string>(options: {
+  multiSelect(options: {
     message: string;
-    groups: Array<{
-      label: string;
-      options: Array<{ value: T; label: string; hint?: string }>;
-    }>;
-    initialValues?: T[];
-  }): Promise<T[] | symbol>;
+    groups: TreeGroup[];
+    initialValues?: string[];
+  }): Promise<string[] | symbol>;
 };
 
 const clackLauncherIO: LauncherIO = {
@@ -90,25 +87,20 @@ const clackLauncherIO: LauncherIO = {
       message: options.message,
       initialValue: options.initialValue,
     }),
-  multiSelect: <T extends string>(options: {
-    message: string;
-    groups: Array<{
-      label: string;
-      options: Array<{ value: T; label: string; hint?: string }>;
-    }>;
-    initialValues?: T[];
-  }) =>
-    // Pinned to string because Clack's Option type defers on a bare type
-    // parameter; the picks are Ticket ids, so string is what it answers.
+  multiSelect: (options) =>
+    // The picks are Ticket ids, so string is what Clack answers.
     groupMultiselect<string>({
       message: options.message,
       options: Object.fromEntries(
         options.groups.map((group) => [group.label, group.options]),
-      ) as Record<string, Array<{ value: string; label: string; hint?: string }>>,
+      ) as Record<string, TreeOption[]>,
       initialValues: options.initialValues,
+      // A Clack multi-select submits at least one row: the top choice is the
+      // floor, so an accidental empty submit never reads as "take everything".
       required: true,
+      // The group headers are the parents, and a parent is never worked.
       selectableGroups: false,
-    }) as Promise<T[] | symbol>,
+    }),
 };
 
 // The cap suggestion is the Plan's unblocked Frontier size (ADR 0040),
@@ -144,30 +136,35 @@ export const goFromTop = "__top__";
 // `--ticket` list the picks emit (flag-expressibility, ADR 0040).
 export type TreeChoice = { kind: "frontier" } | { kind: "list"; ids: string[] };
 
-// The forest the tree question renders in one look (ADR 0041): a first group
+// One pickable row of the tree question's rendering.
+export type TreeOption = { value: string; label: string; hint?: string };
+
+// The rendering's group: one parent's children under a header that is itself
+// never selectable, because a parent is never worked.
+export type TreeGroup = { label: string; options: TreeOption[] };
+
+// The blocked-status copy shared by the tree's hints and the waiting confirm.
+function waitsOn(ticket: Ticket): string {
+  return `waits on ${ticket.blockedBy.join(", ") || "an unknown blocker"}`;
+}
+
+// The tree the tree question renders in one look (ADR 0041): a first group
 // holding the "go from the top" choice, then the Tree's candidates grouped
 // under each parent — parents in first-appearance order over the pickable-now
 // half, then the waiting half — each group listing its pickable-now Tickets
 // before its waiting ones, both in pick order. A waiting Ticket carries its
-// blockers in the hint; the parent group header is not an option, because a
-// parent is never worked.
-export function treeForest(answer: TreeAnswer): Array<{
-  label: string;
-  options: Array<{ value: string; label: string; hint?: string }>;
-}> {
+// blockers in the hint.
+export function treeGroups(answer: TreeAnswer): TreeGroup[] {
   const waiting = new Set(answer.waiting.map((ticket) => ticket.id));
-  const option = (ticket: Ticket): { value: string; label: string; hint?: string } => ({
+  const option = (ticket: Ticket): TreeOption => ({
     value: ticket.id,
     label: ticket.title,
     hint: waiting.has(ticket.id)
-      ? `waits on ${ticket.blockedBy.join(", ") || "an unknown blocker"} — joins when it clears`
+      ? `${waitsOn(ticket)} — joins when it clears`
       : undefined,
   });
-  const groups = new Map<
-    string,
-    { label: string; options: Array<{ value: string; label: string; hint?: string }> }
-  >();
-  const groupFor = (ticket: Ticket) => {
+  const groups = new Map<string, TreeGroup>();
+  const groupFor = (ticket: Ticket): TreeGroup => {
     const key = ticket.parent ?? "";
     let group = groups.get(key);
     if (group === undefined) {
@@ -200,15 +197,16 @@ export function treeForest(answer: TreeAnswer): Array<{
   ];
 }
 
-// The picked ids emitted in forest order — command-line order is not pick
-// order, so the explicit list renders in the order the tree rendered it, top
-// to bottom. The "go from the top" choice is not a Ticket id; a selection of
-// it alone (or an empty one) is the rootless Frontier.
+// The picked ids emitted in the order the tree rendered them, top to bottom —
+// command-line order is not pick order, so the explicit list mirrors the one
+// rendering it came from. The "go from the top" choice is not a Ticket id: a
+// selection of it alone (or an empty one) is the rootless Frontier, while
+// with Tickets also picked the list wins — the more specific answer.
 export function treePick(
   selected: readonly string[],
   answer: TreeAnswer,
 ): TreeChoice {
-  const ids = treeForest(answer)
+  const ids = treeGroups(answer)
     .flatMap((group) => group.options)
     .map((option) => option.value)
     .filter((id) => id !== goFromTop && selected.includes(id));
@@ -317,7 +315,8 @@ export async function launcher(options: LauncherOptions = {}): Promise<number> {
   }
   const resolved = defineConfig(config);
   // The tree question goes first (ADR 0041): the cap suggestion depends on
-  // the selection, and the forest is what the maintainer sat down to see.
+  // the selection, and the candidate tree is what the maintainer sat down to
+  // see.
   let answer: TreeAnswer | undefined;
   let treeRefusal: string | undefined;
   try {
@@ -348,7 +347,10 @@ export async function launcher(options: LauncherOptions = {}): Promise<number> {
     }
     root = fallback;
     try {
-      frontierSize = (await resolved.tracker.frontier(undefined)).length;
+      // The suggestion is the Plan's unblocked Frontier size, and the Plan's
+      // Frontier is the named root's — the tree path's answer.frontier is the
+      // same call for the rootless case.
+      frontierSize = (await resolved.tracker.frontier(root)).length;
     } catch (error) {
       io.cancel(`Could not read the Frontier: ${caughtMessage(error)}`);
       return 1;
@@ -460,52 +462,55 @@ async function collectCap(
 // once, when the selection ends, never per pick — refusing waiting Tickets
 // would make the Launcher stricter than the flags it mirrors.
 function waitingConfirmMessage(picked: readonly Ticket[]): string {
-  const clauses = picked.map((ticket) =>
-    `#${ticket.id} waits on ${
-      ticket.blockedBy.join(", ") || "an unknown blocker"
-    }`,
-  );
+  const clauses = picked.map((ticket) => `#${ticket.id} ${waitsOn(ticket)}`);
   return picked.length === 1
     ? `${clauses[0]} — joins when it clears. Include it in this Run?`
     : `${picked.length} picked Tickets are waiting: ${clauses.join("; ")} — they join when their blockers clear. Include them?`;
 }
 
 // The tree question: one multi-select across the one rendering, then the
-// single waiting confirm. An undefined return is a cancelled prompt.
+// single waiting confirm. Declining every picked waiting Ticket dissolves the
+// selection, so the tree question is asked again rather than silently
+// widening to the rootless Frontier. An undefined return is a cancelled
+// prompt.
 async function collectFromTree(
   io: LauncherIO,
   answer: TreeAnswer,
 ): Promise<TreeChoice | undefined> {
-  const picked = await io.multiSelect<string>({
-    message: "Which Tickets should this Run work?",
-    groups: treeForest(answer),
-    initialValues: [goFromTop],
-  });
-  if (typeof picked === "symbol") {
-    return undefined;
+  for (;;) {
+    const picked = await io.multiSelect({
+      message: "Which Tickets should this Run work?",
+      groups: treeGroups(answer),
+      initialValues: [goFromTop],
+    });
+    if (typeof picked === "symbol") {
+      return undefined;
+    }
+    const choice = treePick(picked, answer);
+    if (choice.kind === "frontier") {
+      return choice;
+    }
+    const waiting = answer.waiting.filter((ticket) =>
+      choice.ids.includes(ticket.id)
+    );
+    if (waiting.length === 0) {
+      return choice;
+    }
+    const keep = await io.confirm({
+      message: waitingConfirmMessage(waiting),
+      initialValue: true,
+    });
+    if (typeof keep === "symbol") {
+      return undefined;
+    }
+    if (keep) {
+      return choice;
+    }
+    const kept = choice.ids.filter((id) => !waiting.some((t) => t.id === id));
+    if (kept.length > 0) {
+      return { kind: "list", ids: kept };
+    }
   }
-  const choice = treePick(picked, answer);
-  if (choice.kind === "frontier") {
-    return choice;
-  }
-  const waiting = answer.waiting.filter((ticket) =>
-    choice.ids.includes(ticket.id)
-  );
-  if (waiting.length === 0) {
-    return choice;
-  }
-  const keep = await io.confirm({
-    message: waitingConfirmMessage(waiting),
-    initialValue: true,
-  });
-  if (typeof keep === "symbol") {
-    return undefined;
-  }
-  if (keep) {
-    return choice;
-  }
-  const kept = choice.ids.filter((id) => !waiting.some((t) => t.id === id));
-  return kept.length > 0 ? { kind: "list", ids: kept } : { kind: "frontier" };
 }
 
 // The tree's fallback (ADR 0041): the same flags an Adapter refusal narrows

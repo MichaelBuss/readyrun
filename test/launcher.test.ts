@@ -154,12 +154,14 @@ function treeConfig(): ReadyRunConfig {
 
 // The tree-refusing shape the fallback answers for: blocking cannot be
 // expressed, so `tree` and `waiting` refuse while `frontier` still answers.
+// 60 is off any named root, so the rootless and rooted Frontiers differ.
 function fallbackConfig(): ReadyRunConfig {
   return defineConfig({
     tracker: memoryTracker({
       tickets: [
         ticket({ id: "52", title: "First up" }),
         ticket({ id: "54", title: "Blocked behind 52", blockedBy: ["52"] }),
+        ticket({ id: "60", title: "Unrelated" }),
       ],
       ready: "unblocked",
       labels: ["ready-for-agent"],
@@ -206,7 +208,7 @@ test("capAnswer demands a whole number of at least 1", () => {
   assert.equal(capAnswer("").ok, false);
 });
 
-test("the tree question goes first, rendering the forest grouped by parent with both halves", async () => {
+test("the tree question goes first, rendering the tree grouped by parent with both halves", async () => {
   const repo = await throwawayRepo();
   const out = capturing();
   const runs: RunOptions[] = [];
@@ -348,6 +350,52 @@ test("declining the waiting confirm drops the waiting Tickets from the list", as
   }
 });
 
+test("declining every picked waiting Ticket re-asks the tree question", async () => {
+  const repo = await throwawayRepo();
+  const out = capturing();
+  const runs: RunOptions[] = [];
+  const { io, prompts } = scripted([
+    "54",
+    false,
+    goFromTop,
+    "1",
+    "ask",
+    "composer-2",
+    defaultEffort,
+    true,
+  ]);
+  try {
+    const exitCode = await launcher({
+      cwd: repo.cwd,
+      stdout: out.stdout,
+      loadConfig: async () => treeConfig(),
+      run: async (options) => {
+        runs.push(options);
+        return 0;
+      },
+      io,
+    });
+
+    assert.equal(exitCode, 0);
+    assert.equal(runs[0]?.root, undefined);
+    assert.deepEqual(
+      prompts.map((prompt) => prompt.kind),
+      [
+        "multiSelect",
+        "confirm",
+        "multiSelect",
+        "text",
+        "select",
+        "text",
+        "select",
+        "confirm",
+      ],
+    );
+  } finally {
+    await repo.cleanup();
+  }
+});
+
 test("a Tracker Adapter that refuses the tree falls back to the root flags as text prompts", async () => {
   const repo = await throwawayRepo();
   const out = capturing();
@@ -379,6 +427,7 @@ test("a Tracker Adapter that refuses the tree falls back to the root flags as te
       prompts.map((prompt) => prompt.kind),
       ["text", "text", "text", "select", "text", "select", "confirm"],
     );
+    assert.equal(prompts[2]?.initial, "1");
     const output = out.chunks.join("");
     assert.ok(output.includes("does not answer the tree"));
     assert.ok(output.includes("cannot express blocking"));
@@ -417,6 +466,7 @@ test("the fallback names a parent with --root when one is given", async () => {
                 blockedBy: ["42"],
                 parent: "41",
               }),
+              ticket({ id: "60", title: "Unrelated" }),
             ],
             ready: "unblocked",
             labels: ["ready-for-agent"],
@@ -439,6 +489,9 @@ test("the fallback names a parent with --root when one is given", async () => {
       prompts[0]?.message.includes("parent"),
       true,
     );
+    // The suggestion is the named parent's Frontier (42), not the rootless
+    // one (42 and 60).
+    assert.equal(prompts[2]?.initial, "1");
     const lines = out.chunks.join("").split("\n").filter(Boolean);
     assert.ok(lines.includes("Run with: readyrun run --max 1 --root 41"));
   } finally {
