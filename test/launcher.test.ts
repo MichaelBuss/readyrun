@@ -1006,7 +1006,16 @@ test("with no config the launcher offers Init first, then continues", async () =
   const runs: RunOptions[] = [];
   const inits: number[] = [];
   let loads = 0;
-  const { io, prompts } = scripted([true, goFromTop, "1", "ask", "composer-2", defaultEffort, true]);
+  const { io, prompts } = scripted([
+    true,
+    true,
+    goFromTop,
+    "1",
+    "ask",
+    "composer-2",
+    defaultEffort,
+    true,
+  ]);
   try {
     const exitCode = await launcher({
       cwd: repo.cwd,
@@ -1035,6 +1044,10 @@ test("with no config the launcher offers Init first, then continues", async () =
     const initConfirm = prompts[0];
     assert.equal(initConfirm?.kind, "confirm");
     assert.equal(initConfirm?.message.includes("init"), true);
+    const runGate = prompts[1];
+    assert.equal(runGate?.kind, "confirm");
+    assert.equal(runGate?.message.includes("Start a Run"), true);
+    assert.equal(runGate?.initial, true);
   } finally {
     await repo.cleanup();
   }
@@ -1070,10 +1083,91 @@ test("a declined Init starts nothing", async () => {
   }
 });
 
+test("fresh off Init, a declined Run gate ends a success with no Run asked", async () => {
+  const repo = await throwawayRepo();
+  const out = capturing();
+  const runs: RunOptions[] = [];
+  const inits: number[] = [];
+  let loads = 0;
+  const { io, prompts } = scripted([true, false]);
+  try {
+    const exitCode = await launcher({
+      cwd: repo.cwd,
+      stdout: out.stdout,
+      loadConfig: async () => {
+        loads += 1;
+        if (loads === 1) {
+          throw new ConfigNotFoundError();
+        }
+        return launcherConfig();
+      },
+      init: async () => {
+        inits.push(1);
+        return 0;
+      },
+      run: async (options) => {
+        runs.push(options);
+        return 0;
+      },
+      io,
+    });
+    assert.equal(exitCode, 0);
+    assert.equal(inits.length, 1);
+    assert.equal(runs.length, 0);
+    // Only the Init offer and the gate: no Run-assembly question ran.
+    assert.deepEqual(
+      prompts.map((prompt) => prompt.kind),
+      ["confirm", "confirm"],
+    );
+    assert.equal(prompts[1]?.message.includes("Start a Run"), true);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("a cancelled Run gate after Init starts nothing", async () => {
+  const repo = await throwawayRepo();
+  const runs: RunOptions[] = [];
+  let loads = 0;
+  const { io } = scripted([true, cancelled]);
+  try {
+    const exitCode = await launcher({
+      cwd: repo.cwd,
+      stdout: { write() { return true; } },
+      loadConfig: async () => {
+        loads += 1;
+        if (loads === 1) {
+          throw new ConfigNotFoundError();
+        }
+        return launcherConfig();
+      },
+      init: async () => 0,
+      run: async (options) => {
+        runs.push(options);
+        return 0;
+      },
+      io,
+    });
+    assert.equal(exitCode, 1);
+    assert.equal(runs.length, 0);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
 test("a real Init hand-off assembles a Run from the config Init wrote", async () => {
   const repo = await throwawayRepo();
   const runs: RunOptions[] = [];
-  const { io } = scripted([true, goFromTop, "1", "unattended", "composer-2", defaultEffort, true]);
+  const { io } = scripted([
+    true,
+    true,
+    goFromTop,
+    "1",
+    "unattended",
+    "composer-2",
+    defaultEffort,
+    true,
+  ]);
   const href = (path: string): string =>
     pathToFileURL(
       join(fileURLToPath(new URL(".", import.meta.url)), path),
