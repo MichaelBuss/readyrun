@@ -6,10 +6,13 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   configWrittenMessage,
   init,
+  listOpencodeModels,
+  parseBareModelIds,
   parseInitAnswers,
   parseListedModels,
   type InitAnswers,
 } from "../src/init.ts";
+import { readReceipt, withRecordingPath } from "./stub-worker.ts";
 
 const tmpRoot = join(fileURLToPath(new URL(".", import.meta.url)), ".tmp");
 const packageHref = pathToFileURL(
@@ -194,6 +197,24 @@ async function assertWrittenStub(
   });
 }
 
+// The stub prints this on stdout unless it is answering the fidelity probe.
+async function withStubStdout(
+  stdout: string,
+  fn: () => Promise<void>,
+): Promise<void> {
+  const previous = process.env.READYRUN_STUB_STDOUT;
+  process.env.READYRUN_STUB_STDOUT = stdout;
+  try {
+    await fn();
+  } finally {
+    if (previous === undefined) {
+      delete process.env.READYRUN_STUB_STDOUT;
+    } else {
+      process.env.READYRUN_STUB_STDOUT = previous;
+    }
+  }
+}
+
 test("init writes a GitHub and Cursor readyrun.config.ts at the Consumer root", async () => {
   await assertWrittenStub(githubCursorAnswers, githubCursorStub);
 });
@@ -335,6 +356,87 @@ test("parseListedModels strips ANSI color and current markers", () => {
     ),
     [{ id: "auto", label: "Auto", hint: "current" }],
   );
+});
+
+test("parseBareModelIds reads one bare provider/model id per line from opencode models output", () => {
+  assert.deepEqual(
+    parseBareModelIds(`opencode/grok-code
+zai-coding-plan/glm-5.3-flash
+zai-coding-plan/glm-4.6
+`),
+    [
+      { id: "opencode/grok-code", label: "opencode/grok-code" },
+      {
+        id: "zai-coding-plan/glm-5.3-flash",
+        label: "zai-coding-plan/glm-5.3-flash",
+      },
+      { id: "zai-coding-plan/glm-4.6", label: "zai-coding-plan/glm-4.6" },
+    ],
+  );
+});
+
+test("parseBareModelIds strips ANSI color, trims, and dedupes bare ids", () => {
+  assert.deepEqual(
+    parseBareModelIds(
+      "\u001b[36mopencode/grok-code\u001b[39m\n  opencode/grok-code  \n\n",
+    ),
+    [{ id: "opencode/grok-code", label: "opencode/grok-code" }],
+  );
+});
+
+test("listOpencodeModels falls back to an empty list when opencode is missing", async () => {
+  const previousPath = process.env.PATH;
+  process.env.PATH = "/no/such/readyrun-path";
+  try {
+    assert.deepEqual(await listOpencodeModels(), []);
+  } finally {
+    process.env.PATH = previousPath;
+  }
+});
+
+test("listOpencodeModels falls back to an empty list when opencode models prints zero lines", async () => {
+  await withStubStdout("", () =>
+    withRecordingPath(["opencode"], async () => {
+      assert.deepEqual(await listOpencodeModels(), []);
+    }),
+  );
+});
+
+test("listOpencodeModels offers the ids a stubbed opencode models prints", async () => {
+  await withStubStdout(`opencode/grok-code
+zai-coding-plan/glm-5.3-flash
+`, () =>
+    withRecordingPath(["opencode"], async ({ receiptPath }) => {
+      assert.deepEqual(await listOpencodeModels(), [
+        { id: "opencode/grok-code", label: "opencode/grok-code" },
+        {
+          id: "zai-coding-plan/glm-5.3-flash",
+          label: "zai-coding-plan/glm-5.3-flash",
+        },
+      ]);
+      const receipt = await readReceipt(receiptPath);
+      assert.deepEqual(receipt.argv, ["models"]);
+    }),
+  );
+});
+
+test("init writes a model picked from a stubbed opencode models list", async () => {
+  await withStubStdout(`opencode/grok-code
+zai-coding-plan/glm-4.6
+`, async () => {
+    await withRecordingPath(["opencode"], async () => {
+      const models = await listOpencodeModels();
+      const picked = models[1]?.id;
+      assert.ok(picked !== undefined);
+      await assertWrittenStub(
+        { ...githubOpencodeAnswers, model: picked },
+        githubOpencodeStub.replace(
+          `model: "zai-coding-plan/glm-5.3-flash"`,
+          `model: "${picked}"`,
+        ),
+      );
+    });
+  });
 });
 
 test("init creates a .gitignore that ignores .readyrun/ when none exists", async () => {
