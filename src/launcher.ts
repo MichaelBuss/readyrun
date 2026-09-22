@@ -309,6 +309,22 @@ export async function launcher(options: LauncherOptions = {}): Promise<number> {
       stdout.write(`${configLoadFailure(error)}\n`);
       return 1;
     }
+    // The Init hand-off's gate (ADR 0043): Init was the reason for this
+    // invocation, so Run assembly asks before starting instead of walking
+    // the maintainer through five answers to say "not now". A decline is
+    // the config ready and a success, not a failed Run.
+    const proceed = await io.confirm({
+      message: "Config created. Start a Run now?",
+      initialValue: true,
+    });
+    if (typeof proceed === "symbol") {
+      io.cancel("Launcher cancelled.");
+      return 1;
+    }
+    if (!proceed) {
+      io.outro("Config ready — launch again when you want a Run.");
+      return 0;
+    }
   }
   if (!greeted) {
     io.intro("ReadyRun");

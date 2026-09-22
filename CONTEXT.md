@@ -67,7 +67,7 @@ The command that writes a stub `readyrun.config.ts` in the **Consumer** root. In
 _Avoid_: setup-ralph, generated `ralph/` folder, command wizard
 
 **Launcher**:
-The Clack surface bare `readyrun` opens on a TTY; off a TTY, bare `readyrun` is usage. It assembles a **Run**: collects answers — naming the **Root** among them by rendering the **Tree**, where picking **Tickets** emits the explicit list and taking the **Frontier** from the top names none, and a picked waiting **Ticket** is confirmed before it lands in the **Root** — renders the **Plan**, and on confirm hands the terminal to the **Run**'s own renderer. Everything it collects is flag-expressible; it never re-derives **Doctor**'s rules; it is never a prompt inside a **Run**, and an unattended **Run** never prompts.
+The Clack surface bare `readyrun` opens on a TTY; off a TTY, bare `readyrun` is usage. Fresh off an **Init** it offered, it first asks whether a **Run** is wanted at all; a decline ends a success (ADR 0043). It assembles a **Run**: collects answers — naming the **Root** among them by rendering the **Tree**, where picking **Tickets** emits the explicit list and taking the **Frontier** from the top names none, and a picked waiting **Ticket** is confirmed before it lands in the **Root** — renders the **Plan**, and on confirm hands the terminal to the **Run**'s own renderer. Everything it collects is flag-expressible; it never re-derives **Doctor**'s rules; it is never a prompt inside a **Run**, and an unattended **Run** never prompts.
 _Avoid_: wizard, menu, TUI shell (around a live **Run**)
 
 **Consumer**:
