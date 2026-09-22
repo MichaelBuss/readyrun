@@ -3,7 +3,13 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promis
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { configWrittenMessage, init, parseListedModels, type InitAnswers } from "../src/init.ts";
+import {
+  configWrittenMessage,
+  init,
+  parseInitAnswers,
+  parseListedModels,
+  type InitAnswers,
+} from "../src/init.ts";
 
 const tmpRoot = join(fileURLToPath(new URL(".", import.meta.url)), ".tmp");
 const packageHref = pathToFileURL(
@@ -193,6 +199,53 @@ test("init points contextFile at a CONTEXT.md already at the Consumer root", asy
 
 test("init omits contextFile when the Consumer root has no CONTEXT.md", async () => {
   await assertWrittenStub(githubCursorAnswers, githubCursorStub);
+});
+
+test("parseInitAnswers accepts an effort answer only for the Adapter that declares it", () => {
+  const base = {
+    tracker: { kind: "github", repo: "acme/widgets", labels: ["ready-for-agent"] },
+    model: "opus",
+  };
+  const claude = parseInitAnswers({
+    ...base,
+    worker: { kind: "claude" },
+    effort: "high",
+  });
+  assert.equal(claude.ok, true);
+  assert.equal(claude.ok && claude.answers.effort, "high");
+
+  const cursor = parseInitAnswers({
+    ...base,
+    worker: { kind: "cursor" },
+    effort: "high",
+  });
+  assert.equal(cursor.ok, false);
+  assert.match(
+    cursor.ok ? "" : cursor.message,
+    /the cursor Worker Adapter does not map it/,
+  );
+
+  const custom = parseInitAnswers({
+    ...base,
+    worker: { kind: "custom", bin: "my-agent", unattendedFlag: "--go" },
+    effort: "high",
+  });
+  assert.equal(custom.ok, false);
+  assert.match(
+    custom.ok ? "" : custom.message,
+    /the custom Worker Adapter does not map it/,
+  );
+
+  const malformed = parseInitAnswers({
+    ...base,
+    worker: { kind: "claude" },
+    effort: "yolo",
+  });
+  assert.equal(malformed.ok, false);
+  assert.match(
+    malformed.ok ? "" : malformed.message,
+    /Effort must be low, medium, high, xhigh, or max/,
+  );
 });
 
 test("parseListedModels reads id and label from agent --list-models output", () => {

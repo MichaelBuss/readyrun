@@ -149,10 +149,35 @@ async function check(
       }
     }
   }
-  if (effort !== undefined && config.worker.effortFlag === undefined) {
+  // The Adapter owns the truth about Effort (ADR 0042): the values it can
+  // honestly map are its declared vocabulary, and anything else is a config
+  // lie. The declaration and the flag only tell the truth together — a flag
+  // with no vocabulary lies about every value it would pass, and a
+  // vocabulary with no flag names values that would be silently dropped.
+  const declaredEfforts: readonly Effort[] = config.worker.effortVocabulary ?? [];
+  const effortAdapter = config.worker.bin !== undefined
+    ? `Worker Adapter "${config.worker.bin}"`
+    : "this Worker Adapter";
+  if (config.worker.effortFlag !== undefined && declaredEfforts.length === 0) {
     failures.push(
-      "effort is set but this Worker Adapter does not map it. Unset effort or pick a Worker Adapter that maps it.",
+      `${effortAdapter} maps ${config.worker.effortFlag} but declares no Effort vocabulary. Declare the Effort values it can honestly map or drop the effort mapping.`,
     );
+  }
+  if (declaredEfforts.length > 0 && config.worker.effortFlag === undefined) {
+    failures.push(
+      `${effortAdapter} declares an Effort vocabulary (${declaredEfforts.join(", ")}) but maps no effort flag. Map the flag that passes them or drop the declaration.`,
+    );
+  }
+  if (effort !== undefined) {
+    if (declaredEfforts.length === 0) {
+      failures.push(
+        "effort is set but this Worker Adapter does not map it. Unset effort or pick a Worker Adapter that maps it.",
+      );
+    } else if (!declaredEfforts.includes(effort)) {
+      failures.push(
+        `effort "${effort}" is not in the Effort vocabulary ${effortAdapter} declares (${declaredEfforts.join(", ")}). Unset effort or pass one it declares.`,
+      );
+    }
   }
   const installOutput = await unignoredInstallOutput(cwd);
   if (installOutput !== undefined) {

@@ -18,7 +18,7 @@ npx jsr add @readyrun/readyrun
 import { defineConfig, github, cursor } from "@readyrun/readyrun";
 ```
 
-`claude()` and `custom()` map an optional `effort` config default (`"low" | "medium" | "high" | "xhigh" | "max"`) onto `--effort`:
+Each Worker Adapter declares the Effort vocabulary it can honestly map (ADR 0042), and the config's `effort` field is typed against that declaration — an out-of-vocabulary value is a compile error, and Doctor fails what slips through at runtime (a JS config file, or the deliberately wide `--effort` parse). `claude()` declares all five (`"low" | "medium" | "high" | "xhigh" | "max"`) and maps them onto `--effort`:
 
 ```ts
 defineConfig({
@@ -29,7 +29,16 @@ defineConfig({
 });
 ```
 
-`cursor()` has no such flag — Cursor's equivalent is a model variant (e.g. `composer-2.5-fast`), not a flag; Doctor fails a Run that sets `effort` on `cursor()`.
+`cursor()` declares none — Cursor's equivalent is a model variant (e.g. `composer-2.5-fast`), not a flag, so `effort` on `cursor()` fails to compile and Doctor refuses it in a loaded config. `custom()` maps no Effort until it declares both the flag its binary takes and the values it can honestly pass; a flag without a declaration is a Doctor config lie, and only declared values are ever passed:
+
+```ts
+custom({
+  bin: "my-agent",
+  unattendedFlag: "--dangerously-skip-permissions",
+  effortFlag: "--effort",
+  effortVocabulary: ["low", "high"],
+});
+```
 
 `cursor()` and `claude()` also accept an optional `extraArgs: string[]` for any other static vendor flag beyond model/effort, landing in the same position `custom()`'s own `args` occupy relative to `--model`, without dropping to `custom()`:
 

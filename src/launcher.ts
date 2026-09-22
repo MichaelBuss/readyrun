@@ -31,7 +31,7 @@ import {
   type FrontierRoot,
   type TreeAnswer,
 } from "./tracker-adapter.ts";
-import type { Effort, Permissions } from "./worker-adapter.ts";
+import { effortLabel, type Effort, type Permissions } from "./worker-adapter.ts";
 
 // The Launcher's only terminal surface. The flow below talks to this shape,
 // so the whole assembly is testable with scripted answers; the default
@@ -371,12 +371,16 @@ export async function launcher(options: LauncherOptions = {}): Promise<number> {
     io.cancel("Launcher cancelled.");
     return 1;
   }
-  // An Adapter that maps no Effort flag — Cursor takes it as a model variant
-  // — would fail Doctor on any effort answer, so the question is not asked;
-  // the same skip Init makes for cursor.
-  const effort = resolved.worker.effortFlag === undefined
+  // The Adapter's declared Effort vocabulary is the truth the question may
+  // offer (ADR 0042): without both a flag to map the answer and a
+  // vocabulary declaring what exists — Cursor takes Effort as a model
+  // variant — any effort answer would fail Doctor, so the question is not
+  // asked; the same skip Init makes for cursor and custom.
+  const effortVocabulary: readonly Effort[] = resolved.worker.effortVocabulary ?? [];
+  const effort = resolved.worker.effortFlag === undefined ||
+      effortVocabulary.length === 0
     ? keptDefault
-    : await collectEffort(io, resolved);
+    : await collectEffort(io, resolved, effortVocabulary);
   if (effort === undefined) {
     io.cancel("Launcher cancelled.");
     return 1;
@@ -587,6 +591,7 @@ async function collectModel(
 async function collectEffort(
   io: LauncherIO,
   config: ReadyRunConfig,
+  vocabulary: readonly Effort[],
 ): Promise<Collected<Effort> | undefined> {
   const picked = await io.select<Effort | typeof defaultEffort>({
     message: "Effort",
@@ -598,11 +603,9 @@ async function collectEffort(
           ? "Worker default"
           : `Config default (${config.effort})`,
       },
-      { value: "low", label: "Low" },
-      { value: "medium", label: "Medium" },
-      { value: "high", label: "High" },
-      { value: "xhigh", label: "Extra high" },
-      { value: "max", label: "Max" },
+      // Exactly the values the Adapter declares (ADR 0042): nothing that
+      // does not exist can be selected.
+      ...vocabulary.map((value) => ({ value, label: effortLabel(value) })),
     ],
   });
   if (typeof picked === "symbol") {
