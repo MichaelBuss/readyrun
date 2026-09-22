@@ -40,5 +40,7 @@ export { cursor } from "./adapters/cursor.ts";
 export type { CursorWorkerOptions } from "./adapters/cursor.ts";
 export { claude } from "./adapters/claude.ts";
 export type { ClaudeWorkerOptions } from "./adapters/claude.ts";
+export { opencode, opencodeEffortVocabulary } from "./adapters/opencode.ts";
+export type { OpencodeEffortVocabulary, OpencodeWorkerOptions } from "./adapters/opencode.ts";
 export { custom } from "./adapters/custom.ts";
 export type { CustomWorkerAdapter, CustomWorkerOptions } from "./adapters/custom.ts";

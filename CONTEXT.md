@@ -19,7 +19,7 @@ The **Tracker**-specific implementation that maps that tracker’s issue onto a 
 _Avoid_: plugin, SDK (the harness is not a vendor agent SDK), Adapter (unqualified)
 
 **Worker Adapter**:
-The coding-CLI-specific way to spawn a **Worker** (prompt, model, cwd; later, usage). v0: `cursor`, `claude`, and `custom`. Codex later. `cursor` and `claude` both take an optional `extraArgs: string[]` for a static vendor flag beyond model/effort, landing next to `--model` the same way `custom`'s `args` do. `cursor` and `claude` also expose an optional health probe **Doctor** can run cheaply (`agent status`, `claude auth status`); `custom` has none.
+The coding-CLI-specific way to spawn a **Worker** (prompt, model, cwd; later, usage). v0: `cursor`, `claude`, `opencode`, and `custom`. Codex later. `cursor`, `claude`, and `opencode` all take an optional `extraArgs: string[]` for a static vendor flag beyond model/effort, landing next to `--model` the same way `custom`'s `args` do. `cursor`, `claude`, and `opencode` also expose an optional health probe **Doctor** can run cheaply (`agent status`, `claude auth status`, and `opencode`'s `auth list` judged for zero credentials, that command exiting 0 either way); `custom` has none. `opencode` passes its own Worktree anchor (`run --dir {cwd}`): it re-roots linked worktrees to the git common dir, so process cwd is never trusted.
 _Avoid_: plugin, SDK, recipe (as the noun)
 
 **Ticket**:
@@ -83,7 +83,7 @@ One invocation of the loop, from start until the **Frontier** is empty, the cap 
 _Avoid_: session, job, sprint
 
 **Permissions**:
-How freely a **Worker** may act without asking. `"ask"` or `"unattended"`. Default `"ask"`. `cursor()` and `claude()` spawn print-mode, so ask is a **Doctor** failure — pass `"unattended"`. Vendor flags (`--yolo`, `--dangerously-skip-permissions`) stay inside the **Worker Adapter**.
+How freely a **Worker** may act without asking. `"ask"` or `"unattended"`. Default `"ask"`. The print-mode Adapters (`cursor()`, `claude()`, `opencode()`) make ask a **Doctor** failure — pass `"unattended"`. Vendor flags (`--yolo`, `--auto`, `--dangerously-skip-permissions`) stay inside the **Worker Adapter**.
 _Avoid_: yolo, autoApprove, boolean `yolo`
 
 **Effort**:
@@ -94,7 +94,7 @@ _Avoid_: max mode (Cursor's interactive slash command), ultracode (a Claude Code
 
 - One **Consumer** config selects one **Tracker**. A repo is not GitHub-and-Linear at once.
 - A **Tracker Adapter** talks to exactly one kind of **Tracker**. GitHub and Linear are both v0 **Tracker Adapters**.
-- A **Worker Adapter** talks to exactly one kind of coding CLI. v0 ships `cursor`, `claude`, and `custom` (`bin` + args). Codex is later.
+- A **Worker Adapter** talks to exactly one kind of coding CLI. v0 ships `cursor`, `claude`, `opencode`, and `custom` (`bin` + args). Codex is later.
 - The package is published (JSR) and depended on. It does not live inside a **Consumer**.
 - If the chosen **Tracker** cannot be reached, the loop does not invent another **Tracker**. A local **Tracker Adapter** is a future option a **Consumer** would select on purpose.
 - One **Ticket** is one **Worker**. The loop never gives two **Tickets** to one process.
@@ -122,7 +122,7 @@ _Avoid_: max mode (Cursor's interactive slash command), ultracode (a Claude Code
 - **Init** is interactive by default (Clack), and `--answers <file>` is the scriptable path through the same writer. The **Launcher** is the second Clack surface: bare `readyrun` opens it on a TTY and prints usage off one. It collects answers, renders the **Plan**, and on confirm hands the terminal to the **Run**'s own renderer; it is not a prompt inside a **Run**. `run` and `doctor` are flags plus stdout. A **Run** owns the terminal while a **Worker** runs: it renders the **Worker**'s stream — one annotated line per tool call (kind glyph + verb + target), tool results silent unless failed, narration passed through, unknown output never silently dropped — under one glyph taxonomy shared with the Run's own lines (picked, landed, stopped, warned). On a TTY a spinner (glyph + elapsed since the **Ticket** started) shows between prints, and `--verbose` bypasses rendering for the raw stream; off a TTY the same render is newline-delimited lines with no animation, and the stage heartbeat (Doctor, Frontier, Worktree, Worker) and in-flight **Ticket** line (id, title, branch, started/cap) are unchanged. The **Launcher** assembles `run` and nothing else does; everything it collects is flag-expressible, and it never re-derives **Doctor**'s rules. An unattended **Run** must not prompt.
 - A **Run** cannot start without a cap: a maximum number of **Tickets** it may start. The cap resolves `--max`, then config `cap`, then — for an explicit list — the list’s length, so a single-**Ticket** invocation is a **Run** with cap 1. Hitting the cap stops the **Run**; it does not prompt; a list longer than the cap keeps its remainder on the **Frontier**. There is no unlimited **Run**.
 - A v0 **Run** starts one **Worker** at a time. That is behaviour, not the isolation model: a **Worker** is already one **Ticket**, one **Branch**, one **Worktree**, so concurrency later is a knob, not a rewrite.
-- **Permissions** are first-class on the **Run**: `"ask"` or `"unattended"`. Default `"ask"`. Never implied by looping. The **Worker Adapter** maps `"unattended"` to its flag; `custom` is told the flag. `cursor()` and `claude()` spawn print-mode (`-p`); ask has nowhere to go, so **Doctor** (and a **Run**) refuse it and name `--permissions unattended`. Sandbox-bypass is not a third value in v0.
+- **Permissions** are first-class on the **Run**: `"ask"` or `"unattended"`. Default `"ask"`. Never implied by looping. The **Worker Adapter** maps `"unattended"` to its flag; `custom` is told the flag. The print-mode Adapters spawn print-mode (`cursor()` and `claude()` as `-p`, `opencode()` as `run`); ask has nowhere to go, so **Doctor** (and a **Run**) refuse it and name `--permissions unattended`. Sandbox-bypass is not a third value in v0.
 - **Effort** is first-class on the **Run**: optional config default, CLI `--effort` for this **Run**. The **Worker Adapter** declares the vocabulary it maps — `--effort` for Claude, `--variant` (`high` | `max`) for opencode; Cursor does not — pick a model variant instead. **Doctor** fails Effort set outside the Adapter's declared vocabulary. Not authored on the **Ticket**.
 - A **Worker**’s model: config default is required (**Doctor** fail if missing). CLI `--model` overrides that default for the **Run**. A label map may override per **Ticket**. The **Ticket** body does not name a model.
 - The **Worker** prompt is owned by the package: loop rules plus **Tracker Adapter** copy (this **Ticket**’s id, title, body, URL). Loop rules tell the **Worker** it will not get a reply and must not ask the **Consumer**; a blocking question is a failed **Ticket**, not a pause. A **Consumer** may append a repo context file from config. That file does not replace tracker instructions. There is no repo `prompt.md` that owns the loop.
@@ -183,7 +183,7 @@ _Avoid_: max mode (Cursor's interactive slash command), ultracode (a Claude Code
 > **Domain expert:** "No. Looping is not **Permissions**. Default is ask. Pass `"unattended"` if you mean it. We don't say yolo."
 >
 > **Dev:** "cursor() defaults to ask, so the **Worker** will prompt me, right?"
-> **Domain expert:** "No. `cursor()` and `claude()` spawn print-mode (`-p`). That is not a chat. **Doctor** fails unless you pass `"unattended"`."
+> **Domain expert:** "No. `cursor()` and `claude()` spawn print-mode (`-p`), and `opencode()` spawns `run`. That is not a chat. **Doctor** fails unless you pass `"unattended"`."
 >
 > **Dev:** "Do I put `opus` on the GitHub issue?"
 > **Domain expert:** "No. Default is in config. `--model` for this **Run**. A label map if this **Ticket**'s labels say so."

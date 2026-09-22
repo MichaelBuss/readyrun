@@ -29,7 +29,7 @@ defineConfig({
 });
 ```
 
-`cursor()` declares none — Cursor's equivalent is a model variant (e.g. `composer-2.5-fast`), not a flag, so `effort` on `cursor()` fails to compile and Doctor refuses it in a loaded config. `custom()` maps no Effort until it declares both the flag its binary takes and the values it can honestly pass; a flag without a declaration is a Doctor config lie, and only declared values are ever passed:
+`cursor()` declares none — Cursor's equivalent is a model variant (e.g. `composer-2.5-fast`), not a flag, so `effort` on `cursor()` fails to compile and Doctor refuses it in a loaded config. `opencode()` declares only `high` | `max` — its effort knob is `--variant`, whose values are provider-specific — and maps the declared values onto `--variant`. `custom()` maps no Effort until it declares both the flag its binary takes and the values it can honestly pass; a flag without a declaration is a Doctor config lie, and only declared values are ever passed:
 
 ```ts
 custom({
@@ -40,7 +40,7 @@ custom({
 });
 ```
 
-`cursor()` and `claude()` also accept an optional `extraArgs: string[]` for any other static vendor flag beyond model/effort, landing in the same position `custom()`'s own `args` occupy relative to `--model`, without dropping to `custom()`:
+`cursor()`, `claude()`, and `opencode()` also accept an optional `extraArgs: string[]` for any other static vendor flag beyond model/effort, landing in the same position `custom()`'s own `args` occupy relative to `--model`, without dropping to `custom()`:
 
 ```ts
 claude({ extraArgs: ["--verbose"] });
@@ -49,14 +49,16 @@ claude({ extraArgs: ["--verbose"] });
 `custom()`'s `args` and print-mode `extraArgs` may reference the Worker's Worktree with a `{cwd}` token, interpolated per spawn with the Worktree's absolute path — the anchor for CLIs that resolve their own project root instead of process cwd:
 
 ```ts
-custom({ bin: "opencode", args: ["run", "--dir", "{cwd}"], unattendedFlag: "--auto" });
+custom({ bin: "my-coder", args: ["--project", "{cwd}"], unattendedFlag: "--go" });
 ```
+
+`opencode()` passes that anchor itself — `run --dir {cwd}` — because opencode re-roots linked worktrees to the git common dir, so its Worker is pinned by argv, never by process cwd.
 
 The token is reserved: any other `{...}` placeholder is a Doctor failure, and a literal `{cwd}` cannot be passed through.
 
-`cursor()` shells out to `agent`, `claude()` shells out to `claude`; both must already be installed and authenticated before `run` — ReadyRun does not manage CLI auth.
+`cursor()` shells out to `agent`, `claude()` to `claude`, and `opencode()` to `opencode run`; all must already be installed and authenticated before `run` — ReadyRun does not manage CLI auth.
 
-Both spawn print-mode (`-p`). `permissions: "ask"` (the default) is a Doctor failure — print-mode is not a chat. Pass `--permissions unattended`, or set `permissions: "unattended"` in config. `custom()` does not force print-mode, so ask remains valid there.
+All three spawn print-mode (`-p` for `agent` and `claude`, `run` for `opencode`). `permissions: "ask"` (the default) is a Doctor failure — print-mode is not a chat. Pass `--permissions unattended`, or set `permissions: "unattended"` in config. `custom()` does not force print-mode, so ask remains valid there.
 
 `readyrun init` writes that line for you rather than asking, and points `contextFile` at a `CONTEXT.md` when the Consumer root already has one:
 
@@ -76,7 +78,7 @@ export default defineConfig({
 
 Without a `CONTEXT.md` the key is absent and the Worker gets tracker copy alone. `--answers` writes the same stub without a TTY.
 
-`readyrun doctor` can tell "not installed" from "installed but not logged in": `cursor()` and `claude()` each define a cheap probe (`agent status`, `claude auth status`) that Doctor runs once it has confirmed the binary exists, reporting a probe failure distinctly from a missing binary. `custom()` Worker Adapters have no probe and keep today's existence-only check.
+`readyrun doctor` can tell "not installed" from "installed but not logged in": `cursor()` and `claude()` each define a cheap probe (`agent status`, `claude auth status`), and `opencode()` judges the output of `auth list` — that command exits 0 either way, so zero credentials is the not-logged-in answer. Doctor runs the probe once it has confirmed the binary exists, reporting a probe failure distinctly from a missing binary. `custom()` Worker Adapters have no probe and keep today's existence-only check.
 
 Doctor also fails when a Consumer lockfile's install output (`node_modules`) is neither tracked nor ignored, and names adding it to `.gitignore` — otherwise every Ticket hard-stops as Worker dirt after ReadyRun's own install.
 
