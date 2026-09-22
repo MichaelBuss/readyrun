@@ -184,8 +184,14 @@ export function spawnWorkerBinary(
 // keeps the probe honest for CLIs that always exit 0 but print the failure.
 const authFailureText = /not authenticated|not logged in|unauthenticated|authentication required/i;
 
-export function execProbe(bin: string, args: string[]): Promise<ProbeResult> {
-  return new Promise((resolve) => {
+// The capture machinery probes share: one invocation, stdout and stderr
+// merged in arrival order, resolved with the exit code. A spawn error (the
+// binary is not installed) rejects.
+export function captureProbeOutput(
+  bin: string,
+  args: string[],
+): Promise<{ exitCode: number; output: string }> {
+  return new Promise((resolve, reject) => {
     const child = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"] });
     let output = "";
     child.stdout?.on("data", (chunk: Buffer) => {
@@ -195,18 +201,27 @@ export function execProbe(bin: string, args: string[]): Promise<ProbeResult> {
       output += chunk.toString();
     });
     child.on("error", (error) => {
-      resolve({ ok: false, detail: error.message });
+      reject(error);
     });
     child.on("close", (code) => {
-      if (authFailureText.test(output)) {
-        resolve({ ok: false, detail: output.trim() });
-      } else if (code === 0) {
-        resolve({ ok: true });
-      } else {
-        resolve({ ok: false, detail: output.trim() || `exited with code ${code}` });
-      }
+      resolve({ exitCode: code ?? 1, output });
     });
   });
+}
+
+export function execProbe(bin: string, args: string[]): Promise<ProbeResult> {
+  return captureProbeOutput(bin, args).then(
+    ({ exitCode, output }) => {
+      if (authFailureText.test(output)) {
+        return { ok: false, detail: output.trim() };
+      } else if (exitCode === 0) {
+        return { ok: true };
+      } else {
+        return { ok: false, detail: output.trim() || `exited with code ${exitCode}` };
+      }
+    },
+    (error: Error) => ({ ok: false, detail: error.message }),
+  );
 }
 
 export type PrintModeWorkerOptions<Vocabulary extends readonly Effort[] = readonly Effort[]> = {

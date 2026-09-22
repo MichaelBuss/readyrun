@@ -49,7 +49,7 @@ claude({ extraArgs: ["--verbose"] });
 `custom()`'s `args` and print-mode `extraArgs` may reference the Worker's Worktree with a `{cwd}` token, interpolated per spawn with the Worktree's absolute path — the anchor for CLIs that resolve their own project root instead of process cwd:
 
 ```ts
-custom({ bin: "my-agent", args: ["--project", "{cwd}"], unattendedFlag: "--go" });
+custom({ bin: "my-coder", args: ["--project", "{cwd}"], unattendedFlag: "--go" });
 ```
 
 `opencode()` passes that anchor itself — `run --dir {cwd}` — because opencode re-roots linked worktrees to the git common dir, so its Worker is pinned by argv, never by process cwd.

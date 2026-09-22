@@ -1,6 +1,6 @@
 import {
+  captureProbeOutput,
   printModeWorker,
-  spawnWorkerBinary,
   type ProbeResult,
   type WorkerAdapter,
 } from "../worker-adapter.ts";
@@ -28,16 +28,14 @@ const zeroCredentials = /\b0 credentials/;
 async function probeAuthList(): Promise<ProbeResult> {
   let result;
   try {
-    result = await spawnWorkerBinary("opencode", ["auth", "list"], process.cwd(), {
-      capture: true,
-    });
+    result = await captureProbeOutput("opencode", ["auth", "list"]);
   } catch (error) {
     return {
       ok: false,
       detail: error instanceof Error ? error.message : String(error),
     };
   }
-  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
+  const output = result.output.trim();
   if (result.exitCode !== 0) {
     return { ok: false, detail: output || `exited with code ${result.exitCode}` };
   }

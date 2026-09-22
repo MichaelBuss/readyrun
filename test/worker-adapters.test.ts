@@ -545,7 +545,7 @@ describe("Worker Adapters", { concurrency: false }, () => {
               ready: "unblocked",
               labels: ["ready-for-agent"],
             }),
-            worker: opencode({ extraArgs: ["--title", "Ticket 52"] }),
+            worker: opencode({ extraArgs: ["--config", "{cwd}/opencode.json"] }),
             model: "zai-coding-plan/glm-5.3-flash",
             permissions: "unattended",
           }),
@@ -559,8 +559,8 @@ describe("Worker Adapters", { concurrency: false }, () => {
           "run",
           "--dir",
           receipt.cwd,
-          "--title",
-          "Ticket 52",
+          "--config",
+          `${receipt.cwd}/opencode.json`,
           "--model",
           "zai-coding-plan/glm-5.3-flash",
           "--auto",
@@ -690,6 +690,7 @@ describe("Worker Adapters", { concurrency: false }, () => {
     try {
       await withRecordingPath(["opencode"], async ({ receiptPath }) => {
         const repo = await throwawayRepo();
+        const chunks: string[] = [];
         try {
           const doctorExit = await doctor({
             config: defineConfig({
@@ -703,9 +704,20 @@ describe("Worker Adapters", { concurrency: false }, () => {
               permissions: "unattended",
             }),
             cwd: repo.cwd,
-            stdout: silent,
+            stdout: {
+              write(chunk: string) {
+                chunks.push(chunk);
+                return true;
+              },
+            },
           });
           assert.equal(doctorExit, 0);
+          // The fidelity probe ran through opencode()'s own spawn and passed:
+          // the `run --dir {cwd}` pin answers ADR 0037 in a linked worktree.
+          assert.match(
+            chunks.join(""),
+            /Probing Worker cwd fidelity in a throwaway Worktree/,
+          );
           const receipt = await readReceipt(receiptPath);
           assert.deepEqual(receipt.argv, ["auth", "list"]);
         } finally {
