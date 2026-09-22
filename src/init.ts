@@ -26,6 +26,21 @@ import {
 const exec = promisify(execFile);
 const otherModel = "__other__";
 
+// Both listing CLIs get the same quiet exec: no color, a short timeout, utf8
+// stdout.
+function listExecOptions() {
+  return {
+    encoding: "utf8" as const,
+    timeout: 4000,
+    env: {
+      ...process.env,
+      NO_COLOR: "1",
+      FORCE_COLOR: "0",
+      TERM: "dumb",
+    },
+  };
+}
+
 export type InitTracker =
   | {
       kind: "github";
@@ -377,16 +392,7 @@ export function parseBareModelIds(stdout: string): ListedModel[] {
 async function listCursorModels(): Promise<ListedModel[]> {
   for (const bin of ["agent", "cursor-agent"]) {
     try {
-      const { stdout } = await exec(bin, ["--list-models"], {
-        encoding: "utf8",
-        timeout: 4000,
-        env: {
-          ...process.env,
-          NO_COLOR: "1",
-          FORCE_COLOR: "0",
-          TERM: "dumb",
-        },
-      });
+      const { stdout } = await exec(bin, ["--list-models"], listExecOptions());
       const models = parseListedModels(stdout);
       if (models.length > 0) {
         return models;
@@ -399,22 +405,14 @@ async function listCursorModels(): Promise<ListedModel[]> {
 }
 
 // The list reflects the providers the Consumer has actually configured, so it
-// doubles as a soft auth signal — but a missing or unauthed CLI must not block
-// Init (#160): zero lines or a failed spawn is an empty list, and the typed
-// `provider/model` prompt takes over. There is no static catalog: nothing that
-// does not exist can be selected (ADR 0042).
+// doubles as a soft auth signal — but a missing or unauthed CLI must not
+// block Init (#160): zero lines or a failed spawn is an empty list, and the
+// typed `provider/model` prompt takes over. Unlike Cursor there is no static
+// fallback catalog: suggesting a model the CLI never listed would write a
+// config the Worker cannot run.
 export async function listOpencodeModels(): Promise<ListedModel[]> {
   try {
-    const { stdout } = await exec("opencode", ["models"], {
-      encoding: "utf8",
-      timeout: 4000,
-      env: {
-        ...process.env,
-        NO_COLOR: "1",
-        FORCE_COLOR: "0",
-        TERM: "dumb",
-      },
-    });
+    const { stdout } = await exec("opencode", ["models"], listExecOptions());
     return parseBareModelIds(stdout);
   } catch {
     return [];

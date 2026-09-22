@@ -197,6 +197,24 @@ async function assertWrittenStub(
   });
 }
 
+// The stub prints this on stdout unless it is answering the fidelity probe.
+async function withStubStdout(
+  stdout: string,
+  fn: () => Promise<void>,
+): Promise<void> {
+  const previous = process.env.READYRUN_STUB_STDOUT;
+  process.env.READYRUN_STUB_STDOUT = stdout;
+  try {
+    await fn();
+  } finally {
+    if (previous === undefined) {
+      delete process.env.READYRUN_STUB_STDOUT;
+    } else {
+      process.env.READYRUN_STUB_STDOUT = previous;
+    }
+  }
+}
+
 test("init writes a GitHub and Cursor readyrun.config.ts at the Consumer root", async () => {
   await assertWrittenStub(githubCursorAnswers, githubCursorStub);
 });
@@ -377,28 +395,18 @@ test("listOpencodeModels falls back to an empty list when opencode is missing", 
 });
 
 test("listOpencodeModels falls back to an empty list when opencode models prints zero lines", async () => {
-  const previousStdout = process.env.READYRUN_STUB_STDOUT;
-  process.env.READYRUN_STUB_STDOUT = "";
-  try {
-    await withRecordingPath(["opencode"], async () => {
+  await withStubStdout("", () =>
+    withRecordingPath(["opencode"], async () => {
       assert.deepEqual(await listOpencodeModels(), []);
-    });
-  } finally {
-    if (previousStdout === undefined) {
-      delete process.env.READYRUN_STUB_STDOUT;
-    } else {
-      process.env.READYRUN_STUB_STDOUT = previousStdout;
-    }
-  }
+    }),
+  );
 });
 
 test("listOpencodeModels offers the ids a stubbed opencode models prints", async () => {
-  const previousStdout = process.env.READYRUN_STUB_STDOUT;
-  process.env.READYRUN_STUB_STDOUT = `opencode/grok-code
+  await withStubStdout(`opencode/grok-code
 zai-coding-plan/glm-5.3-flash
-`;
-  try {
-    await withRecordingPath(["opencode"], async ({ receiptPath }) => {
+`, () =>
+    withRecordingPath(["opencode"], async ({ receiptPath }) => {
       assert.deepEqual(await listOpencodeModels(), [
         { id: "opencode/grok-code", label: "opencode/grok-code" },
         {
@@ -408,22 +416,14 @@ zai-coding-plan/glm-5.3-flash
       ]);
       const receipt = await readReceipt(receiptPath);
       assert.deepEqual(receipt.argv, ["models"]);
-    });
-  } finally {
-    if (previousStdout === undefined) {
-      delete process.env.READYRUN_STUB_STDOUT;
-    } else {
-      process.env.READYRUN_STUB_STDOUT = previousStdout;
-    }
-  }
+    }),
+  );
 });
 
 test("init writes a model picked from a stubbed opencode models list", async () => {
-  const previousStdout = process.env.READYRUN_STUB_STDOUT;
-  process.env.READYRUN_STUB_STDOUT = `opencode/grok-code
+  await withStubStdout(`opencode/grok-code
 zai-coding-plan/glm-4.6
-`;
-  try {
+`, async () => {
     await withRecordingPath(["opencode"], async () => {
       const models = await listOpencodeModels();
       const picked = models[1]?.id;
@@ -436,13 +436,7 @@ zai-coding-plan/glm-4.6
         ),
       );
     });
-  } finally {
-    if (previousStdout === undefined) {
-      delete process.env.READYRUN_STUB_STDOUT;
-    } else {
-      process.env.READYRUN_STUB_STDOUT = previousStdout;
-    }
-  }
+  });
 });
 
 test("init creates a .gitignore that ignores .readyrun/ when none exists", async () => {
