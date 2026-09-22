@@ -16,17 +16,20 @@ const tsc = fileURLToPath(
 // vocabulary (ADR 0042). The fixture writes one config per line: unmarked
 // lines must compile, and every @ts-expect-error line must actually fail —
 // an unused directive is its own error, so tsc exiting 0 proves both halves.
-const fixture = (mod: string, testing: string) => `import { claude, cursor, custom, defineConfig } from ${JSON.stringify(mod)};
+const fixture = (mod: string, testing: string) => `import { claude, cursor, custom, opencode, defineConfig } from ${JSON.stringify(mod)};
 import { memoryTracker } from ${JSON.stringify(testing)};
 
 const tracker = memoryTracker({ tickets: [], ready: "unblocked", labels: [] });
 
 defineConfig({ tracker, worker: claude(), model: "m", effort: "max" });
 defineConfig({ tracker, worker: custom({ bin: "b", unattendedFlag: "--u", effortFlag: "--e", effortVocabulary: ["high"] }), model: "m", effort: "high" });
+defineConfig({ tracker, worker: opencode(), model: "m", effort: "max" });
 // @ts-expect-error cursor declares no Effort vocabulary
 defineConfig({ tracker, worker: cursor(), model: "m", effort: "high" });
 // @ts-expect-error "yolo" is outside Claude's declared vocabulary
 defineConfig({ tracker, worker: claude(), model: "m", effort: "yolo" });
+// @ts-expect-error opencode declares only high | max
+defineConfig({ tracker, worker: opencode(), model: "m", effort: "low" });
 // @ts-expect-error a custom Adapter without a declaration maps no Effort
 defineConfig({ tracker, worker: custom({ bin: "b", unattendedFlag: "--u" }), model: "m", effort: "high" });
 // @ts-expect-error only declared values pass a declared vocabulary

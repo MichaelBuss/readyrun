@@ -19,7 +19,7 @@ The **Tracker**-specific implementation that maps that tracker’s issue onto a 
 _Avoid_: plugin, SDK (the harness is not a vendor agent SDK), Adapter (unqualified)
 
 **Worker Adapter**:
-The coding-CLI-specific way to spawn a **Worker** (prompt, model, cwd; later, usage). v0: `cursor`, `claude`, and `custom`. Codex later. `cursor` and `claude` both take an optional `extraArgs: string[]` for a static vendor flag beyond model/effort, landing next to `--model` the same way `custom`'s `args` do. `cursor` and `claude` also expose an optional health probe **Doctor** can run cheaply (`agent status`, `claude auth status`); `custom` has none.
+The coding-CLI-specific way to spawn a **Worker** (prompt, model, cwd; later, usage). v0: `cursor`, `claude`, `opencode`, and `custom`. Codex later. `cursor`, `claude`, and `opencode` all take an optional `extraArgs: string[]` for a static vendor flag beyond model/effort, landing next to `--model` the same way `custom`'s `args` do. `cursor`, `claude`, and `opencode` also expose an optional health probe **Doctor** can run cheaply (`agent status`, `claude auth status`, and `opencode`'s `auth list` judged for zero credentials, that command exiting 0 either way); `custom` has none. `opencode` passes its own Worktree anchor (`run --dir {cwd}`): it re-roots linked worktrees to the git common dir, so process cwd is never trusted.
 _Avoid_: plugin, SDK, recipe (as the noun)
 
 **Ticket**:
@@ -83,7 +83,7 @@ One invocation of the loop, from start until the **Frontier** is empty, the cap 
 _Avoid_: session, job, sprint
 
 **Permissions**:
-How freely a **Worker** may act without asking. `"ask"` or `"unattended"`. Default `"ask"`. `cursor()` and `claude()` spawn print-mode, so ask is a **Doctor** failure — pass `"unattended"`. Vendor flags (`--yolo`, `--dangerously-skip-permissions`) stay inside the **Worker Adapter**.
+How freely a **Worker** may act without asking. `"ask"` or `"unattended"`. Default `"ask"`. `cursor()` and `claude()` spawn print-mode, so ask is a **Doctor** failure — pass `"unattended"`. Vendor flags (`--yolo`, `--auto`, `--dangerously-skip-permissions`) stay inside the **Worker Adapter**.
 _Avoid_: yolo, autoApprove, boolean `yolo`
 
 **Effort**:

@@ -212,8 +212,15 @@ export function execProbe(bin: string, args: string[]): Promise<ProbeResult> {
 export type PrintModeWorkerOptions<Vocabulary extends readonly Effort[] = readonly Effort[]> = {
   effortFlag?: string;
   effortVocabulary?: Vocabulary;
+  // The argv that puts the CLI into print mode, `{cwd}`-interpolated: a
+  // leading flag (`-p`) or a leading subcommand with its own flags
+  // (`run --dir {cwd}`). Defaults to `-p`, the shared CLIs' flag.
+  leadingArgs?: string[];
   extraArgs?: string[];
   probeArgs?: string[];
+  // A probe probeArgs cannot express: `opencode auth list` exits 0 whether
+  // or not any credential exists, so its Adapter judges the captured output.
+  probe?: () => Promise<ProbeResult>;
 };
 
 export function printModeWorker<Vocabulary extends readonly Effort[] = readonly Effort[]>(
@@ -221,17 +228,22 @@ export function printModeWorker<Vocabulary extends readonly Effort[] = readonly 
   unattendedFlag: string,
   options: PrintModeWorkerOptions<Vocabulary> = {},
 ): WorkerAdapter<Vocabulary> {
-  const { effortFlag, effortVocabulary, extraArgs, probeArgs } = options;
+  const { effortFlag, effortVocabulary, leadingArgs, extraArgs, probeArgs, probe } = options;
   return createWorkerAdapter({
     bin,
     effortFlag,
     effortVocabulary,
     printMode: true,
-    probe: probeArgs === undefined ? undefined : () => execProbe(bin, probeArgs),
+    probe: probe ?? (probeArgs === undefined ? undefined : () => execProbe(bin, probeArgs)),
     staticArgv:
       extraArgs === undefined ? undefined : { option: "extraArgs", args: extraArgs },
     spawn(request: SpawnRequest) {
-      const args = ["-p", ...interpolateCwdArgs(extraArgs ?? [], request.cwd), "--model", request.model];
+      const args = [
+        ...interpolateCwdArgs(leadingArgs ?? ["-p"], request.cwd),
+        ...interpolateCwdArgs(extraArgs ?? [], request.cwd),
+        "--model",
+        request.model,
+      ];
       if (request.effort !== undefined && effortFlag !== undefined) {
         args.push(effortFlag, request.effort);
       }

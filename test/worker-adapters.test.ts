@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { describe, test } from "node:test";
 import { spawnWorkerBinary } from "../src/worker-adapter.ts";
-import { claude, cursor, custom, defineConfig, doctor, run } from "../src/mod.ts";
+import { claude, cursor, custom, defineConfig, doctor, opencode, run } from "../src/mod.ts";
 import type { ReadyRunConfig, WorkerAdapter } from "../src/mod.ts";
 import { memoryTracker } from "../src/testing/mod.ts";
 import { ticket } from "./tracker-adapter-contract.ts";
@@ -492,6 +492,295 @@ describe("Worker Adapters", { concurrency: false }, () => {
     });
   });
 
+  test("an opencode Worker Adapter Run renders the exact argv the shrunken wro config shape needs", async () => {
+    await withRecordingPath(["opencode"], async ({ receiptPath }) => {
+      const repo = await throwawayRepo();
+      try {
+        await run({
+          config: defineConfig({
+            tracker: memoryTracker({
+              tickets: [ticket({ id: "52" })],
+              ready: "unblocked",
+              labels: ["ready-for-agent"],
+            }),
+            worker: opencode(),
+            model: "zai-coding-plan/glm-5.3-flash",
+            permissions: "unattended",
+          }),
+          cap: 1,
+          cwd: repo.cwd,
+          stdout: silent,
+        });
+
+        const receipt = await readReceipt(receiptPath);
+        assert.equal(receipt.bin, "opencode");
+        assert.deepEqual(receipt.argv.slice(0, 6), [
+          "run",
+          "--dir",
+          receipt.cwd,
+          "--model",
+          "zai-coding-plan/glm-5.3-flash",
+          "--auto",
+        ]);
+        assert.equal(receipt.argv.length, 7);
+        assert.match(receipt.argv.at(-1) ?? "", /52/);
+        assert.ok(!receipt.argv.includes("-p"));
+        assert.ok(!receipt.argv.includes("-i"));
+        assert.notEqual(receipt.cwd, repo.cwd);
+        assert.match(receipt.cwd, /worktrees/);
+      } finally {
+        await repo.cleanup();
+      }
+    });
+  });
+
+  test("an opencode Worker Adapter includes the Consumer's extra args between --dir and --model", async () => {
+    await withRecordingPath(["opencode"], async ({ receiptPath }) => {
+      const repo = await throwawayRepo();
+      try {
+        await run({
+          config: defineConfig({
+            tracker: memoryTracker({
+              tickets: [ticket({ id: "52" })],
+              ready: "unblocked",
+              labels: ["ready-for-agent"],
+            }),
+            worker: opencode({ extraArgs: ["--title", "Ticket 52"] }),
+            model: "zai-coding-plan/glm-5.3-flash",
+            permissions: "unattended",
+          }),
+          cap: 1,
+          cwd: repo.cwd,
+          stdout: silent,
+        });
+
+        const receipt = await readReceipt(receiptPath);
+        assert.deepEqual(receipt.argv.slice(0, 8), [
+          "run",
+          "--dir",
+          receipt.cwd,
+          "--title",
+          "Ticket 52",
+          "--model",
+          "zai-coding-plan/glm-5.3-flash",
+          "--auto",
+        ]);
+      } finally {
+        await repo.cleanup();
+      }
+    });
+  });
+
+  test("an opencode Worker Adapter maps Effort to --variant for the values it declares; omitting Effort passes no flag", async () => {
+    await withRecordingPath(["opencode"], async ({ receiptPath }) => {
+      for (const effort of ["high", "max"] as const) {
+        const withEffort = await throwawayRepo();
+        try {
+          await run({
+            config: defineConfig({
+              tracker: memoryTracker({
+                tickets: [ticket({ id: "52" })],
+                ready: "unblocked",
+                labels: ["ready-for-agent"],
+              }),
+              worker: opencode(),
+              model: "zai-coding-plan/glm-5.3-flash",
+              effort,
+              permissions: "unattended",
+            }),
+            cap: 1,
+            cwd: withEffort.cwd,
+            stdout: silent,
+          });
+          const receipt = await readReceipt(receiptPath);
+          assert.deepEqual(receipt.argv.slice(5, 8), [
+            "--variant",
+            effort,
+            "--auto",
+          ]);
+          assert.equal(receipt.argv.length, 9);
+        } finally {
+          await withEffort.cleanup();
+        }
+      }
+
+      const withoutEffort = await throwawayRepo();
+      try {
+        await run({
+          config: defineConfig({
+            tracker: memoryTracker({
+              tickets: [ticket({ id: "52" })],
+              ready: "unblocked",
+              labels: ["ready-for-agent"],
+            }),
+            worker: opencode(),
+            model: "zai-coding-plan/glm-5.3-flash",
+            permissions: "unattended",
+          }),
+          cap: 1,
+          cwd: withoutEffort.cwd,
+          stdout: silent,
+        });
+        const receipt = await readReceipt(receiptPath);
+        assert.ok(!receipt.argv.includes("--variant"));
+      } finally {
+        await withoutEffort.cleanup();
+      }
+    });
+  });
+
+  test("Effort outside opencode's declared vocabulary fails Doctor and a Run will not start", async () => {
+    await withRecordingPath(["opencode"], async ({ receiptPath }) => {
+      const repo = await throwawayRepo();
+      const chunks: string[] = [];
+      // opencode declares high | max, so a typed config cannot carry "low";
+      // the wide annotation is the runtime lie a JS config file (which
+      // TypeScript never checks) can still hand Doctor.
+      const raw: ReadyRunConfig = {
+        tracker: memoryTracker({
+          tickets: [ticket({ id: "52" })],
+          ready: "unblocked",
+          labels: ["ready-for-agent"],
+        }),
+        worker: opencode(),
+        model: "zai-coding-plan/glm-5.3-flash",
+        effort: "low",
+        permissions: "unattended",
+      };
+      const config = defineConfig(raw);
+      try {
+        const doctorExit = await doctor({
+          config,
+          cwd: repo.cwd,
+          stdout: {
+            write(chunk: string) {
+              chunks.push(chunk);
+              return true;
+            },
+          },
+        });
+        const runExit = await run({
+          config,
+          cap: 1,
+          cwd: repo.cwd,
+          stdout: {
+            write(chunk: string) {
+              chunks.push(chunk);
+              return true;
+            },
+          },
+        });
+        assert.equal(doctorExit, 1);
+        assert.equal(runExit, 1);
+        assert.match(
+          chunks.join(""),
+          /Doctor: effort "low" is not in the Effort vocabulary .* declares \(high, max\)/,
+        );
+        const receipt = await readReceipt(receiptPath);
+        assert.deepEqual(receipt.argv, ["auth", "list"]);
+      } finally {
+        await repo.cleanup();
+      }
+    });
+  });
+
+  test("Doctor runs the opencode Worker Adapter's auth probe and passes when it reports credentials", async () => {
+    const previousStdout = process.env.READYRUN_STUB_STDOUT;
+    process.env.READYRUN_STUB_STDOUT = "└  1 credentials\n";
+    try {
+      await withRecordingPath(["opencode"], async ({ receiptPath }) => {
+        const repo = await throwawayRepo();
+        try {
+          const doctorExit = await doctor({
+            config: defineConfig({
+              tracker: memoryTracker({
+                tickets: [ticket({ id: "52" })],
+                ready: "unblocked",
+                labels: ["ready-for-agent"],
+              }),
+              worker: opencode(),
+              model: "zai-coding-plan/glm-5.3-flash",
+              permissions: "unattended",
+            }),
+            cwd: repo.cwd,
+            stdout: silent,
+          });
+          assert.equal(doctorExit, 0);
+          const receipt = await readReceipt(receiptPath);
+          assert.deepEqual(receipt.argv, ["auth", "list"]);
+        } finally {
+          await repo.cleanup();
+        }
+      });
+    } finally {
+      if (previousStdout === undefined) {
+        delete process.env.READYRUN_STUB_STDOUT;
+      } else {
+        process.env.READYRUN_STUB_STDOUT = previousStdout;
+      }
+    }
+  });
+
+  test("Doctor fails with the probe's detail when the opencode CLI shows zero credentials", async () => {
+    const previousStdout = process.env.READYRUN_STUB_STDOUT;
+    process.env.READYRUN_STUB_STDOUT = "└  0 credentials\n";
+    try {
+      await withRecordingPath(["opencode"], async ({ receiptPath }) => {
+        const repo = await throwawayRepo();
+        const chunks: string[] = [];
+        try {
+          const doctorExit = await doctor({
+            config: defineConfig({
+              tracker: memoryTracker({
+                tickets: [ticket({ id: "52" })],
+                ready: "unblocked",
+                labels: ["ready-for-agent"],
+              }),
+              worker: opencode(),
+              model: "zai-coding-plan/glm-5.3-flash",
+              permissions: "unattended",
+            }),
+            cwd: repo.cwd,
+            stdout: {
+              write(chunk: string) {
+                chunks.push(chunk);
+                return true;
+              },
+            },
+          });
+          assert.equal(doctorExit, 1);
+          assert.match(chunks.join(""), /Doctor: Worker Adapter probe failed/);
+          assert.match(chunks.join(""), /0 credentials/);
+          assert.doesNotMatch(chunks.join(""), /is missing/);
+          const receipt = await readReceipt(receiptPath);
+          assert.deepEqual(receipt.argv, ["auth", "list"]);
+        } finally {
+          await repo.cleanup();
+        }
+      });
+    } finally {
+      if (previousStdout === undefined) {
+        delete process.env.READYRUN_STUB_STDOUT;
+      } else {
+        process.env.READYRUN_STUB_STDOUT = previousStdout;
+      }
+    }
+  });
+
+  test("the opencode Worker Adapter's probe reports not installed on a spawn error", async () => {
+    const previousPath = process.env.PATH;
+    process.env.PATH = "/no/such/readyrun-path";
+    try {
+      const probe = opencode().probe;
+      assert.ok(probe !== undefined);
+      const result = await probe();
+      assert.ok(!result.ok);
+      assert.match(result.detail, /ENOENT/);
+    } finally {
+      process.env.PATH = previousPath;
+    }
+  });
+
   test("Effort on a Cursor Worker Adapter fails Doctor and a Run will not start", async () => {
     await withRecordingPath(["agent"], async ({ receiptPath }) => {
       const repo = await throwawayRepo();
@@ -559,6 +848,12 @@ describe("Worker Adapters", { concurrency: false }, () => {
     }> = [
       { bin: "agent", worker: cursor(), model: "composer-2", probeArgv: ["status"] },
       { bin: "claude", worker: claude(), model: "opus", probeArgv: ["auth", "status"] },
+      {
+        bin: "opencode",
+        worker: opencode(),
+        model: "zai-coding-plan/glm-5.3-flash",
+        probeArgv: ["auth", "list"],
+      },
     ];
     for (const { bin, worker, model, probeArgv } of printModeAdapters) {
       await withRecordingPath([bin], async ({ receiptPath }) => {
