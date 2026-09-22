@@ -15,6 +15,7 @@ import {
 } from "@clack/prompts";
 import { ensureReadyrunGitignored } from "./gitignore.ts";
 import { claude } from "./adapters/claude.ts";
+import { opencode } from "./adapters/opencode.ts";
 import { originRepository } from "./git.ts";
 import {
   effortLabel,
@@ -41,6 +42,7 @@ export type InitTracker =
 export type InitWorker =
   | { kind: "cursor" }
   | { kind: "claude" }
+  | { kind: "opencode" }
   | { kind: "custom"; bin: string; unattendedFlag: string };
 
 export type InitAnswers = {
@@ -136,7 +138,7 @@ function parseInitWorker(
   if (!isRecord(value)) {
     return { ok: false, message: "Answers must include a worker" };
   }
-  if (value.kind === "cursor" || value.kind === "claude") {
+  if (value.kind === "cursor" || value.kind === "claude" || value.kind === "opencode") {
     const extra = extraKeys(value, new Set(["kind"]));
     if (extra.length > 0) {
       return { ok: false, message: `Unknown worker key${extra.length === 1 ? "" : "s"}: ${extra.join(", ")}` };
@@ -155,7 +157,7 @@ function parseInitWorker(
     }
     return { ok: true, worker: { kind: "custom", bin, unattendedFlag } };
   }
-  return { ok: false, message: "Worker must be cursor, claude, or custom" };
+  return { ok: false, message: "Worker must be cursor, claude, opencode, or custom" };
 }
 
 export function parseInitAnswers(
@@ -207,9 +209,15 @@ export function parseInitAnswers(
 
 // The Effort vocabulary of the Adapter a kind of Init Worker writes, read
 // from the factory itself so Init never re-derives what the Adapter declares
-// (ADR 0042): only claude writes an Adapter that maps Effort.
+// (ADR 0042): only claude and opencode write Adapters that map Effort.
 function initEffortVocabulary(worker: InitWorker): readonly Effort[] {
-  return worker.kind === "claude" ? claude().effortVocabulary ?? [] : [];
+  if (worker.kind === "claude") {
+    return claude().effortVocabulary ?? [];
+  }
+  if (worker.kind === "opencode") {
+    return opencode().effortVocabulary ?? [];
+  }
+  return [];
 }
 
 export type ListedModel = {
@@ -477,6 +485,7 @@ async function collectWorker(): Promise<InitWorker | undefined> {
       options: [
         { value: "cursor" as const, label: "Cursor" },
         { value: "claude" as const, label: "Claude" },
+        { value: "opencode" as const, label: "OpenCode" },
         { value: "custom" as const, label: "Custom binary" },
       ],
     }),
@@ -511,10 +520,11 @@ async function collectWorker(): Promise<InitWorker | undefined> {
 }
 
 async function collectModel(worker: InitWorker): Promise<string | undefined> {
-  if (worker.kind === "custom") {
+  if (worker.kind === "custom" || worker.kind === "opencode") {
     const typed = unlessCancelled(
       await text({
         message: "Default model",
+        placeholder: worker.kind === "opencode" ? "provider/model" : undefined,
         validate: required,
       }),
     );

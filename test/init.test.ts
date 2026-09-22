@@ -79,6 +79,32 @@ export default defineConfig({
 });
 `;
 
+const githubOpencodeAnswers: InitAnswers = {
+  tracker: {
+    kind: "github",
+    repo: "acme/widgets",
+    labels: ["ready-for-agent"],
+  },
+  worker: { kind: "opencode" },
+  model: "zai-coding-plan/glm-5.3-flash",
+  effort: "high",
+};
+
+const githubOpencodeStub = `import { defineConfig, github, opencode } from "@readyrun/readyrun";
+
+export default defineConfig({
+  tracker: github({
+    repo: "acme/widgets",
+    ready: "unblocked",
+    labels: ["ready-for-agent"],
+  }),
+  worker: opencode(),
+  model: "zai-coding-plan/glm-5.3-flash",
+  permissions: "unattended",
+  effort: "high",
+});
+`;
+
 const githubCustomAnswers: InitAnswers = {
   tracker: {
     kind: "github",
@@ -176,6 +202,10 @@ test("init writes a Linear and Claude readyrun.config.ts at the Consumer root", 
   await assertWrittenStub(linearClaudeAnswers, linearClaudeStub);
 });
 
+test("init writes a GitHub and OpenCode readyrun.config.ts at the Consumer root", async () => {
+  await assertWrittenStub(githubOpencodeAnswers, githubOpencodeStub);
+});
+
 test("init writes a custom Worker Adapter into the stub", async () => {
   await assertWrittenStub(githubCustomAnswers, githubCustomStub);
 });
@@ -234,6 +264,41 @@ test("parseInitAnswers accepts an effort answer only for the Adapter that declar
   assert.match(
     custom.ok ? "" : custom.message,
     /the custom Worker Adapter does not map it/,
+  );
+
+  const opencode = parseInitAnswers({
+    ...base,
+    worker: { kind: "opencode" },
+    effort: "high",
+  });
+  assert.equal(opencode.ok, true);
+  assert.equal(opencode.ok && opencode.answers.effort, "high");
+
+  const opencodeLow = parseInitAnswers({
+    ...base,
+    worker: { kind: "opencode" },
+    effort: "low",
+  });
+  assert.equal(opencodeLow.ok, false);
+  assert.match(
+    opencodeLow.ok ? "" : opencodeLow.message,
+    /the opencode Worker Adapter does not map it/,
+  );
+
+  const opencodeNoEffort = parseInitAnswers({
+    ...base,
+    worker: { kind: "opencode" },
+  });
+  assert.equal(opencodeNoEffort.ok, true);
+
+  const unknownKind = parseInitAnswers({
+    ...base,
+    worker: { kind: "codex" },
+  });
+  assert.equal(unknownKind.ok, false);
+  assert.match(
+    unknownKind.ok ? "" : unknownKind.message,
+    /Worker must be cursor, claude, opencode, or custom/,
   );
 
   const malformed = parseInitAnswers({
