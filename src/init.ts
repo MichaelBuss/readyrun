@@ -356,6 +356,24 @@ export function configWrittenMessage(path: string): string {
   return `Wrote \u001b]8;;${href}\u001b\\readyrun.config.ts\u001b]8;;\u001b\\`;
 }
 
+// `opencode models` prints one bare `provider/model` id per line (verified
+// against opencode 1.18.31, #160): no `id - label` split, no markers, so it
+// gets this sibling parser rather than a bent parseListedModels. Rows carry
+// id == label so the same select/autocomplete surface as Cursor renders them.
+export function parseBareModelIds(stdout: string): ListedModel[] {
+  const seen = new Set<string>();
+  const models: ListedModel[] = [];
+  for (const raw of stdout.split(/\r?\n/)) {
+    const id = raw.replace(ansi, "").trim();
+    if (id.length === 0 || seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    models.push({ id, label: id });
+  }
+  return models;
+}
+
 async function listCursorModels(): Promise<ListedModel[]> {
   for (const bin of ["agent", "cursor-agent"]) {
     try {
@@ -378,6 +396,29 @@ async function listCursorModels(): Promise<ListedModel[]> {
     }
   }
   return fallbackCursorModels;
+}
+
+// The list reflects the providers the Consumer has actually configured, so it
+// doubles as a soft auth signal — but a missing or unauthed CLI must not block
+// Init (#160): zero lines or a failed spawn is an empty list, and the typed
+// `provider/model` prompt takes over. There is no static catalog: nothing that
+// does not exist can be selected (ADR 0042).
+export async function listOpencodeModels(): Promise<ListedModel[]> {
+  try {
+    const { stdout } = await exec("opencode", ["models"], {
+      encoding: "utf8",
+      timeout: 4000,
+      env: {
+        ...process.env,
+        NO_COLOR: "1",
+        FORCE_COLOR: "0",
+        TERM: "dumb",
+      },
+    });
+    return parseBareModelIds(stdout);
+  } catch {
+    return [];
+  }
 }
 
 async function collectInitAnswers(cwd: string): Promise<InitAnswers | undefined> {
@@ -520,23 +561,20 @@ async function collectWorker(): Promise<InitWorker | undefined> {
 }
 
 async function collectModel(worker: InitWorker): Promise<string | undefined> {
-  if (worker.kind === "custom" || worker.kind === "opencode") {
+  const models = worker.kind === "cursor"
+    ? await listCursorModels()
+    : worker.kind === "opencode"
+    ? await listOpencodeModels()
+    : worker.kind === "claude"
+    ? claudeModels
+    : [];
+  if (models.length === 0) {
+    // The fallback for a custom binary or an OpenCode CLI that is missing,
+    // unauthed, or lists nothing (#160): today's typed prompt.
     const typed = unlessCancelled(
       await text({
         message: "Default model",
         placeholder: worker.kind === "opencode" ? "provider/model" : undefined,
-        validate: required,
-      }),
-    );
-    return typed?.trim();
-  }
-  const models = worker.kind === "cursor"
-    ? await listCursorModels()
-    : claudeModels;
-  if (models.length === 0) {
-    const typed = unlessCancelled(
-      await text({
-        message: "Default model",
         validate: required,
       }),
     );
