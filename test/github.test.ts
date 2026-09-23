@@ -252,6 +252,34 @@ test("a parent root that does not exist on GitHub is refused as a lie", async ()
   );
 });
 
+test("a list root naming a Ticket twice is refused as a lie", async () => {
+  const { adapter } = githubFromWorld(world);
+  await assert.rejects(
+    () => adapter.frontier({ kind: "list", ids: ["52", "52"] }),
+    /Ticket 52 is named more than once in the root/,
+  );
+});
+
+test("the blocking-expression probe is read once per process, not once per frontier, waiting, or tree call", async () => {
+  const { adapter, fixture } = githubFromWorld({
+    tickets: [
+      ticket({ id: "52" }),
+      ticket({ id: "53", blockedBy: ["52"] }),
+    ],
+    ready: "unblocked",
+    labels: ["ready-for-agent"],
+  });
+
+  await adapter.frontier();
+  await adapter.waiting();
+  await adapter.tree();
+  const probes = fixture.requests.filter((request) =>
+    (JSON.parse(request.body ?? "{}") as { operationName?: string })
+      .operationName === "SchemaProbe"
+  );
+  assert.equal(probes.length, 1);
+});
+
 test("a parent root that is closed on GitHub is refused as a lie", async () => {
   const fixture = githubHttpFixture({
     repo: "acme/widgets",

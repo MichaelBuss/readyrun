@@ -29,6 +29,8 @@ Every triaged issue carries exactly one.
 
 `documentation` narrows a category rather than replacing it; an issue carrying it still needs `bug` or `enhancement`.
 
+`architecture` narrows a category rather than replacing it; an issue carrying it still needs `bug` or `enhancement`. It marks a deepening opportunity from an architecture review — a refactor toward deep modules at clean seams — so the review's candidates are findable as a set.
+
 Everything else GitHub creates by default (`duplicate`, `invalid`, `question`, `help wanted`, `good first issue`, `accessibility`) is unused by triage.
 
 ## History
