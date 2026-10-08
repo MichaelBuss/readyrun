@@ -1,3 +1,4 @@
+/** A Consumer passed a key neither `defineConfig` nor an Adapter factory knows. */
 export class UnknownConfigKeyError extends Error {
   readonly keys: readonly string[];
 

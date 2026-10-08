@@ -1,4 +1,23 @@
 #!/usr/bin/env node
+
+/**
+ * The `readyrun` command line: three commands plus the bare command.
+ *
+ * - `init [--answers <file>]` — write the Consumer's `readyrun.config.ts`
+ *   stub and cover `.readyrun/` in `.gitignore`; interactive by default,
+ *   scriptable with `--answers`.
+ * - `run [--preview] --max <n> …` — walk the Frontier, one Worker per
+ *   Ticket, collecting each Ticket's Branch onto the Run Branch.
+ * - `doctor` — check config and any named Root against the Tracker without
+ *   starting a Run.
+ * - bare `readyrun` — the Launcher on a TTY; usage off one.
+ *
+ * This module is the bin, not the library surface: Consumers import from the
+ * package root. Entry is {@link cli}.
+ *
+ * @module
+ */
+
 import { realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -34,19 +53,35 @@ Commands:
 A Run cannot start without a cap; an explicit --ticket list defaults the cap to its length. --root runs a parent's children; the parent is never worked. run --preview prints the Plan — Doctor's verdict, the Frontier in pick order, the base, the Run Branch, the cap, the Tickets waiting — and the equivalent run command; nothing starts.
 `;
 
+/**
+ * How {@link cli} runs. Every field but `argv` defaults to the real
+ * environment; the invoke fields are the seams tests script instead.
+ */
 export type CliOptions = {
+  /** The command and its flags, as the process received them. */
   argv: string[];
+  /** The Consumer root. Defaults to the process's working directory. */
   cwd?: string;
+  /** Where command output is written. Defaults to process stdout. */
   stdout?: Writer;
-  // Whether the terminal can host the Launcher (ADR 0040): a TTY on both
-  // ends. Only the bare command reads it; every flag path is unchanged.
+  /**
+   * Whether the terminal can host the Launcher (ADR 0040): a TTY on both
+   * ends. Only the bare command reads it; every flag path is unchanged.
+   */
   tty?: boolean;
+  /** Loads the Consumer's config. Defaults to the real loader. */
   loadConfig?: (cwd: string) => Promise<ReadyRunConfig>;
+  /** The `run` implementation invoked. Defaults to the real Run. */
   run?: (options: RunOptions) => Promise<number>;
+  /** The `run --preview` implementation invoked. Defaults to the real preview. */
   preview?: (options: RunOptions) => Promise<number>;
+  /** The `doctor` implementation invoked. Defaults to the real Doctor. */
   doctor?: (options: DoctorOptions) => Promise<number>;
+  /** The `init` implementation invoked. Defaults to the real Init. */
   init?: (options: InitOptions) => Promise<number>;
+  /** The bare command's Launcher. Defaults to the real Launcher. */
   launcher?: (options: LauncherOptions) => Promise<number>;
+  /** Answers for `init`, taking the place of `--answers <file>`. */
   answers?: InitAnswers;
 };
 
@@ -223,6 +258,15 @@ async function answersFromFile(
   }
 }
 
+/**
+ * Run one `readyrun` command and answer its exit code. Parses `argv`,
+ * loads the Consumer's config for `run` and `doctor`, and dispatches:
+ * `init`, `run` (or its preview), `doctor`, or — bare, on a TTY — the
+ * Launcher. Off a TTY, or on an unknown command, it writes usage and
+ * answers 1.
+ *
+ * @returns The process exit code the command answered.
+ */
 export async function cli(options: CliOptions): Promise<number> {
   const stdout = options.stdout ?? process.stdout;
   const command = options.argv[0];

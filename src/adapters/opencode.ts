@@ -6,18 +6,23 @@ import {
 } from "../worker-adapter.ts";
 import { assertKnownKeys } from "../unknown-keys.ts";
 
-// opencode's effort knob is `--variant`, whose values are provider-specific
-// (ADR 0042): the Adapter declares only the documented `high` | `max` until a
-// Consumer's trial corrects the claim.
+/**
+ * opencode's effort knob is `--variant`, whose values are provider-specific
+ * (ADR 0042): the Adapter declares only the documented `high` | `max` until a
+ * Consumer's trial corrects the claim.
+ */
 export const opencodeEffortVocabulary = ["high", "max"] as const;
 
+/** The Effort values {@link opencode} can honestly map: `high` and `max`. */
 export type OpencodeEffortVocabulary = typeof opencodeEffortVocabulary;
 
-const knownOpencodeKeys = new Set(["extraArgs"]);
-
+/** Options for {@link opencode}: static argv beyond model/effort. */
 export type OpencodeWorkerOptions = {
+  /** One static vendor flag, landed next to `--variant` at spawn. */
   extraArgs?: string[];
 };
+
+const knownOpencodeKeys = new Set(["extraArgs"]);
 
 // `auth list` exits 0 whether or not a credential exists (verified against
 // opencode 1.18.31), so the probe judges the captured output: zero credentials
@@ -45,10 +50,14 @@ async function probeAuthList(): Promise<ProbeResult> {
   return { ok: true };
 }
 
-// Print mode is `opencode run` — already non-interactive, so `-i` is never
-// passed — and `--dir {cwd}` pins the Worker to its Worktree (ADR 0036):
-// opencode re-roots linked worktrees to the git common dir, so process cwd is
-// never trusted (#125).
+/**
+ * The opencode Worker Adapter: `opencode run` — already non-interactive, so
+ * `-i` is never passed — with `--dir {cwd}` pinning the Worker to its
+ * Worktree (ADR 0036): opencode re-roots linked worktrees to the git common
+ * dir, so process cwd is never trusted (#125). Unattended via `--auto`,
+ * Effort via `--variant` in the declared `high` | `max` vocabulary,
+ * health-probed with `auth list` judged for zero credentials.
+ */
 export function opencode(
   options: OpencodeWorkerOptions = {},
 ): WorkerAdapter<OpencodeEffortVocabulary> {

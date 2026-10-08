@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 
 const exec = promisify(execFile);
 
+/** The checkout stands on the default branch, where no Worker may start. */
 export class DefaultBranchError extends Error {
   constructor(branch: string) {
     super(`ReadyRun refuses to start a Worker on the default branch (${branch})`);
@@ -12,6 +13,7 @@ export class DefaultBranchError extends Error {
   }
 }
 
+/** A Worktree already exists for the Ticket's Branch; one Ticket, one Worktree. */
 export class WorktreeExistsError extends Error {
   constructor(branch: string, worktreePath: string) {
     super(
@@ -21,6 +23,7 @@ export class WorktreeExistsError extends Error {
   }
 }
 
+/** Installing a fresh Worktree's dependencies failed; the fix is outside the Run. */
 export class WorktreeInstallError extends Error {
   constructor(command: string, output: string) {
     const detail = output.trim();
@@ -179,6 +182,7 @@ function execExitCode(error: unknown): number | undefined {
   return undefined;
 }
 
+/** A `--base` commit-ish that does not resolve to a commit in this checkout. */
 export class BaseNotFoundError extends Error {
   constructor(commitish: string) {
     super(

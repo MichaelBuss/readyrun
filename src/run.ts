@@ -31,23 +31,39 @@ import type { Effort, Permissions } from "./worker-adapter.ts";
 
 type RunStdout = LivenessStdout;
 
+/**
+ * What a Run takes beyond the config: the cap, an optional base, and the
+ * Root naming this Run's Frontier. The flag surface `readyrun run` parses
+ * maps one-to-one onto these.
+ */
 export type RunOptions = {
+  /** The Consumer's config, as `defineConfig` built it. */
   config: ReadyRunConfig;
+  /** The cap: the most Tickets this Run may start. Required, one way or another. */
   cap?: number;
-  // The commit-ish every Worktree is cut from, and what the Run Branch
-  // collects onto. Defaults to the Consumer's checkout; naming the previous
-  // Run Branch is how a capped Run is continued (ADR 0034). There is no config
-  // key for it, because a permanently overridden base is nobody's workflow.
+  /**
+   * The commit-ish every Worktree is cut from, and what the Run Branch
+   * collects onto. Defaults to the Consumer's checkout; naming the previous
+   * Run Branch is how a capped Run is continued (ADR 0034). There is no config
+   * key for it, because a permanently overridden base is nobody's workflow.
+   */
   base?: string;
-  // The Frontier's root for this Run (ADR 0038): a parent whose children
-  // become the Frontier, or an explicit list that bypasses the Consumer
-  // selector. A root named here replaces any config-level root, as --max and
-  // --model do.
+  /**
+   * The Frontier's root for this Run (ADR 0038): a parent whose children
+   * become the Frontier, or an explicit list that bypasses the Consumer
+   * selector. A root named here replaces any config-level root, as --max and
+   * --model do.
+   */
   root?: FrontierRoot;
+  /** The Consumer root the Run works from. Defaults to the process's. */
   cwd?: string;
+  /** Where the Run's lines are written. Defaults to process stdout. */
   stdout?: RunStdout;
+  /** The model for this Run; overrides the config default, not the label map. */
   model?: string;
+  /** The Permissions for this Run; overrides the config default. */
   permissions?: Permissions;
+  /** The Effort for this Run; must be in the Adapter's declared vocabulary. */
   effort?: Effort;
 };
 
@@ -175,6 +191,17 @@ function completionReport(
   return 0;
 }
 
+/**
+ * One invocation of the Run: `readyrun run` and the library surface for it.
+ * Doctor gates the start; then the loop picks the next Ticket off the
+ * Frontier, gives it one Worker in one Worktree on one Branch, and on
+ * success merges that Branch into the Run Branch as exactly one merge
+ * commit. Serial in v0. Hard stops on Tracker, git, spawn, or Worker
+ * failure; empty Frontier and the cap are clean stops. A Run cannot start
+ * without a cap.
+ *
+ * @returns 0 for a clean stop, 1 for a hard stop or a Doctor refusal.
+ */
 export async function run(options: RunOptions): Promise<number> {
   const config = defineConfig(options.config);
   const { cap } = resolveCap(options, config);

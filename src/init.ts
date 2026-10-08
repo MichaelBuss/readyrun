@@ -60,15 +60,27 @@ export type InitWorker =
   | { kind: "opencode" }
   | { kind: "custom"; bin: string; unattendedFlag: string };
 
+/**
+ * What Init collected, from Clack or `--answers`: which Tracker, which
+ * Worker Adapter, the default model, and an optional Effort in the Adapter's
+ * declared vocabulary.
+ */
 export type InitAnswers = {
+  /** The Tracker and its Frontier selector. */
   tracker: InitTracker;
+  /** The Worker Adapter to write into the stub. */
   worker: InitWorker;
+  /** The default model for the config stub. */
   model: string;
+  /** The default Effort, when the Adapter maps one. */
   effort?: Effort;
 };
 
+/** What {@link init} takes: where to write and, for the scriptable path, the answers. */
 export type InitOptions = {
+  /** The Consumer root the stub is written into. */
   cwd: string;
+  /** The answers, taking Clack's place; absent means prompt. */
   answers?: InitAnswers;
 };
 
@@ -663,6 +675,17 @@ function contextFileAtRoot(cwd: string): string | undefined {
   return existsSync(resolve(cwd, consumerContextFile)) ? consumerContextFile : undefined;
 }
 
+/**
+ * Write the Consumer's `readyrun.config.ts` stub and cover `.readyrun/` in
+ * `.gitignore`. Interactive by default (Clack); scriptable with
+ * `--answers <file>` or {@link InitOptions.answers} so CI or a
+ * template-repo setup script can drive it without a TTY. The stub is one a
+   * Run can use as-is: Permissions `"unattended"`, and `contextFile` pointed
+   * at `CONTEXT.md` when the Consumer root already holds one. It does not
+ * assemble `run`.
+ *
+ * @returns 0 when the stub is written, 1 on a cancelled prompt.
+ */
 export async function init(options: InitOptions): Promise<number> {
   const prompted = options.answers === undefined;
   const answers = options.answers ?? await collectInitAnswers(options.cwd);

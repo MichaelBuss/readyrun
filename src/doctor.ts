@@ -22,12 +22,18 @@ import { unknownPlaceholdersIn, type Effort, type Permissions } from "./worker-a
 
 type DoctorStdout = LivenessStdout;
 
+/** What Doctor takes: the config to lie-check and the same root flags `run` takes. */
 export type DoctorOptions = {
+  /** The Consumer's config, as `defineConfig` built it. */
   config: ReadyRunConfig;
-  // The Frontier's root to lie-check (ADR 0038): the same flags `run` takes,
-  // so a rooted Run can be pre-flighted without starting it.
+  /**
+   * The Frontier's root to lie-check (ADR 0038): the same flags `run` takes,
+   * so a rooted Run can be pre-flighted without starting it.
+   */
   root?: FrontierRoot;
+  /** The Consumer root. Defaults to the process's working directory. */
   cwd?: string;
+  /** Where Doctor's verdict is written. Defaults to process stdout. */
   stdout?: DoctorStdout;
 };
 
@@ -290,6 +296,17 @@ export function writeDoctorFailures(
   return 1;
 }
 
+/**
+ * The check that config — and any named Root — matches the Tracker. Fails a
+ * Frontier that lies: labels, states, or projects that do not exist, a
+ * repository that is not the git remote, blocking that cannot be expressed,
+ * an Effort the Worker Adapter does not declare, a missing model default,
+ * install output that is neither tracked nor ignored. Also probes the Worker
+ * binary, its login, and — unless told not to — cwd fidelity in a throwaway
+ * Worktree. A Run will not start if Doctor fails.
+ *
+ * @returns 0 when config and Root are honest, 1 with the failures written.
+ */
 export async function doctor(options: DoctorOptions): Promise<number> {
   const config = defineConfig(options.config);
   const cwd = options.cwd ?? process.cwd();
