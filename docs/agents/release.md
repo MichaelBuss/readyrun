@@ -17,6 +17,12 @@ Releases run through [Changesets](https://github.com/changesets/changesets). Ver
 3. Merging that PR is the release: the workflow runs `scripts/release.ts`, which publishes npm (trusted publishing: OIDC, `--provenance`) and JSR (OIDC), tags, and creates the GitHub Release. A version already on a registry is skipped, so re-runs and docs-only merges stay green.
 4. If npm publishing is not configured yet (unclaimed `@readyrun` scope, no trusted publisher), the npm step fails **instructively**: exact setup steps appear in the workflow summary and as a comment on the merged PR. Fix them and re-run the workflow.
 
+## One-time setup already done (for the record)
+
+- **Trusted publishing** on npmjs.com: package `@readyrun/readyrun` → Settings → Trusted publishing → GitHub Actions (`MichaelBuss` / `readyrun` / `publish.yml`), with **Allow npm publish** ticked (new configs default to stage-only, which would force a human 2FA approval on every release). The config expires if its first publish doesn't happen within 2 days.
+- **Workflow permissions**: repo Settings → Actions → General → "Allow GitHub Actions to create and approve pull requests" is on — without it the changesets action cannot open the Version Packages PR.
+- The release-guidance comment skips bot-authored PRs: the Version Packages PR *is* the release; lecturing it about changesets is noise.
+
 ## What an agent checks on its own PRs
 
 The release-guidance comment (one per PR, updated in place) reports: which published files change, the changeset's bump kind and note (or how to add one), and whether the body closes an issue. Read it before asking for review; act on its nudges.
