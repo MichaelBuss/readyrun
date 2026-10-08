@@ -6,7 +6,7 @@
  * {@link github} or {@link linear} — and one Worker Adapter — {@link cursor},
  * {@link claude}, {@link opencode}, or {@link custom}. The `readyrun`
  * commands (`init`, `run`, `doctor`, and the bare Launcher) live at the
- * `./cli` entrypoint. Vocabulary is CONTEXT.md's: Ticket, Frontier, Tracker
+ * `./cli` entrypoint. Vocabulary is GLOSSARY.md's: Ticket, Frontier, Tracker
  * Adapter, Worker Adapter, Run, Root.
  *
  * @example

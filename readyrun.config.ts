@@ -10,5 +10,5 @@ export default defineConfig({
   model: "zai-coding-plan/glm-5.3-flash",
   permissions: "unattended",
   effort: "high",
-  contextFile: "CONTEXT.md",
+  contextFile: "GLOSSARY.md",
 });
