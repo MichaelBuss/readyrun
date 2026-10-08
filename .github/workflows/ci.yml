@@ -21,6 +21,7 @@ jobs:
       - run: npx jsr publish --dry-run
 
   release-guidance:
+    if: github.event.pull_request.user.login != 'github-actions[bot]'
     runs-on: ubuntu-latest
     permissions:
       contents: read
