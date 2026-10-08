@@ -1,3 +1,34 @@
+/**
+ * ReadyRun walks a Tracker's Frontier and runs one coding Worker per Ticket.
+ *
+ * A Consumer repo depends on this package and writes `readyrun.config.ts`,
+ * default-exporting {@link defineConfig}, picking one Tracker Adapter —
+ * {@link github} or {@link linear} — and one Worker Adapter — {@link cursor},
+ * {@link claude}, {@link opencode}, or {@link custom}. The `readyrun`
+ * commands (`init`, `run`, `doctor`, and the bare Launcher) live at the
+ * `./cli` entrypoint. Vocabulary is CONTEXT.md's: Ticket, Frontier, Tracker
+ * Adapter, Worker Adapter, Run, Root.
+ *
+ * @example
+ * ```ts
+ * // readyrun.config.ts
+ * import { defineConfig, github, claude } from "@readyrun/readyrun";
+ *
+ * export default defineConfig({
+ *   tracker: github({
+ *     repo: "owner/name",
+ *     ready: "unblocked",
+ *     labels: ["ready-for-agent"],
+ *   }),
+ *   worker: claude(),
+ *   model: "sonnet",
+ *   permissions: "unattended",
+ * });
+ * ```
+ *
+ * @module
+ */
+
 export { defineConfig } from "./config.ts";
 export type { ReadyRunConfig } from "./config.ts";
 export { doctor } from "./doctor.ts";

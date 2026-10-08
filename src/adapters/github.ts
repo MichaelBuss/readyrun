@@ -20,12 +20,24 @@ const knownGitHubKeys = new Set([
   "account",
 ]);
 
+/**
+ * The GitHub Tracker Adapter's options: the repository, the Frontier
+ * selector, and the optional Root. The selector is `ready: "unblocked"`
+ * plus `labels`; the Root is a `parent` — whose children become the
+ * Frontier — or an explicit `ids` list, never both.
+ */
 export type GitHubTrackerOptions = {
+  /** The repository, `owner/name`; must be the checkout's git remote. */
   repo: string;
+  /** The readiness half of the Frontier selector; `"unblocked"` today. */
   ready: "unblocked";
+  /** The labels the Frontier selector requires. */
   labels: string[];
+  /** The parent Ticket whose children become the Frontier. */
   parent?: string;
+  /** The explicit Ticket list; bypasses the selector, never `unblocked`. */
   ids?: string[];
+  /** The `gh` account to authenticate as, when the checkout has several. */
   account?: string;
 };
 
@@ -126,6 +138,15 @@ type TicketData = {
   } | null;
 };
 
+/**
+ * The GitHub Tracker Adapter: talks to one repository's GraphQL API, with
+ * auth from `gh` (or `runtime.token`). GitHub calls the work "issues"; this
+ * Adapter is where that word stays, mapping each onto a Ticket. Pick order
+ * is issue number ascending.
+ *
+ * @param options The repository, the Frontier selector, and the optional Root.
+ * @param runtime The seams tests inject: fetch, token, env, working directory.
+ */
 export function github(
   options: GitHubTrackerOptions,
   runtime: GitHubRuntime = {},

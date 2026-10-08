@@ -14,9 +14,11 @@ import type { FrontierRoot } from "./tracker-adapter.ts";
 import type { Effort, Permissions } from "./worker-adapter.ts";
 import type { RunOptions } from "./run.ts";
 
-// A Run cannot start without a cap (CONTEXT: there is no unlimited Run). The
-// rule lives here because the Plan resolves the cap and says where it came
-// from; `run` re-exports the class so existing import paths hold.
+/**
+ * A Run cannot start without a cap (there is no unlimited Run). The
+ * rule lives here because the Plan resolves the cap and says where it came
+ * from; `run` re-exports the class so existing import paths hold.
+ */
 export class RunCapRequiredError extends Error {
   constructor() {
     super("A Run cannot start without a cap");
@@ -51,20 +53,24 @@ export function resolveCap(
 // namespace it names into.
 export { runBranchName };
 
-// The Tickets waiting off the Frontier with what blocks each (ADR 0039) come
-// from the Tracker Adapter's waiting surface. An Adapter that does not answer
-// it refuses; the Plan renders the refusal rather than an empty answer that
-// would read as "nothing waits".
+/**
+ * The Tickets waiting off the Frontier with what blocks each (ADR 0039) come
+ * from the Tracker Adapter's waiting surface. An Adapter that does not answer
+ * it refuses; the Plan renders the refusal rather than an empty answer that
+ * would read as "nothing waits".
+ */
 export type PlanWaiting =
   | { kind: "answered"; tickets: Ticket[] }
   | { kind: "refused"; message: string };
 
-// Everything a Run resolves before its first side effect (ADR 0039): Doctor's
-// verdict, the Frontier in stable pick order, the resolved base, the Run
-// Branch it would collect onto, the resolved cap and where it came from, and
-// the Tickets waiting off the Frontier. Doctor is the single authority on
-// validity; this computation derives none of its rules. The preview skips the
-// cwd-fidelity probe (ADR 0037) — proving cwd fidelity is the Run's, at start.
+/**
+ * Everything a Run resolves before its first side effect (ADR 0039): Doctor's
+ * verdict, the Frontier in stable pick order, the resolved base, the Run
+ * Branch it would collect onto, the resolved cap and where it came from, and
+ * the Tickets waiting off the Frontier. Doctor is the single authority on
+ * validity; this computation derives none of its rules. The preview skips the
+ * cwd-fidelity probe (ADR 0037) — proving cwd fidelity is the Run's, at start.
+ */
 export type Plan = {
   doctorFailures: string[];
   frontier: Ticket[];
@@ -77,6 +83,11 @@ export type Plan = {
   command: string;
 };
 
+/**
+ * Resolve the Plan: Doctor's verdict, the Frontier, the waiting Tickets, the
+ * base, the Run Branch, the cap and its source, and the equivalent command.
+ * Read-only end to end — it creates nothing and spawns no Worker.
+ */
 export async function computePlan(options: RunOptions): Promise<Plan> {
   const config = defineConfig(options.config);
   const { cap, source } = resolveCap(options, config);
@@ -166,14 +177,15 @@ function waitingLine(ticket: Ticket): string {
   return `  ${ticket.id} waits on ${blockers}`;
 }
 
-// The Plan's rendering (ADR 0039), read-only end to end, under whatever
-// header the surface names. The always-on rendering — Run-start and Doctor
-// disclosure — says the same words about the base; this adds the Frontier in
-// pick order, the cap and its source, the waiting Tickets, and closes with
-// the exact equivalent command, so the flag surface is learned by reading
-// rather than by failing a Run. `run --preview` renders it under the
-// preview's header; the Launcher renders the same Plan under its own before
-// the Run it confirmed starts.
+/**
+ * Render the Plan read-only, under whatever header the surface names. The
+ * always-on rendering — Run-start and Doctor disclosure — says the same words
+ * about the base; this adds the Frontier in pick order, the cap and its
+ * source, the waiting Tickets, and closes with the exact equivalent command,
+ * so the flag surface is learned by reading rather than by failing a Run.
+ * `run --preview` renders it under the preview's header; the Launcher renders
+ * the same Plan under its own before the Run it confirmed starts.
+ */
 export async function renderPlan(
   stdout: { write(chunk: string): unknown },
   plan: Plan,
@@ -220,10 +232,14 @@ export async function renderPlan(
   stdout.write(`Run with: ${plan.command}\n`);
 }
 
-// `run --preview`: the Plan rendered and nothing else — it exits before any
-// mutation and spawns no Worker. A Doctor verdict with failures still renders
-// the whole Plan (the prose names the fix and the Plan carries the command,
-// ADR 0039); the exit code says the Run it previews would be refused.
+/**
+ * `run --preview`: the Plan rendered and nothing else — it exits before any
+ * mutation and spawns no Worker. A Doctor verdict with failures still renders
+ * the whole Plan (the prose names the fix and the Plan carries the command,
+ * ADR 0039); the exit code says the Run it previews would be refused.
+ *
+ * @returns 0 when the previewed Run would start, 1 when Doctor would refuse it.
+ */
 export async function preview(options: RunOptions): Promise<number> {
   const stdout = options.stdout ?? process.stdout;
   const cwd = options.cwd ?? process.cwd();

@@ -9,6 +9,7 @@ const configNames = [
   "readyrun.config.mjs",
 ] as const;
 
+/** No config file at the Consumer root, under any accepted name. */
 export class ConfigNotFoundError extends Error {
   constructor() {
     super(
@@ -18,6 +19,7 @@ export class ConfigNotFoundError extends Error {
   }
 }
 
+/** More than one accepted config name at the Consumer root. */
 export class AmbiguousConfigError extends Error {
   constructor(names: readonly string[]) {
     super(
@@ -27,6 +29,7 @@ export class AmbiguousConfigError extends Error {
   }
 }
 
+/** The config file exists but does not default-export `defineConfig(...)`. */
 export class ConfigExportError extends Error {
   constructor(name: string) {
     super(
@@ -36,6 +39,7 @@ export class ConfigExportError extends Error {
   }
 }
 
+/** The one-line message for a config-load failure, whatever threw. */
 export function configLoadFailure(error: unknown): string {
   if (
     error instanceof ConfigNotFoundError ||
@@ -48,6 +52,12 @@ export function configLoadFailure(error: unknown): string {
   return `Could not load the ReadyRun config. Fix the config file. ${detail}`;
 }
 
+/**
+ * Load the Consumer's `readyrun.config.ts` (or `.js`/`.mjs`) from its
+ * default export. Refuses when no file is there, when more than one
+ * accepted name is, and when the file does not default-export
+ * `defineConfig(...)`.
+ */
 export async function loadConfig(cwd: string): Promise<ReadyRunConfig> {
   const found = configNames.filter((name) => existsSync(join(cwd, name)));
   if (found.length === 0) {

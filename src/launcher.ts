@@ -33,32 +33,42 @@ import {
 } from "./tracker-adapter.ts";
 import { effortLabel, type Effort, type Permissions } from "./worker-adapter.ts";
 
-// The Launcher's only terminal surface. The flow below talks to this shape,
-// so the whole assembly is testable with scripted answers; the default
-// implementation forwards to Clack, the dependency Init already uses
-// (ADR 0040).
+/**
+ * The Launcher's only terminal surface. The flow below talks to this shape,
+ * so the whole assembly is testable with scripted answers; the default
+ * implementation forwards to Clack, the dependency Init already uses
+ * (ADR 0040).
+ */
 export type LauncherIO = {
+  /** The opening banner. */
   intro(message: string): void;
+  /** The closing line after a finished flow. */
   outro(message: string): void;
+  /** The line a cancelled flow ends on. */
   cancel(message: string): void;
+  /** One free-text answer. A returned symbol is a cancelled prompt. */
   text(options: {
     message: string;
     initialValue?: string;
     validate?(value: string | undefined): string | undefined;
   }): Promise<string | symbol>;
+  /** One choice among options. A returned symbol is a cancelled prompt. */
   select<T extends string>(options: {
     message: string;
     options: Array<{ value: T; label: string; hint?: string }>;
     initialValue?: T;
   }): Promise<T | symbol>;
+  /** One yes/no. A returned symbol is a cancelled prompt. */
   confirm(options: {
     message: string;
     initialValue?: boolean;
   }): Promise<boolean | symbol>;
-  // The tree question's multi-select across one rendering (ADR 0041): the
-  // groups carry the tree — a parent per group, the parent node itself never
-  // selectable — and the answer is the picked Ticket ids in the order the
-  // rendering listed them.
+  /**
+   * The tree question's multi-select across one rendering (ADR 0041): the
+   * groups carry the tree — a parent per group, the parent node itself never
+   * selectable — and the answer is the picked Ticket ids in the order the
+   * rendering listed them.
+   */
   multiSelect(options: {
     message: string;
     groups: TreeGroup[];
@@ -257,12 +267,19 @@ const keptDefault = Symbol("kept-default");
 
 type Collected<T> = { value: T } | typeof keptDefault;
 
+/** What the Launcher takes; everything but `cwd` defaults to the real thing. */
 export type LauncherOptions = {
+  /** The Consumer root. Defaults to the process's working directory. */
   cwd?: string;
+  /** Where non-prompt lines are written. Defaults to process stdout. */
   stdout?: { write(chunk: string): unknown };
+  /** Loads the Consumer's config. Defaults to the real loader. */
   loadConfig?: (cwd: string) => Promise<ReadyRunConfig>;
+  /** The Run the confirm starts. Defaults to the real Run. */
   run?: (options: RunOptions) => Promise<number>;
+  /** The Init a missing config offers. Defaults to the real Init. */
   init?: (options: InitOptions) => Promise<number>;
+  /** The prompts. Defaults to Clack. */
   io?: LauncherIO;
 };
 
@@ -274,6 +291,18 @@ function caughtMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * The Clack surface bare `readyrun` opens on a TTY. It assembles a Run:
+ * the tree question (or the root prompts when the Tracker Adapter refuses
+ * the tree), the cap, Permissions, model, Effort, and the base — offering
+ * Init first when no config exists, then asking whether a Run is wanted at
+ * all, a decline ending a success (ADR 0043). It renders the Plan, and on
+ * confirm hands the terminal to the Run's own renderer. Everything it
+ * collects is flag-expressible; it never re-derives Doctor's rules; it is
+ * never a prompt inside a Run.
+ *
+ * @returns 0 when a confirmed Run finished clean or a decline ended the flow, 1 otherwise.
+ */
 export async function launcher(options: LauncherOptions = {}): Promise<number> {
   const io = options.io ?? clackLauncherIO;
   const stdout = options.stdout ?? process.stdout;

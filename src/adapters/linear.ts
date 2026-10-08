@@ -16,12 +16,23 @@ const knownLinearKeys = new Set([
   "ids",
 ]);
 
+/**
+ * The Linear Tracker Adapter's options: the Frontier selector — exactly one
+ * of `state`, `label`, or `project`, always plus `ready: "unblocked"` — and
+ * the optional Root, a `parent` or an explicit `ids` list, never both.
+ */
 export type LinearTrackerOptions = {
+  /** The readiness half of the Frontier selector; `"unblocked"` today. */
   ready: "unblocked";
+  /** The Linear state the Frontier selector requires. */
   state?: string;
+  /** The Linear label the Frontier selector requires. */
   label?: string;
+  /** The Linear project the Frontier selector requires. */
   project?: string;
+  /** The parent Ticket whose children become the Frontier. */
   parent?: string;
+  /** The explicit Ticket list; bypasses the selector, never `unblocked`. */
   ids?: string[];
 };
 
@@ -169,6 +180,16 @@ type IssueStatesData = {
   } | null;
 };
 
+/**
+ * The Linear Tracker Adapter: talks to Linear's GraphQL API, with auth from
+ * `LINEAR_API_KEY` (or `runtime.token`). Linear calls the work "issues";
+ * this Adapter is where that word stays, mapping each onto a Ticket, and
+ * its default `leaveFrontier` moves a finished Ticket to In Review, not
+ * Done.
+ *
+ * @param options The Frontier selector and the optional Root.
+ * @param runtime The seams tests inject: fetch, token, env.
+ */
 export function linear(
   options: LinearTrackerOptions,
   runtime: LinearRuntime = {},

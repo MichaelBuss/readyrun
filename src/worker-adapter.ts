@@ -3,13 +3,27 @@ import type { Ticket } from "./ticket.ts";
 
 const brand = Symbol("WorkerAdapter");
 
+/**
+ * How freely a Worker may act without asking: `"ask"` or `"unattended"`.
+ * Default `"ask"`. The print-mode Adapters (`cursor()`, `claude()`,
+ * `opencode()`) make `"ask"` a Doctor failure — pass `"unattended"`.
+ * Vendor flags (`--yolo`, `--auto`, `--dangerously-skip-permissions`) stay
+ * inside the Worker Adapter.
+ */
 export type Permissions = "ask" | "unattended";
 
+/**
+ * How hard a Worker thinks on a Ticket. The Run-level vocabulary is all
+ * five values; a Worker Adapter declares which of them it can honestly
+ * map, and Effort outside that declaration is a config lie Doctor fails.
+ */
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 
-// The transport vocabulary `--effort` speaks. The truth about which values a
-// CLI accepts lives with the Worker Adapter, which declares the values it can
-// honestly map (ADR 0042); the standard CLIs take all five, in this order.
+/**
+ * The transport vocabulary `--effort` speaks. The truth about which values a
+ * CLI accepts lives with the Worker Adapter, which declares the values it can
+ * honestly map (ADR 0042); the standard CLIs take all five, in this order.
+ */
 export const standardEffortVocabulary = [
   "low",
   "medium",
@@ -18,6 +32,7 @@ export const standardEffortVocabulary = [
   "max",
 ] as const;
 
+/** The Effort vocabulary the standard CLIs map: all five values, in order. */
 export type StandardEffortVocabulary = typeof standardEffortVocabulary;
 
 const efforts = new Set<string>(standardEffortVocabulary);
@@ -26,7 +41,7 @@ export function isEffort(value: string): value is Effort {
   return efforts.has(value);
 }
 
-// The label the Launcher and Init render for a declared Effort value.
+/** The label the Launcher and Init render for a declared Effort value. */
 export function effortLabel(value: Effort): string {
   switch (value) {
     case "low":
@@ -42,17 +57,30 @@ export function effortLabel(value: Effort): string {
   }
 }
 
+/**
+ * One spawn of a coding CLI: exactly one Ticket, in exactly one Worktree,
+ * on that Ticket's Branch. The Adapter turns this into its CLI's argv.
+ */
 export type SpawnRequest = {
+  /** The Ticket the Worker works; the only Ticket this process gets. */
   ticket: Ticket;
+  /** The absolute path of the Ticket's Worktree. */
   cwd: string;
+  /** The model for this spawn, already resolved. */
   model: string;
+  /** How freely the Worker may act without asking. */
   permissions: Permissions;
+  /** The Effort for this spawn, when one is in play. */
   effort?: Effort;
+  /** The full prompt: loop rules, the Tracker Adapter's copy, the Worktree and Branch. */
   prompt: string;
-  // Set only by Doctor's cwd-fidelity probe (ADR 0037): the Adapter must pipe
-  // the Worker's output back instead of inheriting the terminal, and kill it
-  // after timeoutMs. A Run's spawns set neither.
+  /**
+   * Set only by Doctor's cwd-fidelity probe (ADR 0037): the Adapter must pipe
+   * the Worker's output back instead of inheriting the terminal, and kill it
+   * after timeoutMs. A Run's spawns set neither.
+   */
   capture?: true;
+  /** The kill timeout for a capture spawn; Doctor's probe only. */
   timeoutMs?: number;
 };
 
@@ -69,18 +97,32 @@ export type ProbeResult = { ok: true } | { ok: false; detail: string };
 
 export type StaticArgv = { option: string; args: string[] };
 
-// The Effort vocabulary an Adapter declares is part of its public shape
-// (ADR 0042): the values it can honestly map, typed so a Consumer config's
-// `effort` field is checked against exactly this declaration. Absent or empty
-// means the Adapter maps no Effort.
+/**
+ * The coding-CLI-specific way to spawn a Worker: one Ticket, one Branch, one
+ * Worktree per process. The shipped factories (`cursor()`, `claude()`,
+ * `opencode()`, `custom()`) build one; a Consumer building its own uses
+ * {@link createWorkerAdapter}.
+ *
+ * The Effort vocabulary an Adapter declares is part of its public shape
+ * (ADR 0042): the values it can honestly map, typed so a Consumer config's
+ * `effort` field is checked against exactly this declaration. Absent or empty
+ * means the Adapter maps no Effort.
+ */
 export type WorkerAdapter<Vocabulary extends readonly Effort[] = readonly Effort[]> = {
   readonly [brand]: true;
+  /** The CLI binary the Adapter spawns; unset for a purely bespoke spawn. */
   readonly bin?: string;
+  /** The flag that passes Effort; required whenever a vocabulary is declared. */
   readonly effortFlag?: string;
+  /** The Effort values the Adapter can honestly map; empty maps none. */
   readonly effortVocabulary?: Vocabulary;
+  /** True when the Adapter spawns print mode, where `"ask"` cannot reach the Consumer. */
   readonly printMode?: true;
+  /** The cheap health check Doctor runs (binary present, logged in). */
   readonly probe?: () => Promise<ProbeResult>;
+  /** Extra argv the Adapter always passes, named by its option for Doctor's messages. */
   readonly staticArgv?: StaticArgv;
+  /** Spawn one Worker for one Ticket. */
   spawn(request: SpawnRequest): Promise<SpawnResult>;
 };
 
