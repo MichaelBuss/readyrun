@@ -9,7 +9,7 @@
     "url": "git+https://github.com/MichaelBuss/readyrun.git"
   },
   "bin": {
-    "readyrun": "./src/cli.ts"
+    "readyrun": "src/cli.ts"
   },
   "exports": {
     ".": "./src/mod.ts",
