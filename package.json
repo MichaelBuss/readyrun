@@ -4,6 +4,10 @@
   "description": "Walk a tracker Frontier and run one coding Worker per Ticket.",
   "license": "MIT",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MichaelBuss/readyrun.git"
+  },
   "bin": {
     "readyrun": "./src/cli.ts"
   },
