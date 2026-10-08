@@ -21,7 +21,8 @@
     "typecheck": "tsc --noEmit",
     "readyrun": "node src/cli.ts",
     "changeset": "changeset",
-    "version": "changeset version && node scripts/sync-version.ts"
+    "version": "changeset version && node scripts/sync-version.ts",
+    "release": "node scripts/release.ts"
   },
   "engines": {
     "node": ">=24"
