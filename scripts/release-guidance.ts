@@ -88,12 +88,11 @@ export function parseChangeset(content: string): ChangesetEntry[] {
 }
 
 export function closesIssue(body: string): boolean {
-  return /\b(closes?|fixes?|resolves?)\s*:?\s+#\d+/i.test(body);
+  return /\b(closes?|closed|fixes?|fixed|resolves?|resolved)\s*:?\s+#\d+/i.test(body);
 }
 
 export type Guidance = {
   headline: string;
-  detail: string;
   markdown: string;
 };
 
@@ -128,7 +127,7 @@ export function guidance(input: {
   } else {
     lines.push("");
     lines.push(
-      "**No changeset yet — none of these changes will ship when this merges.** Add one with `npm run changeset`: pick `patch` for fixes (the usual default), `minor` for new features, `major` for breaking changes, and write a note worth reading in a changelog.",
+      "**No changeset yet — none of these changes will ship when this merges.** Add one with `npm run changeset`, and write a note worth reading in a changelog. Assumed bump for a fix-shaped PR is **patch**; set it explicitly: `patch` for fixes, `minor` for new features, `major` for breaking changes.",
     );
   }
 
@@ -151,7 +150,6 @@ export function guidance(input: {
         : "Published files change without a changeset";
   return {
     headline,
-    detail: headline,
     markdown,
   };
 }
@@ -192,7 +190,7 @@ async function writeGithubOutput(result: Guidance): Promise<void> {
   const block = [
     `headline=${result.headline}`,
     "detail<<EOF",
-    result.detail,
+    result.headline,
     "EOF",
     "markdown<<EOF",
     result.markdown,

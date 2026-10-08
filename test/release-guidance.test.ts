@@ -73,6 +73,8 @@ test("closesIssue detects the closing keywords, not mere references", () => {
   assert.equal(closesIssue("Closes #54"), true);
   assert.equal(closesIssue("fixes #12"), true);
   assert.equal(closesIssue("resolves: #7"), true);
+  assert.equal(closesIssue("Closed #3 in that PR"), true);
+  assert.equal(closesIssue("Fixed #9"), true);
   assert.equal(closesIssue("refs #12"), false);
   assert.equal(closesIssue(""), false);
 });
@@ -114,7 +116,7 @@ test("a PR with published changes and no changeset is told what will not ship an
   });
   assert.match(markdown, /No changeset/);
   assert.match(markdown, /npm run changeset/);
-  assert.match(markdown, /patch/);
+  assert.match(markdown, /Assumed bump.*\*\*patch\*\*/);
 });
 
 test("a PR with no published changes needs no changeset and says so", () => {

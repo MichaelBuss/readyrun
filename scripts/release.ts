@@ -42,9 +42,13 @@ export function planRelease(input: {
 }
 
 export function isNpmSetupError(stderr: string): boolean {
-  return /E404|E403|E409|ENEEDAUTH|402 Payment Required|403 Forbidden|404 Not Found|not have permission/.test(
+  return /E404|E403|ENEEDAUTH|402 Payment Required|403 Forbidden|404 Not Found|not have permission/.test(
     stderr,
   );
+}
+
+export function isNpmAlreadyPublished(stderr: string): boolean {
+  return /E409|cannot publish over|previously published/i.test(stderr);
 }
 
 export function npmSetupInstructions(name: string, version: string): string {
@@ -78,35 +82,50 @@ function isCliEntry(): boolean {
   }
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function npmVersions(name: string): Promise<string[] | undefined> {
-  const result = sh("npm", ["view", name, "versions", "--json"]);
-  if (result.status !== 0) {
-    if (isNpmSetupError(result.stderr)) {
-      return [];
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) {
+      await sleep(attempt * 2000);
     }
-    return undefined;
+    const result = sh("npm", ["view", name, "versions", "--json"]);
+    if (result.status !== 0) {
+      if (isNpmSetupError(result.stderr)) {
+        return [];
+      }
+      continue;
+    }
+    try {
+      const parsed = JSON.parse(result.stdout) as string[] | string;
+      return Array.isArray(parsed) ? parsed : [parsed];
+    } catch {
+      continue;
+    }
   }
-  try {
-    const parsed = JSON.parse(result.stdout) as string[] | string;
-    return Array.isArray(parsed) ? parsed : [parsed];
-  } catch {
-    return undefined;
-  }
+  return undefined;
 }
 
 async function jsrVersions(name: string): Promise<string[] | undefined> {
-  try {
-    const response = await fetch(`https://jsr.io/${name}/meta.json`);
-    if (response.status === 404) {
-      return [];
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) {
+      await sleep(attempt * 2000);
     }
-    if (!response.ok) {
-      return undefined;
+    try {
+      const response = await fetch(`https://jsr.io/${name}/meta.json`);
+      if (response.status === 404) {
+        return [];
+      }
+      if (response.ok) {
+        return publishedVersions((await response.json()) as JsrMeta);
+      }
+    } catch {
+      continue;
     }
-    return publishedVersions((await response.json()) as JsrMeta);
-  } catch {
-    return undefined;
   }
+  return undefined;
 }
 
 async function appendSummary(text: string): Promise<void> {
@@ -116,6 +135,8 @@ async function appendSummary(text: string): Promise<void> {
   }
   await appendFile(path, text);
 }
+
+const SETUP_COMMENT_MARKER = "<!-- readyrun-npm-setup -->";
 
 async function commentOnMergedPr(instructions: string): Promise<void> {
   const repo = process.env.GITHUB_REPOSITORY;
@@ -128,16 +149,30 @@ async function commentOnMergedPr(instructions: string): Promise<void> {
   if (pr.status !== 0 || number === "") {
     return;
   }
-  sh("gh", ["pr", "comment", number, "--repo", repo, "--body", instructions]);
+  const body = `${SETUP_COMMENT_MARKER}\n\n${instructions}`;
+  const existing = sh("gh", [
+    "api",
+    "--paginate",
+    `repos/${repo}/issues/${number}/comments`,
+    "--jq",
+    `[.[] | select(.body | contains("${SETUP_COMMENT_MARKER}"))][0].id`,
+  ]);
+  const id = existing.stdout.trim();
+  if (existing.status === 0 && id !== "" && id !== "null") {
+    sh("gh", ["api", "--method", "PATCH", `repos/${repo}/issues/comments/${id}`, "-F", `body=${body}`]);
+    return;
+  }
+  sh("gh", ["pr", "comment", number, "--repo", repo, "--body", body]);
 }
 
 function ensureTag(version: string): boolean {
   const tag = `v${version}`;
-  if (sh("git", ["rev-parse", "-q", "--verify", `refs/tags/${tag}`]).status === 0) {
-    return true;
-  }
-  if (sh("git", ["tag", tag]).status !== 0) {
-    return false;
+  // Push unconditionally: a prior run may have tagged locally without
+  // pushing, and pushing an existing tag is a harmless no-op.
+  if (sh("git", ["rev-parse", "-q", "--verify", `refs/tags/${tag}`]).status !== 0) {
+    if (sh("git", ["tag", tag]).status !== 0) {
+      return false;
+    }
   }
   return sh("git", ["push", "origin", tag]).status === 0;
 }
@@ -161,8 +196,7 @@ async function ensureGithubRelease(version: string): Promise<boolean> {
   return sh("gh", ["release", "create", tag]).status === 0;
 }
 
-export async function releaseCli(argv: readonly string[]): Promise<number> {
-  void argv;
+export async function releaseCli(): Promise<number> {
   const root = join(dirname(fileURLToPath(import.meta.url)), "..");
   const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8")) as {
     name: string;
@@ -190,18 +224,26 @@ export async function releaseCli(argv: readonly string[]): Promise<number> {
     return tagged && released ? 0 : 1;
   }
 
+  // The registries ship independently: a failure at one does not block the
+  // other, and every failure is reported before the run goes red.
+  const failures: string[] = [];
+
   if (plan.npm) {
     process.stdout.write(`Publishing ${name}@${version} to npm with provenance.\n`);
     const publish = sh("npm", ["publish", "--provenance", "--access", "public"]);
-    if (publish.status !== 0) {
+    if (publish.status !== 0 && isNpmAlreadyPublished(publish.stderr)) {
+      process.stdout.write(
+        `npm already has ${name}@${version} (a prior run got there first); skipping.\n`,
+      );
+    } else if (publish.status !== 0) {
       process.stderr.write(publish.stderr);
+      failures.push(`npm publish failed`);
       if (isNpmSetupError(publish.stderr)) {
         const instructions = npmSetupInstructions(name, version);
         process.stdout.write(`\n${instructions}\n`);
         await appendSummary(`## npm publish needs human setup\n\n${instructions}\n`);
         await commentOnMergedPr(instructions);
       }
-      return 1;
     }
   }
 
@@ -210,8 +252,13 @@ export async function releaseCli(argv: readonly string[]): Promise<number> {
     const publish = sh("npx", ["jsr", "publish"]);
     if (publish.status !== 0) {
       process.stderr.write(publish.stderr);
-      return 1;
+      failures.push(`JSR publish failed`);
     }
+  }
+
+  if (failures.length > 0) {
+    process.stderr.write(`${failures.join("; ")}; ${name}@${version} is not fully released.\n`);
+    return 1;
   }
 
   const tagged = ensureTag(version);
@@ -229,5 +276,5 @@ export async function releaseCli(argv: readonly string[]): Promise<number> {
 }
 
 if (isCliEntry()) {
-  process.exitCode = await releaseCli(process.argv.slice(2));
+  process.exitCode = await releaseCli();
 }
