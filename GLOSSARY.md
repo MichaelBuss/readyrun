@@ -95,7 +95,7 @@ _Avoid_: max mode (Cursor's interactive slash command), ultracode (a Claude Code
 - One **Consumer** config selects one **Tracker**. A repo is not GitHub-and-Linear at once.
 - A **Tracker Adapter** talks to exactly one kind of **Tracker**. GitHub and Linear are both v0 **Tracker Adapters**.
 - A **Worker Adapter** talks to exactly one kind of coding CLI. v0 ships `cursor`, `claude`, `opencode`, and `custom` (`bin` + args). Codex is later.
-- The package is published (JSR) and depended on. It does not live inside a **Consumer**.
+- The package is published (JSR and npm, always the same version) and depended on. It does not live inside a **Consumer**.
 - If the chosen **Tracker** cannot be reached, the loop does not invent another **Tracker**. A local **Tracker Adapter** is a future option a **Consumer** would select on purpose.
 - One **Ticket** is one **Worker**. The loop never gives two **Tickets** to one process.
 - A parent id or a label query names a **Frontier**. It is not a **Ticket**.
