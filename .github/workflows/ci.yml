@@ -20,7 +20,7 @@ jobs:
       - run: npm test
       - run: npx jsr publish --dry-run
 
-  publish-preview:
+  release-guidance:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -32,38 +32,27 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
-      - id: preview
+      - id: guidance
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           set -euo pipefail
           git diff --name-only "$BASE_SHA" HEAD > /tmp/changed.txt
-          if ! curl -fsSL https://jsr.io/@readyrun/readyrun/meta.json -o /tmp/jsr-meta.json; then
-            {
-              echo "detail<<EOF"
-              echo "Could not fetch jsr.io metadata; skipping publish preview."
-              echo "EOF"
-              echo "markdown<<EOF"
-              echo "Could not fetch jsr.io metadata; skipping publish preview."
-              echo "EOF"
-            } >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          node scripts/publish-preview.ts \
+          node scripts/release-guidance.ts \
             --jsr jsr.json \
-            --meta /tmp/jsr-meta.json \
             --changed-files /tmp/changed.txt
-      - name: Post publish preview as an informational PR comment
+      - name: Post release guidance as an informational PR comment
         env:
-          DETAIL: ${{ steps.preview.outputs.detail }}
-          MARKDOWN: ${{ steps.preview.outputs.markdown }}
+          DETAIL: ${{ steps.guidance.outputs.detail }}
+          MARKDOWN: ${{ steps.guidance.outputs.markdown }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           printf '%s\n' "$DETAIL" | tee -a "$GITHUB_STEP_SUMMARY"
-          MARKER="<!-- readyrun-publish-preview -->"
+          MARKER="<!-- readyrun-release-guidance -->"
           {
             printf '%s\n\n' "$MARKER"
             printf '%s\n' "$MARKDOWN"

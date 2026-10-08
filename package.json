@@ -4,8 +4,12 @@
   "description": "Walk a tracker Frontier and run one coding Worker per Ticket.",
   "license": "MIT",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MichaelBuss/readyrun.git"
+  },
   "bin": {
-    "readyrun": "./src/cli.ts"
+    "readyrun": "src/cli.ts"
   },
   "exports": {
     ".": "./src/mod.ts",
@@ -20,12 +24,16 @@
     "test": "node --test test/**/*.test.ts",
     "typecheck": "tsc --noEmit",
     "readyrun": "node src/cli.ts",
-    "bump": "node scripts/bump.ts"
+    "changeset": "changeset",
+    "version": "changeset version && node scripts/sync-version.ts",
+    "release": "node scripts/release.ts"
   },
   "engines": {
     "node": ">=24"
   },
   "devDependencies": {
+    "@changesets/changelog-github": "^1.0.1",
+    "@changesets/cli": "^3.0.3",
     "@types/node": "^24.3.0",
     "typescript": "^5.9.2"
   },

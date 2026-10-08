@@ -6,12 +6,13 @@ This repo is the product. It is not SpeechDeck. SpeechDeck (and later Trackunit)
 
 Spec: [`docs/specs/readyrun-v0.md`](./docs/specs/readyrun-v0.md). Language: [`GLOSSARY.md`](./GLOSSARY.md). Decisions: [`docs/adr/`](./docs/adr/).
 
-Package: `@readyrun/readyrun` on [JSR](https://jsr.io/@readyrun/readyrun), not npmjs.com. A **Consumer** installs with npm/pnpm/yarn through JSR’s compatibility layer, then writes `readyrun.config.ts`.
+Package: `@readyrun/readyrun` on [npm](https://www.npmjs.com/package/@readyrun/readyrun) and [JSR](https://jsr.io/@readyrun/readyrun), always at the same version. A **Consumer** installs it, then writes `readyrun.config.ts`. Requires Node ≥ 24.
 
 ```sh
-pnpm add jsr:@readyrun/readyrun
-# npm:
-npx jsr add @readyrun/readyrun
+npm install @readyrun/readyrun
+# pnpm / yarn:
+pnpm add @readyrun/readyrun
+yarn add @readyrun/readyrun
 ```
 
 ```ts
@@ -142,7 +143,16 @@ Cwd-fidelity probe: not run; the Run proves it at start
 Run with: readyrun run --max 3
 ```
 
-JSR does not put `readyrun` on PATH. Run the `cli` export as a program (Deno):
+An npm install puts `readyrun` on PATH (Node's type stripping runs the CLI directly):
+
+```sh
+npx readyrun init
+npx readyrun init --answers answers.json
+npx readyrun doctor
+npx readyrun run --max 5
+```
+
+Installed through JSR instead? JSR's npm-compat tarball strips `bin`, so `readyrun` is not on PATH. Run the `cli` export as a program (Deno):
 
 ```sh
 deno run -A jsr:@readyrun/readyrun/cli init
@@ -151,7 +161,7 @@ deno run -A jsr:@readyrun/readyrun/cli doctor
 deno run -A jsr:@readyrun/readyrun/cli run --max 5
 ```
 
-pnpm/npm/yarn: JSR's npm-compat tarball strips `bin`, so `pnpm exec readyrun` and `npx readyrun` fail with no hint at the fix. Import the `cli` export from a two-line wrapper script instead, and call that from a `package.json` script:
+Or with pnpm/npm/yarn against a JSR install, import the `cli` export from a two-line wrapper script and call that from a `package.json` script:
 
 ```js
 // readyrun-cli.mjs
