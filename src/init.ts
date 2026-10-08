@@ -667,7 +667,7 @@ async function collectEffort(
   return picked;
 }
 
-const consumerContextFile = "CONTEXT.md";
+const consumerContextFile = "GLOSSARY.md";
 
 // Not a prompt: the file is either already at the Consumer root or it is not,
 // the same shape as Init's .gitignore step (ADR 0026).
@@ -681,7 +681,7 @@ function contextFileAtRoot(cwd: string): string | undefined {
  * `--answers <file>` or {@link InitOptions.answers} so CI or a
  * template-repo setup script can drive it without a TTY. The stub is one a
    * Run can use as-is: Permissions `"unattended"`, and `contextFile` pointed
-   * at `CONTEXT.md` when the Consumer root already holds one. It does not
+   * at `GLOSSARY.md` when the Consumer root already holds one. It does not
  * assemble `run`.
  *
  * @returns 0 when the stub is written, 1 on a cancelled prompt.

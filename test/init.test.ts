@@ -54,7 +54,7 @@ export default defineConfig({
   worker: cursor(),
   model: "composer-2",
   permissions: "unattended",
-  contextFile: "CONTEXT.md",
+  contextFile: "GLOSSARY.md",
 });
 `;
 
@@ -235,9 +235,9 @@ test("init writes a Linear state Frontier selector into the stub", async () => {
   await assertWrittenStub(linearStateAnswers, linearStateStub);
 });
 
-test("init points contextFile at a CONTEXT.md already at the Consumer root", async () => {
+test("init points contextFile at a GLOSSARY.md already at the Consumer root", async () => {
   await withConsumerRoot(async (cwd) => {
-    await writeFile(join(cwd, "CONTEXT.md"), "# Language\n");
+    await writeFile(join(cwd, "GLOSSARY.md"), "# Language\n");
     const exitCode = await init({ cwd, answers: githubCursorAnswers });
     assert.equal(exitCode, 0);
     assert.equal(
@@ -248,7 +248,7 @@ test("init points contextFile at a CONTEXT.md already at the Consumer root", asy
   });
 });
 
-test("init omits contextFile when the Consumer root has no CONTEXT.md", async () => {
+test("init omits contextFile when the Consumer root has no GLOSSARY.md", async () => {
   await assertWrittenStub(githubCursorAnswers, githubCursorStub);
 });
 

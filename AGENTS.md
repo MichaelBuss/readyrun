@@ -10,4 +10,4 @@ Canonical roles mapped 1:1 to tracker labels (`needs-triage`, `needs-info`, `rea
 
 ### Domain docs
 
-Single-context: `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.

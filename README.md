@@ -4,7 +4,7 @@ A TypeScript CLI that walks a tracker **Frontier** and runs one coding **Worker*
 
 This repo is the product. It is not SpeechDeck. SpeechDeck (and later Trackunit) will *depend* on it.
 
-Spec: [`docs/specs/readyrun-v0.md`](./docs/specs/readyrun-v0.md). Language: [`CONTEXT.md`](./CONTEXT.md). Decisions: [`docs/adr/`](./docs/adr/).
+Spec: [`docs/specs/readyrun-v0.md`](./docs/specs/readyrun-v0.md). Language: [`GLOSSARY.md`](./GLOSSARY.md). Decisions: [`docs/adr/`](./docs/adr/).
 
 Package: `@readyrun/readyrun` on [JSR](https://jsr.io/@readyrun/readyrun), not npmjs.com. A **Consumer** installs with npm/pnpm/yarn through JSR’s compatibility layer, then writes `readyrun.config.ts`.
 
@@ -60,7 +60,7 @@ The token is reserved: any other `{...}` placeholder is a Doctor failure, and a 
 
 All three spawn print-mode (`-p` for `agent` and `claude`, `run` for `opencode`). `permissions: "ask"` (the default) is a Doctor failure — print-mode is not a chat. Pass `--permissions unattended`, or set `permissions: "unattended"` in config. `custom()` does not force print-mode, so ask remains valid there.
 
-`readyrun init` writes that line for you rather than asking, and points `contextFile` at a `CONTEXT.md` when the Consumer root already has one:
+`readyrun init` writes that line for you rather than asking, and points `contextFile` at a `GLOSSARY.md` when the Consumer root already has one:
 
 ```ts
 export default defineConfig({
@@ -72,11 +72,11 @@ export default defineConfig({
   worker: cursor(),
   model: "composer-2",
   permissions: "unattended",
-  contextFile: "CONTEXT.md",
+  contextFile: "GLOSSARY.md",
 });
 ```
 
-Without a `CONTEXT.md` the key is absent and the Worker gets tracker copy alone. `--answers` writes the same stub without a TTY.
+Without a `GLOSSARY.md` the key is absent and the Worker gets tracker copy alone. `--answers` writes the same stub without a TTY.
 
 `readyrun doctor` can tell "not installed" from "installed but not logged in": `cursor()` and `claude()` each define a cheap probe (`agent status`, `claude auth status`), and `opencode()` judges the output of `auth list` — that command exits 0 either way, so zero credentials is the not-logged-in answer. Doctor runs the probe once it has confirmed the binary exists, reporting a probe failure distinctly from a missing binary. `custom()` Worker Adapters have no probe and keep today's existence-only check.
 
