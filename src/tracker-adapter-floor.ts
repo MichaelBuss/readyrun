@@ -5,26 +5,32 @@ import {
   type TreeAnswer,
 } from "./tracker-adapter.ts";
 
-// One page of a Tracker's paged connection: the relay shape GitHub and Linear
-// both answer.
+/** One page of a Tracker's paged connection: the relay shape GitHub and Linear both answer. */
 export type TrackerPageInfo = {
   hasNextPage: boolean;
   endCursor: string | null;
 };
 
+/** One page's nodes, some of which the Tracker may answer as null. */
 export type TrackerPage<Node> = {
   pageInfo: TrackerPageInfo;
   nodes: (Node | null)[];
 };
 
-// Pick order is the Tracker Adapter's stable order (ADR 0017): the Ticket's
-// numeric identifier ascending, so naming Tickets never sequences them.
+/**
+ * Pick order is the Tracker Adapter's stable order (ADR 0017): the Ticket's
+ * numeric identifier ascending, so naming Tickets never sequences them.
+ */
 export function pickOrder(a: Ticket, b: Ticket): number {
   return a.id.localeCompare(b.id, undefined, { numeric: true });
 }
 
-// One paged read, however many pages the Tracker answers. The loop lives here
-// once, so no Tracker Adapter carries its own.
+/**
+ * One paged read, however many pages the Tracker answers. The loop lives here
+ * once, so no Tracker Adapter carries its own.
+ *
+ * @param readPage Reads one page at a cursor; the first read gets no cursor.
+ */
 export async function paginate<Node>(
   readPage: (cursor: string | null) => Promise<TrackerPage<Node>>,
 ): Promise<Node[]> {
@@ -52,6 +58,14 @@ export async function paginate<Node>(
 // call reads again.
 const blockingProbes = new WeakMap<object, Map<string, Promise<boolean>>>();
 
+/**
+ * The blocking-expression probe, read once per transport and scope per
+ * process; a failed read is not remembered, so the next call reads again.
+ *
+ * @param transport The Adapter's HTTP seam, standing in for the process.
+ * @param scope What varies within one Tracker, e.g. the repository.
+ * @param probe The Tracker-specific schema read.
+ */
 export function blockingProbeOnce(
   transport: object,
   scope: string,
@@ -76,15 +90,22 @@ export function blockingProbeOnce(
   return pending;
 }
 
-// The GraphQL transport, with one error shape: an auth failure, an unreachable
-// Tracker, or the vendor's own message — nothing else leaks. The Tracker-
-// specific errors are injected, so every Adapter surfaces the same three cases
-// under its own names.
+/**
+ * The GraphQL transport, with one error shape: an auth failure, an unreachable
+ * Tracker, or the vendor's own message — nothing else leaks. The Tracker-
+ * specific errors are injected, so every Adapter surfaces the same three cases
+ * under its own names.
+ */
 export type GraphqlErrors = {
   auth: () => Error;
   unreachable: (detail: string) => Error;
 };
 
+/**
+ * One GraphQL read: POST, then one of the three error cases or the data.
+ * A vendor message in the `errors` array surfaces as the vendor's own words
+ * in a plain `Error`, for the Adapter to shape.
+ */
 export async function graphqlRead<T>(call: {
   http: typeof fetch;
   endpoint: string;
@@ -126,9 +147,11 @@ export async function graphqlRead<T>(call: {
   return payload.data;
 }
 
-// What the floor asks of the Tracker Adapter standing on it: the blocking
-// refusal, one page of the open candidates read, and the lie refusal for a
-// named root Ticket that is closed or missing (ADR 0038).
+/**
+ * What the floor asks of the Tracker Adapter standing on it: the blocking
+ * refusal, one page of the open candidates read, and the lie refusal for a
+ * named root Ticket that is closed or missing (ADR 0038).
+ */
 export type RootedReadPorts = {
   refuseWhenBlockingUnexpressable(): Promise<void>;
   readCandidatesPage(
@@ -138,8 +161,10 @@ export type RootedReadPorts = {
   refuseLie(id: string): Promise<void>;
 };
 
-// The Consumer selector the Adapter's options name (ADR 0016): labels plus the
-// optional config-level root a root named on the call replaces.
+/**
+ * The Consumer selector the Adapter's options name (ADR 0016): labels plus the
+ * optional config-level root a root named on the call replaces.
+ */
 export type RootedReadSelector = {
   labels: readonly string[];
   parent?: string;
@@ -179,12 +204,17 @@ function refuseDuplicateNames(ids: readonly string[]): void {
   }
 }
 
-// The one rooted candidates read (ADR 0038). The root named on the call wins
-// over the selector's own; a list bypasses the selector but never
-// `ready: "unblocked"`, and a parent narrows the selector and is never worked
-// itself. One scan answers every shape, lies refused, and the candidates split
-// into the two halves `frontier` and `waiting` are — which `tree` returns
-// together (ADR 0039) — each half in pick order.
+/**
+ * The one rooted candidates read (ADR 0038). The root named on the call wins
+ * over the selector's own; a list bypasses the selector but never
+ * `ready: "unblocked"`, and a parent narrows the selector and is never worked
+ * itself. One scan answers every shape, lies refused, and the candidates split
+ * into the two halves `frontier` and `waiting` are — which `tree` returns
+ * together (ADR 0039) — each half in pick order.
+ *
+ * @param ports The Adapter's refusals and one page of its candidates read.
+ * @param selector The Adapter's own Frontier selector.
+ */
 export function rootedRead(
   ports: RootedReadPorts,
   selector: RootedReadSelector,
