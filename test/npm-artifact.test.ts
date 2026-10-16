@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readdir, readFile, stat } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
+import { mkdir, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { join } from "node:path";
 import { before, test } from "node:test";
 
@@ -61,4 +61,62 @@ test("package.json entry points resolve to files the build emitted", async () =>
   for (const target of [...Object.values(pkg.bin), ...Object.values(pkg.exports)]) {
     await stat(join(root, target));
   }
+});
+
+test("the compiled bin runs on stock Node: usage without type stripping", () => {
+  const help = spawnSync(process.execPath, [join(root, "dist", "cli.js"), "--help"], {
+    encoding: "utf8",
+  });
+  assert.equal(help.status, 1, `dist/cli.js --help crashed:\n${help.stderr}`);
+  assert.ok(help.stdout.includes("Usage: readyrun <command>"));
+  assert.ok(!help.stderr.includes("ERR_UNSUPPORTED"), help.stderr);
+});
+
+test("the compiled module imports on stock Node", async () => {
+  const mod = await import(pathToFileURL(join(root, "dist", "mod.js")).href);
+  assert.equal(typeof mod.defineConfig, "function");
+  assert.equal(typeof mod.github, "function");
+  assert.equal(typeof mod.claude, "function");
+});
+
+test("a TS consumer against dist resolves types with moduleResolution bundler", async () => {
+  const consumer = join(root, "test", ".tmp", "npm-artifact-consumer");
+  await rm(consumer, { recursive: true, force: true });
+  await mkdir(join(consumer, "node_modules", "@readyrun"), { recursive: true });
+  await symlink(root, join(consumer, "node_modules", "@readyrun", "readyrun"), "dir");
+  await writeFile(
+    join(consumer, "consumer.ts"),
+    [
+      'import { defineConfig, github, claude } from "@readyrun/readyrun";',
+      "export default defineConfig({",
+      '  tracker: github({ repo: "owner/name", ready: "unblocked", labels: ["x"] }),',
+      "  worker: claude(),",
+      '  model: "sonnet",',
+      '  permissions: "unattended",',
+      "});",
+      "",
+    ].join("\n"),
+  );
+  const tsc = join(root, "node_modules", "typescript", "bin", "tsc");
+  const check = spawnSync(
+    process.execPath,
+    [
+      tsc,
+      "--noEmit",
+      "--strict",
+      "--target",
+      "es2022",
+      "--module",
+      "esnext",
+      "--moduleResolution",
+      "bundler",
+      "consumer.ts",
+    ],
+    { cwd: consumer, encoding: "utf8" },
+  );
+  assert.equal(
+    check.status,
+    0,
+    `consumer typecheck failed against shipped types:\n${check.stdout}${check.stderr}`,
+  );
 });
