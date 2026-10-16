@@ -9,18 +9,20 @@
     "url": "git+https://github.com/MichaelBuss/readyrun.git"
   },
   "bin": {
-    "readyrun": "src/cli.ts"
+    "readyrun": "dist/cli.js"
   },
   "exports": {
-    ".": "./src/mod.ts",
-    "./cli": "./src/cli.ts"
+    ".": "./dist/mod.js",
+    "./cli": "./dist/cli.js"
   },
   "files": [
-    "src",
+    "dist",
     "LICENSE",
     "README.md"
   ],
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "npm run build",
     "test": "node --test test/**/*.test.ts",
     "typecheck": "tsc --noEmit",
     "readyrun": "node src/cli.ts",
