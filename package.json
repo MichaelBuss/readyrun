@@ -1,6 +1,6 @@
 {
   "name": "@readyrun/readyrun",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Walk a tracker Frontier and run one coding Worker per Ticket.",
   "license": "MIT",
   "type": "module",
