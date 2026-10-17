@@ -131,6 +131,27 @@ test("a waiting Ticket carries its suggested Branch name off the same answer", a
   assert.equal(adapter.branchName(waiting), "feature/eng-53-ticket-53");
 });
 
+test("a Ticket held from an earlier answer keeps its suggested Branch across later reads", async () => {
+  const { adapter } = linearFromWorld({
+    tickets: [
+      ticket({ id: "52" }),
+      ticket({
+        id: "53",
+        blockedBy: ["52"],
+        suggestedBranch: "feature/eng-53-ticket-53",
+      }),
+    ],
+    ready: "unblocked",
+    labels: ["ready-for-agent"],
+  });
+  const [held] = await adapter.waiting();
+  assert.ok(held);
+  await adapter.frontier();
+  // The suggestion is the Ticket's own fact, not Adapter state a later
+  // read starts over.
+  assert.equal(adapter.branchName(held), "feature/eng-53-ticket-53");
+});
+
 test("when Linear has no suggested branch name, the Branch is a convention over the identifier", async () => {
   const { adapter } = linearFromWorld(world);
   const answer = await adapter.tree();
