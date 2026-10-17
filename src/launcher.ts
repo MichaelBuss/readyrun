@@ -31,7 +31,13 @@ import {
   type FrontierRoot,
   type TreeAnswer,
 } from "./tracker-adapter.ts";
-import { effortLabel, type Effort, type Permissions } from "./worker-adapter.ts";
+import {
+  declaredEffortVocabulary,
+  effortLabel,
+  mapsEffort,
+  type Effort,
+  type Permissions,
+} from "./worker-adapter.ts";
 
 /**
  * The Launcher's only terminal surface. The flow below talks to this shape,
@@ -416,16 +422,12 @@ export async function launcher(options: LauncherOptions = {}): Promise<number> {
     io.cancel("Launcher cancelled.");
     return 1;
   }
-  // The Adapter's declared Effort vocabulary is the truth the question may
-  // offer (ADR 0042): without both a flag to map the answer and a
-  // vocabulary declaring what exists — Cursor takes Effort as a model
-  // variant — any effort answer would fail Doctor, so the question is not
-  // asked; the same skip Init makes for cursor and custom.
-  const effortVocabulary: readonly Effort[] = resolved.worker.effortVocabulary ?? [];
-  const effort = resolved.worker.effortFlag === undefined ||
-      effortVocabulary.length === 0
-    ? keptDefault
-    : await collectEffort(io, resolved, effortVocabulary);
+  // The seam's predicate answers whether Effort may be asked (ADR 0042) —
+  // the Launcher never re-derives Doctor's flag-and-vocabulary rule — and
+  // the reader names the only values the question may offer.
+  const effort = mapsEffort(resolved.worker)
+    ? await collectEffort(io, resolved, declaredEffortVocabulary(resolved.worker))
+    : keptDefault;
   if (effort === undefined) {
     io.cancel("Launcher cancelled.");
     return 1;

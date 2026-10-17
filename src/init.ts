@@ -14,12 +14,12 @@ import {
   text,
 } from "@clack/prompts";
 import { ensureReadyrunGitignored } from "./gitignore.ts";
-import { claude } from "./adapters/claude.ts";
-import { opencode } from "./adapters/opencode.ts";
+import { opencodeEffortVocabulary } from "./adapters/opencode.ts";
 import { originRepository } from "./git.ts";
 import {
   effortLabel,
   isEffort,
+  standardEffortVocabulary,
   type Effort,
 } from "./worker-adapter.ts";
 
@@ -234,15 +234,17 @@ export function parseInitAnswers(
   };
 }
 
-// The Effort vocabulary of the Adapter a kind of Init Worker writes, read
-// from the factory itself so Init never re-derives what the Adapter declares
-// (ADR 0042): only claude and opencode write Adapters that map Effort.
+// The Effort vocabulary of the Adapter a kind of Init Worker writes (ADR
+// 0042): read from the declared constants the factories pass through, so
+// Init never constructs a Worker Adapter just to inspect it. Only claude and
+// opencode write Adapters that map Effort; the init.test.ts pin keeps these
+// reads aligned with the factories' own declarations.
 function initEffortVocabulary(worker: InitWorker): readonly Effort[] {
   if (worker.kind === "claude") {
-    return claude().effortVocabulary ?? [];
+    return standardEffortVocabulary;
   }
   if (worker.kind === "opencode") {
-    return opencode().effortVocabulary ?? [];
+    return opencodeEffortVocabulary;
   }
   return [];
 }

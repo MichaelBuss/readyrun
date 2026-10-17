@@ -12,6 +12,12 @@ import {
   parseListedModels,
   type InitAnswers,
 } from "../src/init.ts";
+import {
+  claude,
+  opencode,
+  opencodeEffortVocabulary,
+  standardEffortVocabulary,
+} from "../src/mod.ts";
 import { readReceipt, withRecordingPath } from "./stub-worker.ts";
 
 const tmpRoot = join(fileURLToPath(new URL(".", import.meta.url)), ".tmp");
@@ -332,6 +338,14 @@ test("parseInitAnswers accepts an effort answer only for the Adapter that declar
     malformed.ok ? "" : malformed.message,
     /Effort must be low, medium, high, xhigh, or max/,
   );
+});
+
+test("Init reads the same Effort declarations the shipped factories pass", () => {
+  // Init answers its Effort question from the declared vocabulary constants,
+  // never by building an Adapter to inspect it; this pin fails the day a
+  // factory's declaration drifts from what Init reads for its kind.
+  assert.deepEqual(claude().effortVocabulary, standardEffortVocabulary);
+  assert.deepEqual(opencode().effortVocabulary, opencodeEffortVocabulary);
 });
 
 test("parseListedModels reads id and label from agent --list-models output", () => {

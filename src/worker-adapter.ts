@@ -58,6 +58,32 @@ export function effortLabel(value: Effort): string {
 }
 
 /**
+ * The Effort values a Worker Adapter declares it can honestly map; empty when
+ * it declares none (ADR 0042). The one read for "which values does this
+ * Adapter declare": Doctor gates config against it, the Launcher and Init
+ * offer exactly its values.
+ */
+export function declaredEffortVocabulary(
+  adapter: Pick<WorkerAdapter, "effortVocabulary">,
+): readonly Effort[] {
+  return adapter.effortVocabulary ?? [];
+}
+
+/**
+ * Whether a Worker Adapter maps Effort at all: a flag to pass it and a
+ * declared vocabulary naming its values (ADR 0042). The one predicate for
+ * "may Effort be asked here": the Launcher skips the Effort question when
+ * this answers false. It is not the gate — Doctor alone fails the
+ * flag-without-vocabulary and vocabulary-without-flag lies it implies.
+ */
+export function mapsEffort(
+  adapter: Pick<WorkerAdapter, "effortFlag" | "effortVocabulary">,
+): boolean {
+  return adapter.effortFlag !== undefined &&
+    declaredEffortVocabulary(adapter).length > 0;
+}
+
+/**
  * One spawn of a coding CLI: exactly one Ticket, in exactly one Worktree,
  * on that Ticket's Branch. The Adapter turns this into its CLI's argv.
  */
