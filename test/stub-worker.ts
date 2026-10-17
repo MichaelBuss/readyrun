@@ -72,3 +72,21 @@ export async function withRecordingPath(
 export async function readReceipt(receiptPath: string): Promise<SpawnReceipt> {
   return JSON.parse(await readFile(receiptPath, "utf8")) as SpawnReceipt;
 }
+
+// The stub prints this on stdout unless it is answering the fidelity probe.
+export async function withStubStdout(
+  stdout: string,
+  fn: () => Promise<void>,
+): Promise<void> {
+  const previous = process.env.READYRUN_STUB_STDOUT;
+  process.env.READYRUN_STUB_STDOUT = stdout;
+  try {
+    await fn();
+  } finally {
+    if (previous === undefined) {
+      delete process.env.READYRUN_STUB_STDOUT;
+    } else {
+      process.env.READYRUN_STUB_STDOUT = previous;
+    }
+  }
+}

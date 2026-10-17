@@ -56,10 +56,17 @@ export type {
   TrackerInspect,
   TreeAnswer,
 } from "./tracker-adapter.ts";
-export type { Effort, Permissions, SpawnRequest, WorkerAdapter } from "./worker-adapter.ts";
+export type {
+  Effort,
+  ListedModel,
+  Permissions,
+  SpawnRequest,
+  WorkerAdapter,
+} from "./worker-adapter.ts";
 export {
   declaredEffortVocabulary,
   effortLabel,
+  listedModels,
   mapsEffort,
   standardEffortVocabulary,
 } from "./worker-adapter.ts";
