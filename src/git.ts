@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process";
-import { access, mkdir, readFile } from "node:fs/promises";
+import { access, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { parseOwnerRepo } from "./repository.ts";
 
 const exec = promisify(execFile);
 
@@ -84,24 +85,6 @@ export async function originRepository(cwd: string): Promise<string | undefined>
   } catch {
     return undefined;
   }
-}
-
-export function normalizeRepository(value: string): string {
-  return stripRepoDecorations(value).toLowerCase();
-}
-
-function stripRepoDecorations(value: string): string {
-  return value.trim().replace(/\/+$/, "").replace(/\.git$/i, "");
-}
-
-function parseOwnerRepo(url: string): string | undefined {
-  const trimmed = stripRepoDecorations(url);
-  const ssh = trimmed.match(/^git@[^:]+:(.+\/.+)$/);
-  if (ssh?.[1] !== undefined) {
-    return ssh[1];
-  }
-  const path = trimmed.match(/[:/]([^/]+\/[^/]+)$/);
-  return path?.[1];
 }
 
 async function branchTip(
