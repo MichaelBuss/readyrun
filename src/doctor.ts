@@ -7,9 +7,9 @@ import {
   originRepository,
   resolveRunBase,
   shortCommit,
-  unignoredInstallOutput,
   type RunBase,
 } from "./git.ts";
+import { unignoredInstallOutput } from "./install.ts";
 import { normalizeRepository } from "./repository.ts";
 import { startLiveness, type LivenessStdout } from "./liveness.ts";
 import {
