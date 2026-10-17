@@ -3,6 +3,7 @@ import { access, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { parseOwnerRepo } from "./repository.ts";
+import type { Landing } from "./tracker-adapter.ts";
 
 const exec = promisify(execFile);
 
@@ -21,6 +22,25 @@ export class WorktreeExistsError extends Error {
       `ReadyRun already has a Worktree for branch ${branch} at ${worktreePath}. Discard it with \`git worktree remove ${worktreePath}\` and \`git branch -D ${branch}\`, then start a new Run.`,
     );
     this.name = "WorktreeExistsError";
+  }
+}
+
+/**
+ * A collect whose Worktree could not be removed. Plain `remove`, not
+ * `--force`: a Worktree still holding work is a hard stop the Run has already
+ * refused to reach, so failing loudly here is right (ADR 0029). Typed because
+ * it is the one collect failure that leaves the Worktree on disk — a merge
+ * failure comes after the removal — so a report may claim a kept Worktree
+ * only for this one.
+ */
+export class WorktreeNotRemovedError extends Error {
+  constructor(worktreePath: string, cause: unknown) {
+    const detail = cause instanceof Error ? cause.message : undefined;
+    super(
+      `ReadyRun could not remove the Worktree at ${worktreePath}` +
+        (detail === undefined ? "" : `: ${detail}`),
+    );
+    this.name = "WorktreeNotRemovedError";
   }
 }
 
@@ -544,7 +564,7 @@ export async function createTicketWorktree(
   return worktreePath;
 }
 
-export type CollectOntoRunBranchOptions = {
+type CollectOntoRunBranchOptions = {
   runBranch: string;
   branch: string;
   base: string;
@@ -554,7 +574,7 @@ export type CollectOntoRunBranchOptions = {
 // Merges with plumbing rather than `git merge`, because the Run Branch never
 // needs a working tree of its own and the Consumer's checkout is theirs to
 // stand on: a Run collects Tickets without moving anyone (ADR 0028).
-export async function collectOntoRunBranch(
+async function collectOntoRunBranch(
   cwd: string,
   options: CollectOntoRunBranchOptions,
 ): Promise<string> {
@@ -589,13 +609,42 @@ export async function collectOntoRunBranch(
   return merge;
 }
 
+export type CollectTicketOptions = CollectOntoRunBranchOptions & {
+  /** The Worktree the Ticket's Worker ran in, removed before the merge. */
+  worktree: string;
+};
+
+// One call collects a finished Ticket: remove the Worktree, merge the Ticket's
+// Branch into the Run Branch as exactly one merge commit, delete the Ticket's
+// Branch, and hand back the Landing. The remove-before-merge ordering — a
+// Branch cannot be deleted while a Worktree has it checked out (ADR 0029) —
+// lives here, so both primitives above stay private and no caller can sequence
+// them; the Run loop assembles nothing.
+export async function collectTicket(
+  cwd: string,
+  options: CollectTicketOptions,
+): Promise<Landing> {
+  try {
+    await removeTicketWorktree(cwd, options.worktree);
+  } catch (error) {
+    throw new WorktreeNotRemovedError(options.worktree, error);
+  }
+  const mergeCommit = await collectOntoRunBranch(cwd, {
+    runBranch: options.runBranch,
+    branch: options.branch,
+    base: options.base,
+    message: options.message,
+  });
+  return { runBranch: options.runBranch, mergeCommit };
+}
+
 // Plain `remove`, not `--force`: a Worktree still holding work is a hard stop
 // the Run has already refused to reach, so failing loudly here is right.
-export async function removeTicketWorktree(
+function removeTicketWorktree(
   cwd: string,
   worktreePath: string,
 ): Promise<void> {
-  await git(cwd, ["worktree", "remove", worktreePath]);
+  return git(cwd, ["worktree", "remove", worktreePath]).then(() => undefined);
 }
 
 // The Doctor cwd-fidelity probe (ADR 0037) cuts its throwaway Worktree with
