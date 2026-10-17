@@ -6,13 +6,13 @@ import { startLiveness, type Liveness, type LivenessStdout } from "./liveness.ts
 import {
   branchTreeDiffersFrom,
   captureRepoSnapshot,
-  collectOntoRunBranch,
+  collectTicket,
   createTicketWorktree,
   describeEscape,
-  removeTicketWorktree,
   resolveRunBase,
   shortCommit,
   worktreeIsClean,
+  WorktreeNotRemovedError,
 } from "./git.ts";
 import { composeWorkerPrompt } from "./prompt.ts";
 import { installWorktreeDependencies } from "./install.ts";
@@ -27,7 +27,7 @@ import {
   warnWaitingRootTickets,
 } from "./frontier-root.ts";
 import type { Ticket } from "./ticket.ts";
-import type { FrontierRoot } from "./tracker-adapter.ts";
+import type { FrontierRoot, Landing } from "./tracker-adapter.ts";
 import type { Effort, Permissions } from "./worker-adapter.ts";
 
 type RunStdout = LivenessStdout;
@@ -440,37 +440,38 @@ async function runWithLiveness(
       );
     }
     // After the success checks, so that a hard stop at any earlier stage leaves
-    // the Worktree on disk for the Consumer to look at (ADR 0029) — and before
-    // the merge, because a Branch cannot be deleted while a Worktree still has
-    // it checked out.
+    // the Worktree on disk for the Consumer to look at (ADR 0029). One call:
+    // the collect removes the Worktree, merges, and deletes the Branch in the
+    // order that implies, and hands back the Landing the Ticket leaves with.
+    let landing: Landing;
     try {
-      await removeTicketWorktree(cwd, worktree);
-      keptWorktree = undefined;
-    } catch (error) {
-      return stop("git", ticket.id, caughtMessage(error));
-    }
-    try {
-      runBranchTip = await collectOntoRunBranch(cwd, {
+      landing = await collectTicket(cwd, {
         runBranch,
         branch,
         base: base.commit,
         message: mergeMessage(ticket),
+        worktree,
       });
-      landed += 1;
     } catch (error) {
+      // The removal is the one collect failure that leaves the Worktree on
+      // disk: the collect removes before it merges, so a merge failure has
+      // nothing left to keep and the report must not claim one.
+      const kept = error instanceof WorktreeNotRemovedError;
+      if (!kept) {
+        keptWorktree = undefined;
+      }
       const gitError = caughtMessage(error);
-      return stop(
-        "git",
-        ticket.id,
-        gitError === undefined
-          ? "ReadyRun could not merge the Ticket's Branch into the Run Branch"
-          : `ReadyRun could not merge the Ticket's Branch into the Run Branch. ${gitError}`,
-      );
+      const mergeFailure = gitError === undefined
+        ? "ReadyRun could not merge the Ticket's Branch into the Run Branch"
+        : `ReadyRun could not merge the Ticket's Branch into the Run Branch. ${gitError}`;
+      return stop("git", ticket.id, kept ? gitError : mergeFailure);
     }
-    // After the merge, because the commit the Ticket is about to name does not
-    // exist before it — and because a merge that fails must leave the Ticket on
-    // the Frontier rather than off it with nothing landed (ADR 0033).
-    const landing = { runBranch, mergeCommit: runBranchTip };
+    keptWorktree = undefined;
+    runBranchTip = landing.mergeCommit;
+    landed += 1;
+    // After the merge, because the Landing the Ticket is about to name did not
+    // exist before it — and because a merge that fails must leave the Ticket
+    // on the Frontier rather than off it with nothing landed (ADR 0033).
     try {
       if (config.leaveFrontier) {
         await config.leaveFrontier(ticket, landing);

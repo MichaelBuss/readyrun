@@ -4,8 +4,8 @@ import { access, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
-import { captureRepoSnapshot, collectOntoRunBranch, createTicketWorktree, describeEscape, headCommit, originRepository, WorktreeExistsError } from "../src/git.ts";
-import { commitNpmConsumer, commitRepoFiles, git, throwawayRepo } from "./throwaway-repo.ts";
+import { captureRepoSnapshot, collectTicket, createTicketWorktree, describeEscape, headCommit, originRepository, WorktreeExistsError, WorktreeNotRemovedError } from "../src/git.ts";
+import { commitNpmConsumer, commitRepoFiles, git, onDisk, throwawayRepo } from "./throwaway-repo.ts";
 
 const exec = promisify(execFile);
 
@@ -155,14 +155,82 @@ test("createTicketWorktree hands back a Worktree whose dependencies are not inst
   }
 });
 
-test("collectOntoRunBranch leaves no Run Branch behind when it cannot merge the Ticket's Branch", async () => {
+test("collectTicket removes the Worktree, lands one merge, deletes the Ticket's Branch, and returns the Landing", async () => {
   const repo = await throwawayRepo();
   try {
-    await assert.rejects(collectOntoRunBranch(repo.cwd, {
+    const base = await headCommit(repo.cwd);
+    const worktreePath = await createTicketWorktree(repo.cwd, "readyrun/52", base);
+    await commitRepoFiles(
+      worktreePath,
+      { "ticket-52.txt": "the Worker's work\n" },
+      "Ticket 52",
+    );
+    const ticketTip = await git(repo.cwd, ["rev-parse", "refs/heads/readyrun/52"]);
+
+    const landing = await collectTicket(repo.cwd, {
       runBranch: "readyrun/run-20260902-193300",
       branch: "readyrun/52",
-      base: await headCommit(repo.cwd),
+      base,
       message: "Ticket 52: Fix the thing",
+      worktree: worktreePath,
+    });
+
+    const runBranchTip = await git(repo.cwd, [
+      "rev-parse",
+      "refs/heads/readyrun/run-20260902-193300",
+    ]);
+    assert.deepEqual(landing, {
+      runBranch: "readyrun/run-20260902-193300",
+      mergeCommit: runBranchTip,
+    });
+    assert.equal(await onDisk(worktreePath), false);
+    await assert.rejects(exec("git", [
+      "-C",
+      repo.cwd,
+      "rev-parse",
+      "--verify",
+      "refs/heads/readyrun/52",
+    ]));
+    // One merge commit, two parents: the Run Branch tip it collected onto
+    // first, the Ticket's Branch second (ADR 0028's first-parent shape).
+    assert.equal(
+      await git(repo.cwd, ["rev-parse", `${runBranchTip}^1`]),
+      base,
+    );
+    assert.equal(
+      await git(repo.cwd, ["rev-parse", `${runBranchTip}^2`]),
+      ticketTip,
+    );
+    assert.match(
+      await git(repo.cwd, ["log", "-1", "--format=%s", runBranchTip]),
+      /^Ticket 52: Fix the thing$/,
+    );
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("collectTicket leaves no Run Branch behind when it cannot merge the Ticket's Branch, with the Worktree gone and the Branch surviving", async () => {
+  const repo = await throwawayRepo();
+  try {
+    const base = await headCommit(repo.cwd);
+    // A branch named readyrun makes every ref under readyrun/ unwritable, so
+    // the merge fails where it writes the Run Branch. The Ticket's own Branch
+    // is named out of that collision, so the collect gets as far as the merge.
+    const worktreePath = await createTicketWorktree(repo.cwd, "work/52", base);
+    await commitRepoFiles(
+      worktreePath,
+      { "ticket-52.txt": "the Worker's work\n" },
+      "Ticket 52",
+    );
+    await git(repo.cwd, ["branch", "readyrun"]);
+
+    await assert.rejects(collectTicket(repo.cwd, {
+      runBranch: "readyrun/run-20260902-193300",
+      branch: "work/52",
+      base,
+      message: "Ticket 52: Fix the thing",
+      worktree: worktreePath,
     }));
 
     await assert.rejects(exec("git", [
@@ -172,6 +240,45 @@ test("collectOntoRunBranch leaves no Run Branch behind when it cannot merge the 
       "--verify",
       "refs/heads/readyrun/run-20260902-193300",
     ]));
+    // Removed before the merge was attempted: a Branch cannot be deleted
+    // while a Worktree still has it checked out (ADR 0029) — the ordering
+    // invariant collectTicket owns.
+    assert.equal(await onDisk(worktreePath), false);
+    // The Branch survives, because the Ticket it belongs to is still on the
+    // Frontier: collection did not happen (ADR 0033).
+    await git(repo.cwd, ["rev-parse", "--verify", "refs/heads/work/52"]);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("collectTicket keeps the Worktree and merges nothing when the Worktree cannot be removed", async () => {
+  const repo = await throwawayRepo();
+  try {
+    const base = await headCommit(repo.cwd);
+    const worktreePath = await createTicketWorktree(repo.cwd, "readyrun/52", base);
+    await writeFile(join(worktreePath, "left-behind.txt"), "untracked\n");
+
+    await assert.rejects(
+      collectTicket(repo.cwd, {
+        runBranch: "readyrun/run-20260902-193300",
+        branch: "readyrun/52",
+        base,
+        message: "Ticket 52: Fix the thing",
+        worktree: worktreePath,
+      }),
+      WorktreeNotRemovedError,
+    );
+
+    assert.equal(await onDisk(worktreePath), true);
+    await assert.rejects(exec("git", [
+      "-C",
+      repo.cwd,
+      "rev-parse",
+      "--verify",
+      "refs/heads/readyrun/run-20260902-193300",
+    ]));
+    await git(repo.cwd, ["rev-parse", "--verify", "refs/heads/readyrun/52"]);
   } finally {
     await repo.cleanup();
   }
