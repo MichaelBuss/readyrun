@@ -10,4 +10,5 @@ Resuming the *same* Run — the same ref, more Tickets — was rejected because 
 - A Run's base is no longer necessarily the Consumer's checkout, so anything that reads HEAD as the base is now reading a default rather than the answer.
 - Continuing repeatedly leaves a chain of Run Branches, each containing the one before it. Accepted: the newest holds everything and the earlier refs are prefixes of it, which is cheaper than collapsing the distinction between a Run and a session that can be paused.
 - Uncommitted work in the primary checkout still reaches no Worktree and the existing warning stays correct, because `--base` resolves a ref and never reads the working tree — so continuing does not require the checkout to have been clean.
+- The base-freshness probe (ADR 0046) vouches for Run starts only: it fires once at start, never mid-Run — the Run Branch is local and origin-irrelevant mid-Run (ADR 0033) — and a continuation Run is a new Run whose explicit `--base` lands in the warned path, warned and never gated.
 - Revisit if choosing a base other than the newest Run Branch turns out to be common, which is the evidence #108 waits on.
