@@ -5,7 +5,6 @@ import {
   paginate,
   rootedRead,
   type TrackerPage,
-  type TrackerPageInfo,
 } from "../tracker-adapter-floor.ts";
 import {
   createTrackerAdapter,
@@ -292,13 +291,13 @@ export function linear(
   // policy, and the mapping onto Tickets. Each read starts at no cursor, so
   // the first page resets what the read has seen, and a lie is named from
   // this read's own answers.
-  const fetched = new Map<string, IssueNode>();
+  const answersById = new Map<string, IssueNode>();
 
   async function readCandidatesPage(
     cursor: string | null,
   ): Promise<TrackerPage<IssueNode>> {
     if (cursor === null) {
-      fetched.clear();
+      answersById.clear();
     }
     const data: FrontierData = await graphql<FrontierData>(
       "Frontier",
@@ -308,7 +307,7 @@ export function linear(
     const page = data.issues;
     for (const node of page.nodes) {
       if (node !== null) {
-        fetched.set(node.identifier, node);
+        answersById.set(node.identifier, node);
       }
     }
     return {
@@ -386,7 +385,7 @@ export function linear(
     {
       refuseWhenBlockingUnexpressable,
       readCandidatesPage,
-      refuseLie: (id) => refuseTicketLie(id, fetched.get(id)),
+      refuseLie: (id) => refuseTicketLie(id, answersById.get(id)),
       toTicket,
     },
     {
@@ -402,7 +401,7 @@ export function linear(
         suggestedBranches.clear();
         const answer = await read(root);
         for (const ticket of answer.frontier) {
-          const branch = fetched.get(ticket.id)?.branchName;
+          const branch = answersById.get(ticket.id)?.branchName;
           if (branch !== undefined && branch !== null && branch.length > 0) {
             suggestedBranches.set(ticket.id, branch);
           }

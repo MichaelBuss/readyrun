@@ -18,6 +18,10 @@ _Avoid_: ticket database, ralphctl store, fallback queue, Ralph
 The **Tracker**-specific implementation that maps that tracker’s issue onto a **Ticket**. v0 ships `github` and `linear`; a Consumer building one for a Tracker this package doesn't ship (Jira, GitLab) calls the public `createTrackerAdapter` directly — the same building block `github()` and `linear()` use internally.
 _Avoid_: plugin, SDK (the harness is not a vendor agent SDK), Adapter (unqualified)
 
+**Tracker Adapter floor**:
+The shared skeleton the shipped **Tracker Adapters** stand on: one rooted open candidates read — root precedence, the paging loop, pick order, the split into the **Frontier** and waiting halves — plus the GraphQL transport and the blocking-expression probe, each written once so no Adapter carries a copy. The Adapter brings the **Tracker**'s own facts: which candidates match its selector, what an open candidate looks like, how a candidate maps onto a **Ticket**, and which named **Ticket** is a lie.
+_Avoid_: base class, shared parent, helper module
+
 **Worker Adapter**:
 The coding-CLI-specific way to spawn a **Worker** (prompt, model, cwd; later, usage). v0: `cursor`, `claude`, `opencode`, and `custom`. Codex later. `cursor`, `claude`, and `opencode` all take an optional `extraArgs: string[]` for a static vendor flag beyond model/effort, landing next to `--model` the same way `custom`'s `args` do. `cursor`, `claude`, and `opencode` also expose an optional health probe **Doctor** can run cheaply (`agent status`, `claude auth status`, and `opencode`'s `auth list` judged for zero credentials, that command exiting 0 either way); `custom` has none. `opencode` passes its own Worktree anchor (`run --dir {cwd}`): it re-roots linked worktrees to the git common dir, so process cwd is never trusted.
 _Avoid_: plugin, SDK, recipe (as the noun)

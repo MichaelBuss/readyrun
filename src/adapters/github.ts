@@ -333,7 +333,7 @@ export function github(
     {
       refuseWhenBlockingUnexpressable,
       readCandidatesPage,
-      refuseLie: (id) => refuseClosedOrMissing(id),
+      refuseLie: refuseClosedOrMissing,
       toTicket: (node, selectorApplies) =>
         toTicket(node, selectorApplies ? options.labels : []),
     },

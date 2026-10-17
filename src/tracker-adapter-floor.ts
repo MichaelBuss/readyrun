@@ -152,7 +152,8 @@ export async function graphqlRead<T>(call: {
  * own vocabulary: the blocking refusal, one page of the open candidates read,
  * each candidate's mapping onto a Ticket, and the lie refusal for a named
  * root Ticket that is closed or missing (ADR 0038). The Adapter's page type
- * is its own — the floor never sees the Tracker's words, only Tickets.
+ * is its own: raw Tracker nodes route through the floor, but the floor never
+ * interprets them — it only asks for Tickets and Ticket ids.
  */
 export type RootedReadPorts<Node> = {
   refuseWhenBlockingUnexpressable(): Promise<void>;
@@ -164,7 +165,11 @@ export type RootedReadPorts<Node> = {
    * selector does not judge its own blockers (ADR 0038).
    */
   toTicket(node: Node, selectorApplies: boolean): Ticket;
-  /** The named root Ticket is closed or missing: refused as a lie. */
+  /**
+   * The named root Ticket is closed or missing: refused as a lie. Asked only
+   * once the whole candidates read has answered, so the Adapter may name a
+   * lie from what this read saw.
+   */
   refuseLie(id: string): Promise<void>;
 };
 
