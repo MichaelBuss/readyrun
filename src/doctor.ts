@@ -18,7 +18,12 @@ import {
 } from "./frontier-root.ts";
 import type { Ticket } from "./ticket.ts";
 import type { FrontierRoot } from "./tracker-adapter.ts";
-import { unknownPlaceholdersIn, type Effort, type Permissions } from "./worker-adapter.ts";
+import {
+  declaredEffortVocabulary,
+  unknownPlaceholdersIn,
+  type Effort,
+  type Permissions,
+} from "./worker-adapter.ts";
 
 type DoctorStdout = LivenessStdout;
 
@@ -156,11 +161,13 @@ async function check(
     }
   }
   // The Adapter owns the truth about Effort (ADR 0042): the values it can
-  // honestly map are its declared vocabulary, and anything else is a config
-  // lie. The declaration and the flag only tell the truth together — a flag
-  // with no vocabulary lies about every value it would pass, and a
-  // vocabulary with no flag names values that would be silently dropped.
-  const declaredEfforts: readonly Effort[] = config.worker.effortVocabulary ?? [];
+  // honestly map are its declared vocabulary, read from the seam's shared
+  // reader, and anything else is a config lie. The declaration and the flag
+  // only tell the truth together — a flag with no vocabulary lies about every
+  // value it would pass, and a vocabulary with no flag names values that
+  // would be silently dropped. The lie branches stay Doctor's own: it is the
+  // only gate.
+  const declaredEfforts = declaredEffortVocabulary(config.worker);
   const effortAdapter = config.worker.bin !== undefined
     ? `Worker Adapter "${config.worker.bin}"`
     : "this Worker Adapter";
