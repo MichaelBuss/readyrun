@@ -2,8 +2,15 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { landingComment } from "../landing-comment.ts";
 import {
+  blockingProbeOnce,
+  graphqlRead,
+  paginate,
+  rootedRead,
+  type TrackerPage,
+  type TrackerPageInfo,
+} from "../tracker-adapter-floor.ts";
+import {
   createTrackerAdapter,
-  optionalRoot,
   type TrackerAdapter,
 } from "../tracker-adapter.ts";
 import type { Ticket } from "../ticket.ts";
@@ -47,11 +54,6 @@ export type GitHubRuntime = {
   env?: Record<string, string | undefined>;
   cwd?: string;
   ghAuthToken?: (account?: string) => Promise<string | undefined>;
-};
-
-type PageInfo = {
-  hasNextPage: boolean;
-  endCursor: string | null;
 };
 
 type LabelNode = { name: string };
@@ -122,13 +124,13 @@ type SchemaProbeData = {
 
 type LabelsData = {
   repository: {
-    labels: { pageInfo: PageInfo; nodes: (LabelNode | null)[] };
+    labels: TrackerPage<LabelNode>;
   } | null;
 };
 
 type FrontierData = {
   repository: {
-    issues: { pageInfo: PageInfo; nodes: (IssueNode | null)[] };
+    issues: TrackerPage<IssueNode>;
   } | null;
 };
 
@@ -186,13 +188,19 @@ export function github(
     variables: Record<string, unknown> = {},
   ): Promise<T> {
     try {
-      return await githubGraphql<T>(
+      return await graphqlRead<T>({
         http,
-        await token(),
+        endpoint: "https://api.github.com/graphql",
+        headers: githubHeaders(await token()),
         operationName,
         query,
         variables,
-      );
+        errors: {
+          auth: () => new GitHubAuthError(),
+          unreachable: (detail) =>
+            new GitHubUnreachableError(`GitHub GraphQL ${detail}`),
+        },
+      });
     } catch (error) {
       if (
         error instanceof Error &&
@@ -220,16 +228,25 @@ export function github(
     await githubRest(http, await token(), method, path, body);
   }
 
-  async function canExpressBlocking(): Promise<boolean> {
-    const data = await graphql<SchemaProbeData>("SchemaProbe", schemaProbeQuery);
-    return data.__type?.fields?.some((field) => field.name === "blockedBy") ??
-      false;
+  // The blocking-expression probe is a schema fact, not a per-call one: the
+  // floor reads it once per process, so frontier, waiting, tree, and inspect
+  // share the first answer.
+  function canExpressBlocking(): Promise<boolean> {
+    return blockingProbeOnce(http, options.repo, async () => {
+      const data = await graphql<SchemaProbeData>("SchemaProbe", schemaProbeQuery);
+      return data.__type?.fields?.some((field) => field.name === "blockedBy") ??
+        false;
+    });
+  }
+
+  async function refuseWhenBlockingUnexpressable(): Promise<void> {
+    if (!(await canExpressBlocking())) {
+      throw new Error("GitHub cannot express blocking");
+    }
   }
 
   async function existingLabels(): Promise<string[]> {
-    const names: string[] = [];
-    let cursor: string | null = null;
-    while (true) {
+    const nodes = await paginate<LabelNode>(async (cursor) => {
       const data: LabelsData = await graphql<LabelsData>("Labels", labelsQuery, {
         owner,
         name,
@@ -239,17 +256,9 @@ export function github(
       if (connection === undefined) {
         throw new Error(`GitHub repository ${options.repo} was not found`);
       }
-      for (const node of connection.nodes) {
-        if (node !== null) {
-          names.push(node.name);
-        }
-      }
-      if (!connection.pageInfo.hasNextPage) {
-        break;
-      }
-      cursor = connection.pageInfo.endCursor;
-    }
-    return names;
+      return connection;
+    });
+    return nodes.map((node) => node.name);
   }
 
   async function inspect() {
@@ -296,174 +305,47 @@ export function github(
     );
   }
 
-  // Every open Issue with its blocking facts, in one paged scan. A list root
-  // reads its Tickets with no selector labels at all, so a bypassed selector
-  // does not judge its own blockers.
-  async function scanOpenTickets(
+  // One page of the open candidates read, every open Issue with its blocking
+  // facts; the floor owns the paging loop and the root policy (ADR 0038). A
+  // list root reads its Tickets with no selector labels at all, so a bypassed
+  // selector does not judge its own blockers.
+  async function readCandidatesPage(
+    cursor: string | null,
     selectorLabels: readonly string[],
-  ): Promise<Ticket[]> {
-    const tickets: Ticket[] = [];
-    let cursor: string | null = null;
-    while (true) {
-      const data: FrontierData = await graphql<FrontierData>(
-        "Frontier",
-        frontierQuery,
-        { owner, name, cursor },
-      );
-      const connection = data.repository?.issues;
-      if (connection === undefined) {
-        throw new Error(`GitHub repository ${options.repo} was not found`);
-      }
-      for (const node of connection.nodes) {
-        if (node !== null) {
-          tickets.push(toTicket(node, selectorLabels));
-        }
-      }
-      if (!connection.pageInfo.hasNextPage) {
-        break;
-      }
-      cursor = connection.pageInfo.endCursor;
+  ): Promise<TrackerPage<Ticket>> {
+    const data: FrontierData = await graphql<FrontierData>(
+      "Frontier",
+      frontierQuery,
+      { owner, name, cursor },
+    );
+    const connection = data.repository?.issues;
+    if (connection === undefined) {
+      throw new Error(`GitHub repository ${options.repo} was not found`);
     }
-    return tickets;
+    return {
+      pageInfo: connection.pageInfo,
+      nodes: connection.nodes.map((node) =>
+        node === null ? null : toTicket(node, selectorLabels)
+      ),
+    };
   }
+
+  // The rooted read answers all three rooted methods (ADR 0038): frontier and
+  // waiting are its halves, tree is the whole answer (ADR 0039).
+  const read = rootedRead(
+    {
+      refuseWhenBlockingUnexpressable,
+      readCandidatesPage,
+      refuseLie: refuseClosedOrMissing,
+    },
+    { labels: options.labels, parent: options.parent, ids: options.ids },
+  );
 
   return Object.assign(
     createTrackerAdapter({
-      async frontier(root) {
-        const blocking = await canExpressBlocking();
-        if (!blocking) {
-          throw new Error("GitHub cannot express blocking");
-        }
-        // The root named per Run reaches the Adapter as an argument (ADR 0038); a
-        // config-level root is what stands in when none is named on the call.
-        const effective = root ?? optionalRoot(options.parent, options.ids);
-        // A bypassed selector must not judge its own blockers, so a list's
-        // Tickets are read with no selector labels at all.
-        const bypass = effective?.kind === "list";
-        const tickets = await scanOpenTickets(bypass ? [] : options.labels);
-        let frontier: Ticket[];
-        if (effective?.kind === "list") {
-          // The list bypasses the selector but never `ready: "unblocked"`.
-          frontier = tickets.filter((ticket) =>
-            effective.ids.includes(ticket.id) && ticket.blockedBy.length === 0
-          );
-          const answered = new Set(frontier.map((ticket) => ticket.id));
-          for (const id of effective.ids) {
-            if (!answered.has(id)) {
-              await refuseClosedOrMissing(id);
-            }
-          }
-        } else if (effective?.kind === "parent") {
-          // The parent narrows the selector's Frontier, so its children are
-          // still selector Tickets: labels and unblocked both apply.
-          frontier = tickets.filter((ticket) =>
-            ticket.parent === effective.id &&
-            options.labels.every((label) => ticket.labels.includes(label)) &&
-            ticket.blockedBy.length === 0
-          );
-          // A closed parent can still hold open children, so the parent is
-          // probed even when children answered.
-          await refuseClosedOrMissing(effective.id);
-        } else {
-          frontier = tickets.filter((ticket) => matchesFrontier(ticket, options));
-        }
-        return frontier
-          .sort((a, b) =>
-            a.id.localeCompare(b.id, undefined, { numeric: true }),
-          );
-      },
-      async waiting(root) {
-        const blocking = await canExpressBlocking();
-        if (!blocking) {
-          throw new Error("GitHub cannot express blocking");
-        }
-        const effective = root ?? optionalRoot(options.parent, options.ids);
-        const bypass = effective?.kind === "list";
-        const tickets = await scanOpenTickets(bypass ? [] : options.labels);
-        let waiting: Ticket[];
-        if (effective?.kind === "list") {
-          // A named Ticket is either unblocked (the Frontier's), waiting
-          // here, or a lie: closed or missing is refused as `frontier` does.
-          waiting = tickets.filter((ticket) =>
-            effective.ids.includes(ticket.id) && ticket.blockedBy.length > 0
-          );
-          const answered = new Set(
-            tickets.filter((ticket) => effective.ids.includes(ticket.id))
-              .map((ticket) => ticket.id),
-          );
-          for (const id of effective.ids) {
-            if (!answered.has(id)) {
-              await refuseClosedOrMissing(id);
-            }
-          }
-        } else if (effective?.kind === "parent") {
-          waiting = tickets.filter((ticket) =>
-            ticket.parent === effective.id &&
-            options.labels.every((label) => ticket.labels.includes(label)) &&
-            ticket.blockedBy.length > 0
-          );
-          await refuseClosedOrMissing(effective.id);
-        } else {
-          waiting = tickets.filter((ticket) =>
-            matchesSelectorOptions(ticket, options) &&
-            ticket.blockedBy.length > 0
-          );
-        }
-        return waiting
-          .sort((a, b) =>
-            a.id.localeCompare(b.id, undefined, { numeric: true }),
-          );
-      },
-      // One scan answers the whole tree: the same candidates `frontier` and
-      // `waiting` split, partitioned here, plus the named parent's own
-      // Ticket — open, or the lie above was already refused (#142).
-      async tree(root) {
-        const blocking = await canExpressBlocking();
-        if (!blocking) {
-          throw new Error("GitHub cannot express blocking");
-        }
-        const effective = root ?? optionalRoot(options.parent, options.ids);
-        const bypass = effective?.kind === "list";
-        const tickets = await scanOpenTickets(bypass ? [] : options.labels);
-        let candidates: Ticket[];
-        if (effective?.kind === "list") {
-          candidates = tickets.filter((ticket) =>
-            effective.ids.includes(ticket.id)
-          );
-          const answered = new Set(candidates.map((ticket) => ticket.id));
-          for (const id of effective.ids) {
-            if (!answered.has(id)) {
-              await refuseClosedOrMissing(id);
-            }
-          }
-        } else if (effective?.kind === "parent") {
-          // The parent narrows the selector's candidates, so its children
-          // are still selector Tickets: labels apply, unblocked does not.
-          candidates = tickets.filter((ticket) =>
-            ticket.parent === effective.id &&
-            options.labels.every((label) => ticket.labels.includes(label))
-          );
-          await refuseClosedOrMissing(effective.id);
-        } else {
-          candidates = tickets.filter((ticket) =>
-            matchesSelectorOptions(ticket, options)
-          );
-        }
-        const parent = effective?.kind === "parent"
-          ? tickets.find((ticket) => ticket.id === effective.id)
-          : undefined;
-        const byPickOrder = (a: Ticket, b: Ticket) =>
-          a.id.localeCompare(b.id, undefined, { numeric: true });
-        return {
-          parent,
-          frontier: candidates.filter((ticket) =>
-            ticket.blockedBy.length === 0
-          ).sort(byPickOrder),
-          waiting: candidates.filter((ticket) =>
-            ticket.blockedBy.length > 0
-          ).sort(byPickOrder),
-        };
-      },
+      frontier: (root) => read(root).then((answer) => [...answer.frontier]),
+      waiting: (root) => read(root).then((answer) => [...answer.waiting]),
+      tree: read,
       branchName(ticket) {
         return `readyrun/${ticket.id}`;
       },
@@ -487,32 +369,6 @@ export function github(
     }),
     { options },
   );
-}
-
-function matchesFrontier(
-  ticket: Ticket,
-  options: GitHubTrackerOptions,
-): boolean {
-  return matchesSelectorOptions(ticket, options) &&
-    ticket.blockedBy.length === 0;
-}
-
-// The selector's own facts — labels, config parent, config ids — without the
-// unblocked clause, so `frontier` and `waiting` split the same candidates.
-function matchesSelectorOptions(
-  ticket: Ticket,
-  options: GitHubTrackerOptions,
-): boolean {
-  if (!options.labels.every((label) => ticket.labels.includes(label))) {
-    return false;
-  }
-  if (options.parent !== undefined && ticket.parent !== options.parent) {
-    return false;
-  }
-  if (options.ids !== undefined && !options.ids.includes(ticket.id)) {
-    return false;
-  }
-  return true;
 }
 
 function toTicket(node: IssueNode, selectorLabels: readonly string[]): Ticket {
@@ -590,37 +446,6 @@ class GitHubCannotSeeError extends Error {
     );
     this.name = "GitHubCannotSeeError";
   }
-}
-
-async function githubGraphql<T>(
-  http: typeof fetch,
-  token: string,
-  operationName: string,
-  query: string,
-  variables: Record<string, unknown>,
-): Promise<T> {
-  const response = await http("https://api.github.com/graphql", {
-    method: "POST",
-    headers: githubHeaders(token),
-    body: JSON.stringify({ query, variables, operationName }),
-  });
-  const payload = await response.json() as {
-    data?: T;
-    errors?: { message: string }[];
-  };
-  if (!response.ok) {
-    if (response.status === 401) {
-      throw new GitHubAuthError();
-    }
-    throw new GitHubUnreachableError(`GitHub GraphQL HTTP ${response.status}`);
-  }
-  if (payload.errors !== undefined && payload.errors.length > 0) {
-    throw new Error(payload.errors[0]?.message ?? "GitHub GraphQL error");
-  }
-  if (payload.data === undefined) {
-    throw new GitHubUnreachableError("GitHub GraphQL returned no data");
-  }
-  return payload.data;
 }
 
 async function githubRest(
