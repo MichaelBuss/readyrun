@@ -106,5 +106,6 @@ export function opencode(
     extraArgs: options.extraArgs,
     probe: probeAuthList,
     listModels: listOpencodeModels,
+    typedModelPlaceholder: "provider/model",
   });
 }

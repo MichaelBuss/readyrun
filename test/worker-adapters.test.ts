@@ -1488,7 +1488,9 @@ composer-2 - Composer 2
 zai-coding-plan/glm-5.3-flash
 `, () =>
       withRecordingPath(["opencode"], async ({ receiptPath }) => {
-        assert.deepEqual(await listedModels(opencode()), [
+        const adapter = opencode();
+        assert.equal(adapter.typedModelPlaceholder, "provider/model");
+        assert.deepEqual(await listedModels(adapter), [
           { id: "opencode/grok-code", label: "opencode/grok-code" },
           {
             id: "zai-coding-plan/glm-5.3-flash",

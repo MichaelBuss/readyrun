@@ -471,15 +471,17 @@ async function collectWorker(): Promise<InitWorker | undefined> {
 
 async function collectModel(worker: InitWorker): Promise<string | undefined> {
   // The Adapter answers with its own listing or catalog (ADR 0047); Init
-  // renders whichever rows come back and never parses vendor output.
-  const models = await listedModels(initWorkerAdapter(worker));
+  // renders whichever rows come back and never parses vendor output, and
+  // even the typed fallback's placeholder is the Adapter's id shape.
+  const adapter = initWorkerAdapter(worker);
+  const models = await listedModels(adapter);
   if (models.length === 0) {
     // The fallback for a custom binary or an OpenCode CLI that is missing,
     // unauthed, or lists nothing (#160): today's typed prompt.
     const typed = unlessCancelled(
       await text({
         message: "Default model",
-        placeholder: worker.kind === "opencode" ? "provider/model" : undefined,
+        placeholder: adapter.typedModelPlaceholder,
         validate: required,
       }),
     );

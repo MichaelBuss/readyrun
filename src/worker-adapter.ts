@@ -178,6 +178,12 @@ export type WorkerAdapter<Vocabulary extends readonly Effort[] = readonly Effort
    * the Adapter.
    */
   readonly listModels?: () => Promise<readonly ListedModel[]>;
+  /**
+   * The placeholder the typed model prompt offers when `listModels` answers
+   * empty — the Adapter's id shape, named where the shape lives. Unset
+   * leaves the prompt bare.
+   */
+  readonly typedModelPlaceholder?: string;
   /** Spawn one Worker for one Ticket. */
   spawn(request: SpawnRequest): Promise<SpawnResult>;
 };
@@ -196,6 +202,7 @@ export function createWorkerAdapter<
       | "probe"
       | "staticArgv"
       | "listModels"
+      | "typedModelPlaceholder"
     >
   > = {},
 ): WorkerAdapter<Vocabulary> {
@@ -334,8 +341,9 @@ export function stripAnsi(text: string): string {
 const listExec = promisify(execFile);
 
 // The quiet exec the model listings share: no color, a short timeout, utf8
-// stdout, ANSI stripped. A non-zero exit rejects, so a failed listing reads
-// as "no models" at the call site — the same shape a missing binary has.
+// stdout. A non-zero exit rejects, so a failed listing reads as "no models"
+// at the call site — the same shape a missing binary has. Whatever color
+// still leaks through is the listing grammar's to strip (stripAnsi).
 export function execListOutput(bin: string, args: string[]): Promise<string> {
   return listExec(bin, args, {
     encoding: "utf8",
@@ -346,7 +354,7 @@ export function execListOutput(bin: string, args: string[]): Promise<string> {
       FORCE_COLOR: "0",
       TERM: "dumb",
     },
-  }).then(({ stdout }) => stripAnsi(stdout));
+  }).then(({ stdout }) => stdout);
 }
 
 export type PrintModeWorkerOptions<Vocabulary extends readonly Effort[] = readonly Effort[]> = {
@@ -363,6 +371,8 @@ export type PrintModeWorkerOptions<Vocabulary extends readonly Effort[] = readon
   probe?: () => Promise<ProbeResult>;
   // The Adapter's answer to the model question (ADR 0047).
   listModels?: () => Promise<readonly ListedModel[]>;
+  // The typed fallback prompt's placeholder, the Adapter's id shape.
+  typedModelPlaceholder?: string;
 };
 
 export function printModeWorker<Vocabulary extends readonly Effort[] = readonly Effort[]>(
@@ -370,8 +380,16 @@ export function printModeWorker<Vocabulary extends readonly Effort[] = readonly 
   unattendedFlag: string,
   options: PrintModeWorkerOptions<Vocabulary> = {},
 ): WorkerAdapter<Vocabulary> {
-  const { effortFlag, effortVocabulary, leadingArgs, extraArgs, probeArgs, probe, listModels } =
-    options;
+  const {
+    effortFlag,
+    effortVocabulary,
+    leadingArgs,
+    extraArgs,
+    probeArgs,
+    probe,
+    listModels,
+    typedModelPlaceholder,
+  } = options;
   return createWorkerAdapter({
     bin,
     effortFlag,
@@ -379,6 +397,7 @@ export function printModeWorker<Vocabulary extends readonly Effort[] = readonly 
     printMode: true,
     probe: probe ?? (probeArgs === undefined ? undefined : () => execProbe(bin, probeArgs)),
     listModels,
+    typedModelPlaceholder,
     staticArgv:
       extraArgs === undefined ? undefined : { option: "extraArgs", args: extraArgs },
     spawn(request: SpawnRequest) {
