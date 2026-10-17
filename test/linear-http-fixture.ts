@@ -31,7 +31,6 @@ export type LinearWorld = MemoryTrackerOptions & {
   project?: string;
   existingStates?: string[];
   existingProjects?: string[];
-  suggestedBranchNames?: Record<string, string>;
   ticketStates?: Record<string, string>;
   ticketProjects?: Record<string, string>;
 };
@@ -112,7 +111,7 @@ export function linearHttpFixture(world: LinearWorld): LinearHttpFixture {
     parent: ticket.parent,
     project: world.ticketProjects?.[ticket.id],
     state: world.ticketStates?.[ticket.id] ?? "Todo",
-    branchName: world.suggestedBranchNames?.[ticket.id] ?? "",
+    branchName: ticket.suggestedBranch ?? "",
   }));
   const existingLabels = world.existingLabels ?? [
     ...new Set([

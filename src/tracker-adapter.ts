@@ -108,7 +108,11 @@ export type TrackerAdapter = {
    * or candidates it cannot enumerate — refuses, never answers empty.
    */
   tree(root?: FrontierRoot): Promise<TreeAnswer>;
-  /** The Branch name a Worker's Ticket works on: `readyrun/<id>` by default. */
+  /**
+   * The Branch name a Worker's Ticket works on: the Tracker's own suggested
+   * name when the answer that carried the Ticket named one
+   * (`Ticket.suggestedBranch`), `readyrun/<id>` by default (ADR 0004).
+   */
   branchName(ticket: Ticket): string;
   /** Where a finished Ticket goes when it leaves the Frontier. */
   leaveFrontier(ticket: Ticket, landing: Landing): Promise<void>;
@@ -171,8 +175,11 @@ const defaults: Pick<
       ),
     );
   },
+  // The Branch name is derived, not authored (ADR 0004): the Tracker's own
+  // suggestion travels on the answer that discovered it (#167), so the
+  // derivation reads the Ticket and no Adapter keeps a copy of the rule.
   branchName(ticket) {
-    return `readyrun/${ticket.id}`;
+    return ticket.suggestedBranch ?? `readyrun/${ticket.id}`;
   },
   leaveFrontier() {
     return Promise.resolve();

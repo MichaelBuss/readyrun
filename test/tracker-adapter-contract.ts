@@ -489,6 +489,53 @@ export function trackerAdapterContract(
     await assert.rejects(() => adapter.tree(), /cannot express blocking/);
   });
 
+  test(`${name}: the Branch suggestion travels on the answer, and branchName reads the answer's own Ticket`, async () => {
+    const adapter = await create({
+      tickets: [
+        ticket({ id: "52", suggestedBranch: "feature/eng-52" }),
+        ticket({
+          id: "53",
+          blockedBy: ["52"],
+          suggestedBranch: "feature/eng-53",
+        }),
+      ],
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+    });
+
+    // The expectation is the Ticket's own fact: whatever suggestion the
+    // answer carries is what branchName answers, and a Tracker with no
+    // suggestion keeps the convention (ADR 0004). The tree, not the
+    // Frontier — no earlier read may be a prerequisite (#167).
+    const answer = await adapter.tree();
+    const suggested = answer.frontier.find((item) => item.id === "52");
+    const waitingSuggested = answer.waiting.find((item) => item.id === "53");
+    assert.ok(suggested);
+    assert.ok(waitingSuggested);
+    assert.equal(
+      adapter.branchName(suggested),
+      suggested.suggestedBranch ?? `readyrun/${suggested.id}`,
+    );
+    assert.equal(
+      adapter.branchName(waitingSuggested),
+      waitingSuggested.suggestedBranch ?? `readyrun/${waitingSuggested.id}`,
+    );
+
+    // The same holds answering the halves, in any order.
+    const [frontierTicket] = await adapter.frontier();
+    const [waitingTicket] = await adapter.waiting();
+    assert.ok(frontierTicket);
+    assert.ok(waitingTicket);
+    assert.equal(
+      adapter.branchName(frontierTicket),
+      frontierTicket.suggestedBranch ?? `readyrun/${frontierTicket.id}`,
+    );
+    assert.equal(
+      adapter.branchName(waitingTicket),
+      waitingTicket.suggestedBranch ?? `readyrun/${waitingTicket.id}`,
+    );
+  });
+
   test(`${name}: leaveFrontier makes the Ticket ineligible and unblocks Tickets that were waiting on it`, async () => {
     const adapter = await create({
       tickets: [

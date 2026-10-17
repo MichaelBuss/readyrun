@@ -17,4 +17,10 @@ export type Ticket = {
   blockedBy: string[];
   /** The id of the parent Ticket, when the Tracker knows one. */
   parent?: string;
+  /**
+   * The Tracker's own suggested Branch name, when the Tracker suggests one
+   * (Linear does). It travels on the answer that discovered it; absent means
+   * `branchName`'s convention names the Branch (ADR 0004).
+   */
+  suggestedBranch?: string;
 };

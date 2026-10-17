@@ -47,7 +47,7 @@ What a tree rendering reads from a **Tracker Adapter** in one read-only look: th
 _Avoid_: hierarchy (unqualified), forest
 
 **Branch**:
-The git ref created for a **Ticket** when its **Worker** starts. The name is derived by the harness / **Tracker Adapter**, not authored on the **Ticket**.
+The git ref created for a **Ticket** when its **Worker** starts. The name is derived by the harness / **Tracker Adapter**, not authored on the **Ticket**; a **Tracker**'s own suggested name (Linear hands each issue one) is a fact about the **Ticket** the **Tracker Adapter** maps on, and it travels on the answer that discovered it.
 _Avoid_: main
 
 **Run Branch**:
@@ -105,7 +105,7 @@ _Avoid_: max mode (Cursor's interactive slash command), ultracode (a Claude Code
 - A parent id or a label query names a **Frontier**. It is not a **Ticket**.
 - A **Frontier** is the **Tracker Adapter**’s answer to: `ready: "unblocked"` (string literal), plus a Consumer selector (GitHub labels, Linear state/label/project), plus an optional root (a parent id or an explicit list of **Ticket** ids), named on the command line per **Run**. The **Ticket** body does not name the **Frontier**.
 - When more than one **Ticket** is on the **Frontier**, pick order is the **Tracker Adapter**’s stable order (GitHub: issue number ascending). There is no priority field on the **Ticket**. Naming **Tickets** does not sequence them — command-line order is not pick order; a blocking relationship is.
-- When a **Worker** starts, the harness creates a **Branch** for that **Ticket**. It does not start on main. The **Ticket** body does not name the **Branch**.
+- When a **Worker** starts, the harness creates a **Branch** for that **Ticket**. It does not start on main. The **Ticket** body does not name the **Branch**; a **Tracker**'s own suggested name is a fact the **Tracker Adapter** reads onto the answer, not authoring.
 - Each **Worker** runs in a **Worktree** on that **Branch**, even when a **Run** is serial. There is no cwd-isolation mode and no clone-per-**Ticket**.
 - A **Worker** is anchored to its **Worktree** by its **Worker Adapter**'s argv — a `{cwd}` placeholder interpolated at spawn — never by process cwd alone, because a CLI that re-roots linked worktrees resolves cwd to the git common dir and never sees the **Worktree** at all. The **Worker** prompt names the **Worktree**'s absolute path and the **Ticket**'s **Branch**; "this directory" is not an instruction (ADR 0036).
 - A **Run** treats work that appeared outside the **Ticket**'s **Worktree** and **Branch** as a failed **Ticket**: repo-global state is snapshotted before each **Worker** and diffed after, and the hard stop names what moved instead of saying the **Ticket** produced nothing. **Doctor** proves a **Worker Adapter**'s cwd fidelity in a throwaway **Worktree** before a **Run** starts, so an Adapter that re-roots linked worktrees is caught before it can lose a **Ticket** (ADR 0037).

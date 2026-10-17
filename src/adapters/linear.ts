@@ -208,11 +208,6 @@ export function linear(
     throw new Error("Linear Frontier needs a state, label, or project");
   }
   const http = runtime.fetch ?? fetch;
-  // Linear hands each Issue a suggested Branch name; the Frontier is what
-  // seeds the Adapter's suggestion with its own Tickets' names (#142), so
-  // the tree answers read-only. Each frontier read starts the suggestion
-  // over.
-  const suggestedBranches = new Map<string, string>();
 
   async function token(): Promise<string> {
     if (runtime.token !== undefined && runtime.token.length > 0) {
@@ -397,22 +392,9 @@ export function linear(
 
   return Object.assign(
     createTrackerAdapter({
-      async frontier(root) {
-        suggestedBranches.clear();
-        const answer = await read(root);
-        for (const ticket of answer.frontier) {
-          const branch = answersById.get(ticket.id)?.branchName;
-          if (branch !== undefined && branch !== null && branch.length > 0) {
-            suggestedBranches.set(ticket.id, branch);
-          }
-        }
-        return [...answer.frontier];
-      },
+      frontier: (root) => read(root).then((answer) => [...answer.frontier]),
       waiting: (root) => read(root).then((answer) => [...answer.waiting]),
       tree: read,
-      branchName(ticket) {
-        return suggestedBranches.get(ticket.id) ?? `readyrun/${ticket.id}`;
-      },
       async leaveFrontier(ticket, landing) {
         const data = await graphql<IssueStatesData>(
           "IssueStates",
@@ -493,6 +475,9 @@ function toTicket(node: IssueNode): Ticket {
     labels: names(node.labels.nodes),
     blockedBy: blockedBy(node),
     parent: node.parent === null ? undefined : node.parent.identifier,
+    suggestedBranch: node.branchName === null || node.branchName.length === 0
+      ? undefined
+      : node.branchName,
   };
 }
 
