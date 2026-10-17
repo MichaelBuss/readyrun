@@ -72,8 +72,8 @@ export function declaredEffortVocabulary(
 /**
  * Whether a Worker Adapter maps Effort at all: a flag to pass it and a
  * declared vocabulary naming its values (ADR 0042). The one predicate for
- * "may Effort be asked here": the Launcher and Init skip the Effort question
- * when this answers false. It is not the gate — Doctor alone fails the
+ * "may Effort be asked here": the Launcher skips the Effort question when
+ * this answers false. It is not the gate — Doctor alone fails the
  * flag-without-vocabulary and vocabulary-without-flag lies it implies.
  */
 export function mapsEffort(

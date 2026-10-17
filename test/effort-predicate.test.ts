@@ -6,7 +6,7 @@ import {
   mapsEffort,
 } from "../src/worker-adapter.ts";
 
-test("mapsEffort answers true when the Adapter maps a flag over a declared vocabulary", () => {
+test("mapsEffort answers true when the Worker Adapter maps a flag over a declared vocabulary", () => {
   assert.equal(
     mapsEffort(
       createWorkerAdapter({ effortFlag: "--effort", effortVocabulary: ["high"] }),
@@ -15,22 +15,22 @@ test("mapsEffort answers true when the Adapter maps a flag over a declared vocab
   );
 });
 
-test("mapsEffort answers false when the Adapter names no flag, whatever it declares", () => {
+test("mapsEffort answers false when the Worker Adapter names no flag, whatever it declares", () => {
   assert.equal(mapsEffort(createWorkerAdapter({ effortVocabulary: ["high"] })), false);
 });
 
-test("mapsEffort answers false when the Adapter declares an empty vocabulary", () => {
+test("mapsEffort answers false when the Worker Adapter declares an empty vocabulary", () => {
   assert.equal(
     mapsEffort(createWorkerAdapter({ effortFlag: "--effort", effortVocabulary: [] })),
     false,
   );
 });
 
-test("mapsEffort answers false when the Adapter declares neither flag nor vocabulary", () => {
+test("mapsEffort answers false when the Worker Adapter declares neither flag nor vocabulary", () => {
   assert.equal(mapsEffort(createWorkerAdapter()), false);
 });
 
-test("declaredEffortVocabulary answers the values the Adapter declares, in order", () => {
+test("declaredEffortVocabulary answers the values the Worker Adapter declares, in order", () => {
   assert.deepEqual(
     declaredEffortVocabulary(
       createWorkerAdapter({ effortFlag: "--variant", effortVocabulary: ["high", "max"] }),
@@ -39,6 +39,6 @@ test("declaredEffortVocabulary answers the values the Adapter declares, in order
   );
 });
 
-test("declaredEffortVocabulary answers empty for an Adapter that declares none", () => {
+test("declaredEffortVocabulary answers empty for a Worker Adapter that declares none", () => {
   assert.deepEqual(declaredEffortVocabulary(createWorkerAdapter()), []);
 });
