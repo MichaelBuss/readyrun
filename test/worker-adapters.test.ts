@@ -8,7 +8,8 @@ import type { ReadyRunConfig, WorkerAdapter } from "../src/mod.ts";
 import { memoryTracker } from "../src/testing/mod.ts";
 import { ticket } from "./tracker-adapter-contract.ts";
 import { throwawayRepo } from "./throwaway-repo.ts";
-import { readReceipt, withRecordingPath } from "./stub-worker.ts";
+import { readReceipt, withRecordingPath, withStubStdout } from "./stub-worker.ts";
+import { listedModels } from "../src/mod.ts";
 
 const silent = { write(_chunk?: string) { return true; } };
 
@@ -1435,5 +1436,77 @@ describe("Worker Adapters", { concurrency: false }, () => {
         process.env.READYRUN_PROBE_HANG = previousHang;
       }
     }
+  });
+
+  test("the Cursor Worker Adapter answers its model listing at the seam by spawning --list-models", async () => {
+    await withStubStdout(`Available models
+auto - Auto
+composer-2.5 - Composer 2.5 (default)
+composer-2 - Composer 2
+`, () =>
+      withRecordingPath(["agent"], async ({ receiptPath }) => {
+        assert.deepEqual(await listedModels(cursor()), [
+          { id: "auto", label: "Auto" },
+          { id: "composer-2.5", label: "Composer 2.5", hint: "default" },
+          { id: "composer-2", label: "Composer 2" },
+        ]);
+        const receipt = await readReceipt(receiptPath);
+        assert.equal(receipt.bin, "agent");
+        assert.deepEqual(receipt.argv, ["--list-models"]);
+      }),
+    );
+  });
+
+  test("the Cursor Worker Adapter's model listing falls back to its static catalog when no Cursor CLI answers", async () => {
+    const previousPath = process.env.PATH;
+    process.env.PATH = "/no/such/readyrun-path";
+    try {
+      assert.deepEqual(await listedModels(cursor()), [
+        { id: "composer-2.5", label: "Composer 2.5" },
+        { id: "composer-2", label: "Composer 2" },
+        { id: "auto", label: "Auto" },
+      ]);
+    } finally {
+      process.env.PATH = previousPath;
+    }
+  });
+
+  test("the Claude Worker Adapter answers its static catalog at the seam without spawning", async () => {
+    await withRecordingPath(["claude"], async ({ receiptPath }) => {
+      assert.deepEqual(await listedModels(claude()), [
+        { id: "opus", label: "Opus" },
+        { id: "sonnet", label: "Sonnet" },
+        { id: "haiku", label: "Haiku" },
+        { id: "fable", label: "Fable" },
+      ]);
+      assert.equal(existsSync(receiptPath), false);
+    });
+  });
+
+  test("the opencode Worker Adapter answers its models command at the seam with bare ids", async () => {
+    await withStubStdout(`opencode/grok-code
+zai-coding-plan/glm-5.3-flash
+`, () =>
+      withRecordingPath(["opencode"], async ({ receiptPath }) => {
+        const adapter = opencode();
+        assert.equal(adapter.typedModelPlaceholder, "provider/model");
+        assert.deepEqual(await listedModels(adapter), [
+          { id: "opencode/grok-code", label: "opencode/grok-code" },
+          {
+            id: "zai-coding-plan/glm-5.3-flash",
+            label: "zai-coding-plan/glm-5.3-flash",
+          },
+        ]);
+        const receipt = await readReceipt(receiptPath);
+        assert.deepEqual(receipt.argv, ["models"]);
+      }),
+    );
+  });
+
+  test("a custom Worker Adapter lists no models, so the seam answers empty", async () => {
+    assert.deepEqual(
+      await listedModels(custom({ bin: "my-agent", unattendedFlag: "--go" })),
+      [],
+    );
   });
 });

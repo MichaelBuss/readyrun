@@ -1,9 +1,7 @@
-import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { promisify } from "node:util";
 import {
   autocomplete,
   cancel,
@@ -14,32 +12,21 @@ import {
   text,
 } from "@clack/prompts";
 import { ensureReadyrunGitignored } from "./gitignore.ts";
-import { opencodeEffortVocabulary } from "./adapters/opencode.ts";
+import { claude } from "./adapters/claude.ts";
+import { cursor } from "./adapters/cursor.ts";
+import { custom } from "./adapters/custom.ts";
+import { opencode, opencodeEffortVocabulary } from "./adapters/opencode.ts";
 import { originRepository } from "./git.ts";
 import {
   effortLabel,
   isEffort,
+  listedModels,
   standardEffortVocabulary,
   type Effort,
+  type WorkerAdapter,
 } from "./worker-adapter.ts";
 
-const exec = promisify(execFile);
 const otherModel = "__other__";
-
-// Both listing CLIs get the same quiet exec: no color, a short timeout, utf8
-// stdout.
-function listExecOptions() {
-  return {
-    encoding: "utf8" as const,
-    timeout: 4000,
-    env: {
-      ...process.env,
-      NO_COLOR: "1",
-      FORCE_COLOR: "0",
-      TERM: "dumb",
-    },
-  };
-}
 
 export type InitTracker =
   | {
@@ -249,24 +236,23 @@ function initEffortVocabulary(worker: InitWorker): readonly Effort[] {
   return [];
 }
 
-export type ListedModel = {
-  id: string;
-  label: string;
-  hint?: string;
-};
-
-const fallbackCursorModels: ListedModel[] = [
-  { id: "composer-2.5", label: "Composer 2.5" },
-  { id: "composer-2", label: "Composer 2" },
-  { id: "auto", label: "Auto" },
-];
-
-const claudeModels: ListedModel[] = [
-  { id: "opus", label: "Opus" },
-  { id: "sonnet", label: "Sonnet" },
-  { id: "haiku", label: "Haiku" },
-  { id: "fable", label: "Fable" },
-];
+// The Adapter the answers name, for the questions only an Adapter can
+// answer: the model question asks its `listModels` — the same factories the
+// stub writes — while Effort keeps reading the declared constants above (the
+// pin in init.test.ts keeps those aligned). Init holds no vendor facts of
+// its own (ADR 0047).
+function initWorkerAdapter(worker: InitWorker): WorkerAdapter {
+  if (worker.kind === "cursor") {
+    return cursor();
+  }
+  if (worker.kind === "claude") {
+    return claude();
+  }
+  if (worker.kind === "opencode") {
+    return opencode();
+  }
+  return custom({ bin: worker.bin, unattendedFlag: worker.unattendedFlag });
+}
 
 function linearSelector(tracker: Extract<InitTracker, { kind: "linear" }>): string {
   if (tracker.state !== undefined) {
@@ -339,98 +325,9 @@ function unlessCancelled<T>(value: T | symbol): T | undefined {
   return value;
 }
 
-const ansi = /\u001b\[[0-9;]*m/g;
-const listedMarker = /\s*\((default|current)\)\s*$/i;
-
-export function parseListedModels(stdout: string): ListedModel[] {
-  const seen = new Set<string>();
-  const models: ListedModel[] = [];
-  for (const raw of stdout.split(/\r?\n/)) {
-    const line = raw.replace(ansi, "").trim();
-    if (
-      line.length === 0 ||
-      line === "Available models" ||
-      line.startsWith("Tip:")
-    ) {
-      continue;
-    }
-    const idx = line.indexOf(" - ");
-    if (idx < 0) {
-      continue;
-    }
-    const id = line.slice(0, idx).trim();
-    if (id.length === 0 || seen.has(id)) {
-      continue;
-    }
-    let label = line.slice(idx + 3).trim();
-    const mark = label.match(listedMarker);
-    if (mark?.index !== undefined) {
-      label = label.slice(0, mark.index).trim();
-    }
-    seen.add(id);
-    const model: ListedModel = {
-      id,
-      label: label.length > 0 ? label : id,
-    };
-    if (mark?.[1] !== undefined) {
-      model.hint = mark[1].toLowerCase();
-    }
-    models.push(model);
-  }
-  return models;
-}
-
 export function configWrittenMessage(path: string): string {
   const href = pathToFileURL(resolve(path)).href;
   return `Wrote \u001b]8;;${href}\u001b\\readyrun.config.ts\u001b]8;;\u001b\\`;
-}
-
-// `opencode models` prints one bare `provider/model` id per line (verified
-// against opencode 1.18.31, #160): no `id - label` split, no markers, so it
-// gets this sibling parser rather than a bent parseListedModels. Rows carry
-// id == label so the same select/autocomplete surface as Cursor renders them.
-export function parseBareModelIds(stdout: string): ListedModel[] {
-  const seen = new Set<string>();
-  const models: ListedModel[] = [];
-  for (const raw of stdout.split(/\r?\n/)) {
-    const id = raw.replace(ansi, "").trim();
-    if (id.length === 0 || seen.has(id)) {
-      continue;
-    }
-    seen.add(id);
-    models.push({ id, label: id });
-  }
-  return models;
-}
-
-async function listCursorModels(): Promise<ListedModel[]> {
-  for (const bin of ["agent", "cursor-agent"]) {
-    try {
-      const { stdout } = await exec(bin, ["--list-models"], listExecOptions());
-      const models = parseListedModels(stdout);
-      if (models.length > 0) {
-        return models;
-      }
-    } catch {
-      // Try the next binary, then the fallback catalog.
-    }
-  }
-  return fallbackCursorModels;
-}
-
-// The list reflects the providers the Consumer has actually configured, so it
-// doubles as a soft auth signal — but a missing or unauthed CLI must not
-// block Init (#160): zero lines or a failed spawn is an empty list, and the
-// typed `provider/model` prompt takes over. Unlike Cursor there is no static
-// fallback catalog: suggesting a model the CLI never listed would write a
-// config the Worker cannot run.
-export async function listOpencodeModels(): Promise<ListedModel[]> {
-  try {
-    const { stdout } = await exec("opencode", ["models"], listExecOptions());
-    return parseBareModelIds(stdout);
-  } catch {
-    return [];
-  }
 }
 
 async function collectInitAnswers(cwd: string): Promise<InitAnswers | undefined> {
@@ -573,20 +470,18 @@ async function collectWorker(): Promise<InitWorker | undefined> {
 }
 
 async function collectModel(worker: InitWorker): Promise<string | undefined> {
-  const models = worker.kind === "cursor"
-    ? await listCursorModels()
-    : worker.kind === "opencode"
-    ? await listOpencodeModels()
-    : worker.kind === "claude"
-    ? claudeModels
-    : [];
+  // The Adapter answers with its own listing or catalog (ADR 0047); Init
+  // renders whichever rows come back and never parses vendor output, and
+  // even the typed fallback's placeholder is the Adapter's id shape.
+  const adapter = initWorkerAdapter(worker);
+  const models = await listedModels(adapter);
   if (models.length === 0) {
     // The fallback for a custom binary or an OpenCode CLI that is missing,
     // unauthed, or lists nothing (#160): today's typed prompt.
     const typed = unlessCancelled(
       await text({
         message: "Default model",
-        placeholder: worker.kind === "opencode" ? "provider/model" : undefined,
+        placeholder: adapter.typedModelPlaceholder,
         validate: required,
       }),
     );

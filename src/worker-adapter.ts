@@ -1,4 +1,5 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { promisify } from "node:util";
 import type { Ticket } from "./ticket.ts";
 
 const brand = Symbol("WorkerAdapter");
@@ -84,6 +85,17 @@ export function mapsEffort(
 }
 
 /**
+ * The models a setup surface offers for one Adapter: its `listModels`
+ * answer, empty when the Adapter lists none. The one read for "which models
+ * can be asked here"; Init's model question asks exactly this.
+ */
+export async function listedModels(
+  adapter: Pick<WorkerAdapter, "listModels">,
+): Promise<readonly ListedModel[]> {
+  return (await adapter.listModels?.()) ?? [];
+}
+
+/**
  * One spawn of a coding CLI: exactly one Ticket, in exactly one Worktree,
  * on that Ticket's Branch. The Adapter turns this into its CLI's argv.
  */
@@ -124,6 +136,17 @@ export type ProbeResult = { ok: true } | { ok: false; detail: string };
 export type StaticArgv = { option: string; args: string[] };
 
 /**
+ * One model a setup surface offers for a CLI: the id a config's `model`
+ * accepts, the label the question renders, and an optional hint naming the
+ * row to start from (Cursor's `(default)` / `(current)` markers).
+ */
+export type ListedModel = {
+  id: string;
+  label: string;
+  hint?: string;
+};
+
+/**
  * The coding-CLI-specific way to spawn a Worker: one Ticket, one Branch, one
  * Worktree per process. The shipped factories (`cursor()`, `claude()`,
  * `opencode()`, `custom()`) build one; a Consumer building its own uses
@@ -148,6 +171,19 @@ export type WorkerAdapter<Vocabulary extends readonly Effort[] = readonly Effort
   readonly probe?: () => Promise<ProbeResult>;
   /** Extra argv the Adapter always passes, named by its option for Doctor's messages. */
   readonly staticArgv?: StaticArgv;
+  /**
+   * The model facts a setup surface asks for: one live listing where the CLI
+   * can list, a static catalog where it cannot, and an empty answer where no
+   * honest list exists. Vendor binary names and output grammar stay inside
+   * the Adapter.
+   */
+  readonly listModels?: () => Promise<readonly ListedModel[]>;
+  /**
+   * The placeholder the typed model prompt offers when `listModels` answers
+   * empty — the Adapter's id shape, named where the shape lives. Unset
+   * leaves the prompt bare.
+   */
+  readonly typedModelPlaceholder?: string;
   /** Spawn one Worker for one Ticket. */
   spawn(request: SpawnRequest): Promise<SpawnResult>;
 };
@@ -165,6 +201,8 @@ export function createWorkerAdapter<
       | "printMode"
       | "probe"
       | "staticArgv"
+      | "listModels"
+      | "typedModelPlaceholder"
     >
   > = {},
 ): WorkerAdapter<Vocabulary> {
@@ -292,6 +330,33 @@ export function execProbe(bin: string, args: string[]): Promise<ProbeResult> {
   );
 }
 
+// ANSI color can reach a listing even under NO_COLOR; every listing grammar
+// strips it before parsing, so the strip is written once here.
+const ansi = /\u001b\[[0-9;]*m/g;
+
+export function stripAnsi(text: string): string {
+  return text.replace(ansi, "");
+}
+
+const listExec = promisify(execFile);
+
+// The quiet exec the model listings share: no color, a short timeout, utf8
+// stdout. A non-zero exit rejects, so a failed listing reads as "no models"
+// at the call site — the same shape a missing binary has. Whatever color
+// still leaks through is the listing grammar's to strip (stripAnsi).
+export function execListOutput(bin: string, args: string[]): Promise<string> {
+  return listExec(bin, args, {
+    encoding: "utf8",
+    timeout: 4000,
+    env: {
+      ...process.env,
+      NO_COLOR: "1",
+      FORCE_COLOR: "0",
+      TERM: "dumb",
+    },
+  }).then(({ stdout }) => stdout);
+}
+
 export type PrintModeWorkerOptions<Vocabulary extends readonly Effort[] = readonly Effort[]> = {
   effortFlag?: string;
   effortVocabulary?: Vocabulary;
@@ -304,6 +369,10 @@ export type PrintModeWorkerOptions<Vocabulary extends readonly Effort[] = readon
   // A probe probeArgs cannot express: `opencode auth list` exits 0 whether
   // or not any credential exists, so its Adapter judges the captured output.
   probe?: () => Promise<ProbeResult>;
+  // The Adapter's answer to the model question (ADR 0047).
+  listModels?: () => Promise<readonly ListedModel[]>;
+  // The typed fallback prompt's placeholder, the Adapter's id shape.
+  typedModelPlaceholder?: string;
 };
 
 export function printModeWorker<Vocabulary extends readonly Effort[] = readonly Effort[]>(
@@ -311,13 +380,24 @@ export function printModeWorker<Vocabulary extends readonly Effort[] = readonly 
   unattendedFlag: string,
   options: PrintModeWorkerOptions<Vocabulary> = {},
 ): WorkerAdapter<Vocabulary> {
-  const { effortFlag, effortVocabulary, leadingArgs, extraArgs, probeArgs, probe } = options;
+  const {
+    effortFlag,
+    effortVocabulary,
+    leadingArgs,
+    extraArgs,
+    probeArgs,
+    probe,
+    listModels,
+    typedModelPlaceholder,
+  } = options;
   return createWorkerAdapter({
     bin,
     effortFlag,
     effortVocabulary,
     printMode: true,
     probe: probe ?? (probeArgs === undefined ? undefined : () => execProbe(bin, probeArgs)),
+    listModels,
+    typedModelPlaceholder,
     staticArgv:
       extraArgs === undefined ? undefined : { option: "extraArgs", args: extraArgs },
     spawn(request: SpawnRequest) {

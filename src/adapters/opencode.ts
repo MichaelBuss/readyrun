@@ -1,6 +1,9 @@
 import {
   captureProbeOutput,
+  execListOutput,
   printModeWorker,
+  stripAnsi,
+  type ListedModel,
   type ProbeResult,
   type WorkerAdapter,
 } from "../worker-adapter.ts";
@@ -50,13 +53,47 @@ async function probeAuthList(): Promise<ProbeResult> {
   return { ok: true };
 }
 
+// `opencode models` prints one bare `provider/model` id per line (verified
+// against opencode 1.18.31, #160): no `id - label` split, no markers, so it
+// gets this sibling parser rather than a bent parseListedModels. Rows carry
+// id == label so the same select/autocomplete surface as Cursor renders them.
+export function parseBareModelIds(stdout: string): ListedModel[] {
+  const seen = new Set<string>();
+  const models: ListedModel[] = [];
+  for (const raw of stdout.split(/\r?\n/)) {
+    const id = stripAnsi(raw).trim();
+    if (id.length === 0 || seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    models.push({ id, label: id });
+  }
+  return models;
+}
+
+// The list reflects the providers the Consumer has actually configured, so it
+// doubles as a soft auth signal — but a missing or unauthed CLI must not
+// block Init (#160): zero lines or a failed spawn is an empty list, and the
+// typed `provider/model` prompt takes over. Unlike Cursor there is no static
+// fallback catalog: suggesting a model the CLI never listed would write a
+// config the Worker cannot run.
+export async function listOpencodeModels(): Promise<readonly ListedModel[]> {
+  try {
+    return parseBareModelIds(await execListOutput("opencode", ["models"]));
+  } catch {
+    return [];
+  }
+}
+
 /**
  * The opencode Worker Adapter: `opencode run` — already non-interactive, so
  * `-i` is never passed — with `--dir {cwd}` pinning the Worker to its
  * Worktree (ADR 0036): opencode re-roots linked worktrees to the git common
  * dir, so process cwd is never trusted (#125). Unattended via `--auto`,
  * Effort via `--variant` in the declared `high` | `max` vocabulary,
- * health-probed with `auth list` judged for zero credentials.
+ * health-probed with `auth list` judged for zero credentials. The model
+ * question answers here too: the Adapter's own `models` command, its bare-id
+ * grammar, an empty answer when nothing can be listed honestly (ADR 0047).
  */
 export function opencode(
   options: OpencodeWorkerOptions = {},
@@ -68,5 +105,7 @@ export function opencode(
     leadingArgs: ["run", "--dir", "{cwd}"],
     extraArgs: options.extraArgs,
     probe: probeAuthList,
+    listModels: listOpencodeModels,
+    typedModelPlaceholder: "provider/model",
   });
 }

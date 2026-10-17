@@ -6,19 +6,22 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   configWrittenMessage,
   init,
-  listOpencodeModels,
-  parseBareModelIds,
   parseInitAnswers,
-  parseListedModels,
   type InitAnswers,
 } from "../src/init.ts";
+import { parseListedModels } from "../src/adapters/cursor.ts";
+import { listOpencodeModels, parseBareModelIds } from "../src/adapters/opencode.ts";
 import {
   claude,
   opencode,
   opencodeEffortVocabulary,
   standardEffortVocabulary,
 } from "../src/mod.ts";
-import { readReceipt, withRecordingPath } from "./stub-worker.ts";
+import {
+  readReceipt,
+  withRecordingPath,
+  withStubStdout,
+} from "./stub-worker.ts";
 
 const tmpRoot = join(fileURLToPath(new URL(".", import.meta.url)), ".tmp");
 const packageHref = pathToFileURL(
@@ -201,24 +204,6 @@ async function assertWrittenStub(
     );
     await assert.doesNotReject(() => loadStub(cwd));
   });
-}
-
-// The stub prints this on stdout unless it is answering the fidelity probe.
-async function withStubStdout(
-  stdout: string,
-  fn: () => Promise<void>,
-): Promise<void> {
-  const previous = process.env.READYRUN_STUB_STDOUT;
-  process.env.READYRUN_STUB_STDOUT = stdout;
-  try {
-    await fn();
-  } finally {
-    if (previous === undefined) {
-      delete process.env.READYRUN_STUB_STDOUT;
-    } else {
-      process.env.READYRUN_STUB_STDOUT = previous;
-    }
-  }
 }
 
 test("init writes a GitHub and Cursor readyrun.config.ts at the Consumer root", async () => {
