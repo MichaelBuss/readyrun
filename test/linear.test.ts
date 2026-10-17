@@ -244,6 +244,32 @@ test("a named Ticket already In Review on Linear is refused as a lie", async () 
   );
 });
 
+test("a Ticket that has left the Frontier is not an open candidate, even when the state selector names its state", async () => {
+  const { adapter } = linearFromWorld({
+    tickets: [ticket({ id: "52" })],
+    ready: "unblocked",
+    labels: ["ready-for-agent"],
+    state: "In Review",
+    ticketStates: { "52": "In Review" },
+    existingStates: ["Todo", "In Review", "Done"],
+  });
+  const frontier = await adapter.frontier();
+  assert.deepEqual(
+    frontier.map((item) => item.id),
+    [],
+  );
+});
+
+test("the blocking probe is read once per process, not once per call", async () => {
+  const { adapter, fixture } = linearFromWorld(world);
+  await adapter.frontier();
+  await adapter.waiting();
+  const probes = fixture.requests.filter((request) =>
+    (request.body ?? "").includes("SchemaProbe"),
+  ).length;
+  assert.equal(probes, 1);
+});
+
 test("a parent root that does not exist on Linear is refused as a lie", async () => {
   const { adapter } = linearFromWorld(world);
   await assert.rejects(
