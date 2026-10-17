@@ -26,12 +26,9 @@ export class WorktreeExistsError extends Error {
 }
 
 /**
- * A collect whose Worktree could not be removed. Plain `remove`, not
- * `--force`: a Worktree still holding work is a hard stop the Run has already
- * refused to reach, so failing loudly here is right (ADR 0029). Typed because
- * it is the one collect failure that leaves the Worktree on disk — a merge
- * failure comes after the removal — so a report may claim a kept Worktree
- * only for this one.
+ * A collect whose Worktree could not be removed. Typed because it is the one
+ * collect failure that leaves the Worktree on disk — a merge failure comes
+ * after the removal — so a report may claim a kept Worktree only for this one.
  */
 export class WorktreeNotRemovedError extends Error {
   constructor(worktreePath: string, cause: unknown) {
@@ -39,6 +36,7 @@ export class WorktreeNotRemovedError extends Error {
     super(
       `ReadyRun could not remove the Worktree at ${worktreePath}` +
         (detail === undefined ? "" : `: ${detail}`),
+      { cause },
     );
     this.name = "WorktreeNotRemovedError";
   }

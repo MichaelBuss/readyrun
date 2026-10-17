@@ -461,15 +461,10 @@ async function runWithLiveness(
         keptWorktree = undefined;
       }
       const gitError = caughtMessage(error);
-      return stop(
-        "git",
-        ticket.id,
-        kept
-          ? gitError
-          : gitError === undefined
-          ? "ReadyRun could not merge the Ticket's Branch into the Run Branch"
-          : `ReadyRun could not merge the Ticket's Branch into the Run Branch. ${gitError}`,
-      );
+      const mergeFailure = gitError === undefined
+        ? "ReadyRun could not merge the Ticket's Branch into the Run Branch"
+        : `ReadyRun could not merge the Ticket's Branch into the Run Branch. ${gitError}`;
+      return stop("git", ticket.id, kept ? gitError : mergeFailure);
     }
     keptWorktree = undefined;
     runBranchTip = landing.mergeCommit;
