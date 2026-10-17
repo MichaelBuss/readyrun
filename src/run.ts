@@ -235,7 +235,7 @@ async function runWithLiveness(
   // Doctor's verdict and every Worker spawn read the same answer.
   const settings = resolveRunSettings(config, options);
   live.stage("Doctor");
-  const failures = await collectDoctorFailures({
+  const verdict = await collectDoctorFailures({
     config,
     cwd,
     root: options.root,
@@ -243,7 +243,7 @@ async function runWithLiveness(
     stdout,
   });
   live.stop();
-  if (writeDoctorFailures(stdout, failures) === 1) {
+  if (writeDoctorFailures(stdout, verdict.failures) === 1) {
     return 1;
   }
   const runBranch = runBranchName(new Date());

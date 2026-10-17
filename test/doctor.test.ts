@@ -1004,7 +1004,7 @@ test("a Worker Adapter that never exits fails Doctor's cwd-fidelity probe via ti
               return true;
             },
           },
-          failures,
+          failures.failures,
         );
         assert.match(output.join(""), /Doctor: Worker Adapter cwd-fidelity probe timed out/);
         assert.match(output.join(""), /without exiting/);
@@ -1211,6 +1211,49 @@ test("a Consumer that ignores its install output does not fail Doctor", async ()
     assert.equal(doctorExit, 0);
     assert.doesNotMatch(chunks.join(""), /install output/);
     assert.match(chunks.join(""), /Next Ticket: 52/);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("a rooted doctor invocation reads the Frontier once", async () => {
+  const repo = await throwawayRepo();
+  try {
+    await exec("git", [
+      "-C",
+      repo.cwd,
+      "remote",
+      "add",
+      "origin",
+      "git@github.com:acme/widgets.git",
+    ]);
+    const { adapter, fixture } = githubFromWorld({
+      tickets: [
+        ticket({ id: "11", parent: "8" }),
+        ticket({ id: "12", parent: "9" }),
+        ticket({ id: "8" }),
+      ],
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+    });
+    const out = capturing();
+    const exit = await doctor({
+      config: defineConfig({
+        tracker: adapter,
+        worker: createWorkerAdapter(),
+        model: "composer-2",
+      }),
+      root: { kind: "parent", id: "8" },
+      cwd: repo.cwd,
+      stdout: out.stdout,
+    });
+    assert.equal(exit, 0);
+    assert.match(out.chunks.join(""), /Next Ticket: 11/);
+    const frontierReads = fixture.requests.filter((request) =>
+      (JSON.parse(request.body ?? "{}") as { operationName?: string })
+        .operationName === "Frontier"
+    );
+    assert.equal(frontierReads.length, 1);
   } finally {
     await repo.cleanup();
   }

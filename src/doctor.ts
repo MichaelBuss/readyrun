@@ -88,9 +88,20 @@ export type DoctorInput = {
   probe?: boolean;
 };
 
+/**
+ * Doctor's verdict: the failures it found, and — when a Root was named and
+ * the read answered — the rooted Frontier that read returned. The verdict's
+ * one read is the read: Doctor and the Plan share it instead of fetching the
+ * Frontier twice in one command.
+ */
+export type DoctorVerdict = {
+  failures: string[];
+  frontier?: Ticket[];
+};
+
 export async function collectDoctorFailures(
   input: DoctorInput,
-): Promise<string[]> {
+): Promise<DoctorVerdict> {
   const { config, cwd, root } = input;
   const { effort, permissions } = resolveRunSettings(config, input.overrides);
   const failures: string[] = [];
@@ -123,7 +134,7 @@ export async function collectDoctorFailures(
     inspect = await config.tracker.inspect();
   } catch (error) {
     failures.push(error instanceof Error ? error.message : String(error));
-    return failures;
+    return { failures };
   }
   for (const label of inspect.selectorLabels) {
     if (!inspect.existingLabels.includes(label)) {
@@ -238,11 +249,12 @@ export async function collectDoctorFailures(
       rooted = await config.tracker.frontier(root);
     } catch (error) {
       failures.push(error instanceof Error ? error.message : String(error));
-      return failures;
+      return { failures };
     }
     failures.push(...rootViolationMessages(rooted, root));
+    return { failures, frontier: rooted };
   }
-  return failures;
+  return { failures };
 }
 
 function workerBinaryExists(bin: string): boolean {
@@ -344,14 +356,14 @@ export async function doctor(options: DoctorOptions): Promise<number> {
   const live = startLiveness(stdout);
   try {
     live.stage("Doctor");
-    const failures = await collectDoctorFailures({
+    const verdict = await collectDoctorFailures({
       config,
       cwd,
       root: options.root,
       stdout,
     });
     live.stop();
-    if (writeDoctorFailures(stdout, failures) === 1) {
+    if (writeDoctorFailures(stdout, verdict.failures) === 1) {
       return 1;
     }
     try {
@@ -361,14 +373,15 @@ export async function doctor(options: DoctorOptions): Promise<number> {
       // Has no base to disclose. A Run hard-stops at git there, which is where that gets reported.
     }
     live.stage("Frontier");
-    const frontier = await config.tracker.frontier(options.root);
+    // The check's rooted read already answered; reading again would fetch the
+    // Frontier twice in one command. Unrooted, this is the one read.
+    const frontier = verdict.frontier ??
+      await config.tracker.frontier(options.root);
     live.stop();
     const root = options.root;
     if (root !== undefined) {
-      const violations = rootViolationMessages(frontier, root);
-      if (writeDoctorFailures(stdout, violations) === 1) {
-        return 1;
-      }
+      // Root violations rode the verdict's failures, written above; what is
+      // left to say here is which rooted Tickets wait off the Frontier.
       warnWaitingRootTickets(stdout, root, frontier);
     }
     warnUnusedModelsByLabel(stdout, config.modelsByLabel, frontier);
