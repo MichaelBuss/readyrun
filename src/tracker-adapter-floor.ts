@@ -148,47 +148,36 @@ export async function graphqlRead<T>(call: {
 }
 
 /**
- * What the floor asks of the Tracker Adapter standing on it: the blocking
- * refusal, one page of the open candidates read, and the lie refusal for a
- * named root Ticket that is closed or missing (ADR 0038).
+ * What the floor asks of the Tracker Adapter standing on it, in the Adapter's
+ * own vocabulary: the blocking refusal, one page of the open candidates read,
+ * each candidate's mapping onto a Ticket, and the lie refusal for a named
+ * root Ticket that is closed or missing (ADR 0038). The Adapter's page type
+ * is its own — the floor never sees the Tracker's words, only Tickets.
  */
-export type RootedReadPorts = {
+export type RootedReadPorts<Node> = {
   refuseWhenBlockingUnexpressable(): Promise<void>;
-  readCandidatesPage(
-    cursor: string | null,
-    selectorLabels: readonly string[],
-  ): Promise<TrackerPage<Ticket>>;
+  /** One page of the open candidates read, as the Tracker answers it. */
+  readCandidatesPage(cursor: string | null): Promise<TrackerPage<Node>>;
+  /**
+   * The candidate's Ticket. `selectorApplies` says whether the Frontier
+   * selector's own judgment may: a list root bypasses it, so a bypassed
+   * selector does not judge its own blockers (ADR 0038).
+   */
+  toTicket(node: Node, selectorApplies: boolean): Ticket;
+  /** The named root Ticket is closed or missing: refused as a lie. */
   refuseLie(id: string): Promise<void>;
 };
 
 /**
- * The Consumer selector the Adapter's options name (ADR 0016): labels plus the
+ * The Consumer selector the Adapter's options name (ADR 0016): which
+ * candidates are the selector's own, in the Adapter's vocabulary, plus the
  * optional config-level root a root named on the call replaces.
  */
-export type RootedReadSelector = {
-  labels: readonly string[];
+export type RootedReadSelector<Node> = {
+  matches(node: Node): boolean;
   parent?: string;
   ids?: string[];
 };
-
-// The selector's own facts — labels, config parent, config ids — without the
-// unblocked clause, so the Frontier and the waiting set split the same
-// candidates.
-function matchesSelector(
-  ticket: Ticket,
-  selector: RootedReadSelector,
-): boolean {
-  if (!selector.labels.every((label) => ticket.labels.includes(label))) {
-    return false;
-  }
-  if (selector.parent !== undefined && ticket.parent !== selector.parent) {
-    return false;
-  }
-  if (selector.ids !== undefined && !selector.ids.includes(ticket.id)) {
-    return false;
-  }
-  return true;
-}
 
 // A list root naming one Ticket twice is the duplicate lie ADR 0038 refuses;
 // the command line catches its own duplicates, and this catches the rest.
@@ -212,12 +201,13 @@ function refuseDuplicateNames(ids: readonly string[]): void {
  * into the two halves `frontier` and `waiting` are — which `tree` returns
  * together (ADR 0039) — each half in pick order.
  *
- * @param ports The Adapter's refusals and one page of its candidates read.
+ * @param ports The Adapter's refusals, its candidates read, and its mapping
+ *   onto Tickets.
  * @param selector The Adapter's own Frontier selector.
  */
-export function rootedRead(
-  ports: RootedReadPorts,
-  selector: RootedReadSelector,
+export function rootedRead<Node>(
+  ports: RootedReadPorts<Node>,
+  selector: RootedReadSelector<Node>,
 ): (root?: FrontierRoot) => Promise<TreeAnswer> {
   return async (root) => {
     await ports.refuseWhenBlockingUnexpressable();
@@ -226,16 +216,23 @@ export function rootedRead(
       refuseDuplicateNames(effective.ids);
     }
     // A bypassed selector must not judge its own blockers, so a list's
-    // Tickets are read with no selector labels at all.
-    const selectorLabels = effective?.kind === "list" ? [] : selector.labels;
-    const tickets = await paginate<Ticket>((cursor) =>
-      ports.readCandidatesPage(cursor, selectorLabels)
+    // candidates are mapped with the selector off.
+    const selectorApplies = effective?.kind !== "list";
+    const nodes = await paginate<Node>((cursor) =>
+      ports.readCandidatesPage(cursor)
     );
+    const mapped = new Map<string, { node: Node; ticket: Ticket }>();
+    for (const node of nodes) {
+      const ticket = ports.toTicket(node, selectorApplies);
+      mapped.set(ticket.id, { node, ticket });
+    }
     let candidates: Ticket[];
     let parent: Ticket | undefined;
     if (effective?.kind === "list") {
       const named = new Set(effective.ids);
-      candidates = tickets.filter((ticket) => named.has(ticket.id));
+      candidates = [...mapped.values()]
+        .filter(({ ticket }) => named.has(ticket.id))
+        .map(({ ticket }) => ticket);
       for (const id of effective.ids) {
         if (!candidates.some((ticket) => ticket.id === id)) {
           await ports.refuseLie(id);
@@ -243,20 +240,22 @@ export function rootedRead(
       }
     } else if (effective?.kind === "parent") {
       // The parent narrows the selector's candidates, so its children are
-      // still selector Tickets: labels apply, unblocked does not — and a
-      // root named on the call replaces the selector's own root entirely.
-      candidates = tickets.filter((ticket) =>
-        ticket.parent === effective.id &&
-        selector.labels.every((label) => ticket.labels.includes(label))
-      );
+      // still selector Tickets: the selector applies, unblocked does not —
+      // and a root named on the call replaces the selector's own root
+      // entirely.
+      candidates = [...mapped.values()]
+        .filter(({ node, ticket }) =>
+          ticket.parent === effective.id && selector.matches(node)
+        )
+        .map(({ ticket }) => ticket);
       // A closed parent can still hold open children, so the parent is
       // probed even when children answered.
       await ports.refuseLie(effective.id);
-      parent = tickets.find((ticket) => ticket.id === effective.id);
+      parent = mapped.get(effective.id)?.ticket;
     } else {
-      candidates = tickets.filter((ticket) =>
-        matchesSelector(ticket, selector)
-      );
+      candidates = [...mapped.values()]
+        .filter(({ node }) => selector.matches(node))
+        .map(({ ticket }) => ticket);
     }
     return {
       parent,

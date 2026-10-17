@@ -306,14 +306,13 @@ export function github(
     );
   }
 
-  // One page of the open candidates read, every open Issue with its blocking
-  // facts; the floor owns the paging loop and the root policy (ADR 0038). A
-  // list root reads its Tickets with no selector labels at all, so a bypassed
-  // selector does not judge its own blockers.
+  // One page of the open candidates read, every open Issue as the API
+  // answers it; the floor owns the paging loop, the root policy, and the
+  // mapping onto Tickets (ADR 0038). A list root reads with the selector
+  // off, so a bypassed selector does not judge its own blockers.
   async function readCandidatesPage(
     cursor: string | null,
-    selectorLabels: readonly string[],
-  ): Promise<TrackerPage<Ticket>> {
+  ): Promise<TrackerPage<IssueNode>> {
     const data: FrontierData = await graphql<FrontierData>(
       "Frontier",
       frontierQuery,
@@ -323,23 +322,29 @@ export function github(
     if (connection === undefined) {
       throw new Error(`GitHub repository ${options.repo} was not found`);
     }
-    return {
-      pageInfo: connection.pageInfo,
-      nodes: connection.nodes.map((node) =>
-        node === null ? null : toTicket(node, selectorLabels)
-      ),
-    };
+    return connection;
   }
 
   // The rooted read answers all three rooted methods (ADR 0038): frontier and
-  // waiting are its halves, tree is the whole answer (ADR 0039).
-  const read = rootedRead(
+  // waiting are its halves, tree is the whole answer (ADR 0039). The
+  // selector's own match is labels — GitHub's vocabulary (ADR 0016); the
+  // root policy stays in the floor.
+  const read = rootedRead<IssueNode>(
     {
       refuseWhenBlockingUnexpressable,
       readCandidatesPage,
-      refuseLie: refuseClosedOrMissing,
+      refuseLie: (id) => refuseClosedOrMissing(id),
+      toTicket: (node, selectorApplies) =>
+        toTicket(node, selectorApplies ? options.labels : []),
     },
-    { labels: options.labels, parent: options.parent, ids: options.ids },
+    {
+      matches: (node) => {
+        const labels = names(node.labels.nodes);
+        return options.labels.every((label) => labels.includes(label));
+      },
+      parent: options.parent,
+      ids: options.ids,
+    },
   );
 
   return Object.assign(
