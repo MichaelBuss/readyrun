@@ -58,7 +58,9 @@ export type {
 } from "./tracker-adapter.ts";
 export type { Effort, Permissions, SpawnRequest, WorkerAdapter } from "./worker-adapter.ts";
 export {
+  declaredEffortVocabulary,
   effortLabel,
+  mapsEffort,
   standardEffortVocabulary,
 } from "./worker-adapter.ts";
 export type { StandardEffortVocabulary } from "./worker-adapter.ts";
