@@ -45,8 +45,8 @@ export {
   BaseNotFoundError,
   DefaultBranchError,
   WorktreeExistsError,
-  WorktreeInstallError,
 } from "./git.ts";
+export { WorktreeInstallError } from "./install.ts";
 export type { Ticket } from "./ticket.ts";
 export { createTrackerAdapter } from "./tracker-adapter.ts";
 export type {

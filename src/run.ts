@@ -15,6 +15,7 @@ import {
   worktreeIsClean,
 } from "./git.ts";
 import { composeWorkerPrompt } from "./prompt.ts";
+import { installWorktreeDependencies } from "./install.ts";
 import {
   resolveCap,
   runBranchName,
@@ -333,6 +334,9 @@ async function runWithLiveness(
       // Absolute, because the prompt names it (ADR 0036) and a relative cwd
       // would make "Your working directory is ..." point somewhere else.
       worktree = resolve(await createTicketWorktree(cwd, branch, runBranchTip));
+      // Dependency install is a step at its own seam, and the Run is its
+      // caller: the Worktree exists before its dependencies do.
+      await installWorktreeDependencies(worktree);
       keptWorktree = worktree;
     } catch (error) {
       return stop(

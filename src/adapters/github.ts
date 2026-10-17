@@ -15,6 +15,7 @@ import {
 } from "../tracker-adapter.ts";
 import type { Ticket } from "../ticket.ts";
 import { assertKnownKeys } from "../unknown-keys.ts";
+import { stripRepoDecorations } from "../repository.ts";
 
 const exec = promisify(execFile);
 
@@ -399,8 +400,7 @@ function names(nodes: (LabelNode | null)[]): string[] {
 }
 
 function splitRepo(repo: string): { owner: string; name: string } {
-  const trimmed = repo.trim().replace(/\/+$/, "").replace(/\.git$/i, "");
-  const [owner, name, ...rest] = trimmed.split("/");
+  const [owner, name, ...rest] = stripRepoDecorations(repo).split("/");
   if (owner === undefined || name === undefined || rest.length > 0) {
     throw new Error(`GitHub repo must be owner/name, got ${repo}`);
   }
