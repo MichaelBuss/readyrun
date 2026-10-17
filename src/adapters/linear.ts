@@ -1,7 +1,14 @@
 import { landingComment } from "../landing-comment.ts";
 import {
+  blockingProbeOnce,
+  graphqlRead,
+  paginate,
+  rootedRead,
+  type TrackerPage,
+  type TrackerPageInfo,
+} from "../tracker-adapter-floor.ts";
+import {
   createTrackerAdapter,
-  optionalRoot,
   type TrackerAdapter,
 } from "../tracker-adapter.ts";
 import type { Ticket } from "../ticket.ts";
@@ -40,11 +47,6 @@ export type LinearRuntime = {
   fetch?: typeof fetch;
   token?: string;
   env?: Record<string, string | undefined>;
-};
-
-type PageInfo = {
-  hasNextPage: boolean;
-  endCursor: string | null;
 };
 
 type LabelNode = { name: string };
@@ -159,19 +161,19 @@ type SchemaProbeData = {
 };
 
 type IssueLabelsData = {
-  issueLabels: { pageInfo: PageInfo; nodes: (LabelNode | null)[] };
+  issueLabels: TrackerPage<LabelNode>;
 };
 
 type WorkflowStatesData = {
-  workflowStates: { pageInfo: PageInfo; nodes: (StateNode | null)[] };
+  workflowStates: TrackerPage<StateNode>;
 };
 
 type ProjectsData = {
-  projects: { pageInfo: PageInfo; nodes: (ProjectNode | null)[] };
+  projects: TrackerPage<ProjectNode>;
 };
 
 type FrontierData = {
-  issues: { pageInfo: PageInfo; nodes: (IssueNode | null)[] };
+  issues: TrackerPage<IssueNode>;
 };
 
 type IssueStatesData = {
@@ -185,7 +187,11 @@ type IssueStatesData = {
  * `LINEAR_API_KEY` (or `runtime.token`). Linear calls the work "issues";
  * this Adapter is where that word stays, mapping each onto a Ticket, and
  * its default `leaveFrontier` moves a finished Ticket to In Review, not
- * Done.
+ * Done. Its `frontier`, `waiting`, and `tree` are thin partitions over the
+ * Tracker Adapter floor's one rooted candidates read: the floor owns the
+ * paging loop, the root policy, pick order, the GraphQL transport, and the
+ * blocking probe; this Adapter owns Linear's own facts — the selector's
+ * state, label, or project, the open candidates read, and the lie refusal.
  *
  * @param options The Frontier selector and the optional Root.
  * @param runtime The seams tests inject: fetch, token, env.
@@ -203,6 +209,10 @@ export function linear(
     throw new Error("Linear Frontier needs a state, label, or project");
   }
   const http = runtime.fetch ?? fetch;
+  // Linear hands each Issue a suggested Branch name; the Frontier is what
+  // seeds the Adapter's suggestion with its own Tickets' names (#142), so
+  // the tree answers read-only. Each frontier read starts the suggestion
+  // over.
   const suggestedBranches = new Map<string, string>();
 
   async function token(): Promise<string> {
@@ -223,13 +233,22 @@ export function linear(
     variables: Record<string, unknown> = {},
   ): Promise<T> {
     try {
-      return await linearGraphql<T>(
+      return await graphqlRead<T>({
         http,
-        await token(),
+        endpoint: "https://api.linear.app/graphql",
+        headers: {
+          Authorization: await token(),
+          "Content-Type": "application/json",
+        },
         operationName,
         query,
         variables,
-      );
+        errors: {
+          auth: () => new LinearAuthError(),
+          unreachable: (detail) =>
+            new LinearUnreachableError(`Linear GraphQL ${detail}`),
+        },
+      });
     } catch (error) {
       if (
         error instanceof LinearUnreachableError ||
@@ -242,68 +261,71 @@ export function linear(
     }
   }
 
-  async function canExpressBlocking(): Promise<boolean> {
-    const data = await graphql<SchemaProbeData>("SchemaProbe", schemaProbeQuery);
-    return data.__type?.fields?.some((field) => field.name === "inverseRelations") ??
-      false;
+  // The blocking-expression probe is a schema fact, not a per-call one: the
+  // floor reads it once per transport and scope per process, so frontier,
+  // waiting, tree, and inspect share the first answer. The token is the
+  // scope: it names the one workspace this Adapter talks to.
+  function canExpressBlocking(): Promise<boolean> {
+    return token().then((scope) =>
+      blockingProbeOnce(http, scope, async () => {
+        const data = await graphql<SchemaProbeData>(
+          "SchemaProbe",
+          schemaProbeQuery,
+        );
+        return data.__type?.fields?.some((field) =>
+          field.name === "inverseRelations"
+        ) ?? false;
+      }),
+    );
   }
 
-  async function paginate<T, N>(
-    operationName: string,
-    query: string,
-    connection: (data: T) => { pageInfo: PageInfo; nodes: (N | null)[] },
-  ): Promise<N[]> {
-    const nodes: N[] = [];
-    let cursor: string | null = null;
-    while (true) {
-      const data: T = await graphql<T>(operationName, query, { cursor });
-      const page = connection(data);
-      for (const node of page.nodes) {
-        if (node !== null) {
-          nodes.push(node);
-        }
-      }
-      if (!page.pageInfo.hasNextPage) {
-        break;
-      }
-      cursor = page.pageInfo.endCursor;
+  async function refuseWhenBlockingUnexpressable(): Promise<void> {
+    if (!(await canExpressBlocking())) {
+      throw new Error("Linear cannot express blocking");
     }
-    return nodes;
   }
 
-  async function inspect() {
-    const [labels, states, projects, blocking] = await Promise.all([
-      paginate<IssueLabelsData, LabelNode>(
-        "IssueLabels",
-        issueLabelsQuery,
-        (data) => data.issueLabels,
-      ),
-      paginate<WorkflowStatesData, StateNode>(
-        "WorkflowStates",
-        workflowStatesQuery,
-        (data) => data.workflowStates,
-      ),
-      paginate<ProjectsData, ProjectNode>(
-        "Projects",
-        projectsQuery,
-        (data) => data.projects,
-      ),
-      canExpressBlocking(),
-    ]);
+  // One page of the open candidates read: every Issue the API answers with,
+  // minus the ones that have left the Frontier — a Ticket whose work already
+  // landed, or was canceled, is not an open candidate, so a root naming one
+  // is refused as a lie (ADR 0038). The floor owns the paging loop, the root
+  // policy, and the mapping onto Tickets. Each read starts at no cursor, so
+  // the first page resets what the read has seen, and a lie is named from
+  // this read's own answers.
+  const fetched = new Map<string, IssueNode>();
+
+  async function readCandidatesPage(
+    cursor: string | null,
+  ): Promise<TrackerPage<IssueNode>> {
+    if (cursor === null) {
+      fetched.clear();
+    }
+    const data: FrontierData = await graphql<FrontierData>(
+      "Frontier",
+      frontierQuery,
+      { cursor },
+    );
+    const page = data.issues;
+    for (const node of page.nodes) {
+      if (node !== null) {
+        fetched.set(node.identifier, node);
+      }
+    }
     return {
-      existingLabels: labels.map((label) => label.name),
-      selectorLabels: options.label === undefined ? [] : [options.label],
-      existingStates: states.map((state) => state.name),
-      selectorState: options.state,
-      existingProjects: projects.map((project) => project.name),
-      selectorProject: options.project,
-      canExpressBlocking: blocking,
+      pageInfo: page.pageInfo,
+      nodes: page.nodes.flatMap((node) =>
+        node !== null && !hasLeftFrontier(node.state) ? [node] : []
+      ),
     };
   }
 
   // The Frontier query answers every Ticket regardless of state, so a named
-  // Ticket's absence or state is a lie the Adapter can see directly.
-  function refuseTicketLie(id: string, node: IssueNode | undefined): void {
+  // Ticket's absence or state is a lie the Adapter can see directly, in
+  // Linear's own words.
+  async function refuseTicketLie(
+    id: string,
+    node: IssueNode | undefined,
+  ): Promise<void> {
     if (node === undefined) {
       throw new Error(`Ticket ${id} does not exist on Linear`);
     }
@@ -317,176 +339,78 @@ export function linear(
     }
   }
 
+  async function inspect() {
+    const [labels, states, projects, blocking] = await Promise.all([
+      paginate<LabelNode>(async (cursor) => {
+        const data: IssueLabelsData = await graphql<IssueLabelsData>(
+          "IssueLabels",
+          issueLabelsQuery,
+          { cursor },
+        );
+        return data.issueLabels;
+      }),
+      paginate<StateNode>(async (cursor) => {
+        const data: WorkflowStatesData = await graphql<WorkflowStatesData>(
+          "WorkflowStates",
+          workflowStatesQuery,
+          { cursor },
+        );
+        return data.workflowStates;
+      }),
+      paginate<ProjectNode>(async (cursor) => {
+        const data: ProjectsData = await graphql<ProjectsData>(
+          "Projects",
+          projectsQuery,
+          { cursor },
+        );
+        return data.projects;
+      }),
+      canExpressBlocking(),
+    ]);
+    return {
+      existingLabels: labels.map((label) => label.name),
+      selectorLabels: options.label === undefined ? [] : [options.label],
+      existingStates: states.map((state) => state.name),
+      selectorState: options.state,
+      existingProjects: projects.map((project) => project.name),
+      selectorProject: options.project,
+      canExpressBlocking: blocking,
+    };
+  }
+
+  // The rooted read answers all three rooted methods (ADR 0038): frontier
+  // and waiting are its halves, tree is the whole answer (ADR 0039). The
+  // selector's own match is state, label, or project — Linear's vocabulary
+  // (ADR 0016); the root policy stays in the floor.
+  const read = rootedRead<IssueNode>(
+    {
+      refuseWhenBlockingUnexpressable,
+      readCandidatesPage,
+      refuseLie: (id) => refuseTicketLie(id, fetched.get(id)),
+      toTicket,
+    },
+    {
+      matches: (node) => matchesSelector(node, options),
+      parent: options.parent,
+      ids: options.ids,
+    },
+  );
+
   return Object.assign(
     createTrackerAdapter({
       async frontier(root) {
-        const blocking = await canExpressBlocking();
-        if (!blocking) {
-          throw new Error("Linear cannot express blocking");
-        }
-        // The root named per Run reaches the Adapter as an argument (ADR 0038); a
-        // config-level root is what stands in when none is named on the call.
-        const effective = root ?? optionalRoot(options.parent, options.ids);
         suggestedBranches.clear();
-        const issues = await paginate<FrontierData, IssueNode>(
-          "Frontier",
-          frontierQuery,
-          (data) => data.issues,
-        );
-        const matched: IssueNode[] = [];
-        if (effective?.kind === "list") {
-          const byId = new Map(issues.map((node) => [node.identifier, node]));
-          for (const id of effective.ids) {
-            const node = byId.get(id);
-            refuseTicketLie(id, node);
-            if (node !== undefined && blockedBy(node).length === 0) {
-              matched.push(node);
-            }
-          }
-        } else {
-          for (const node of issues) {
-            if (effective?.kind === "parent") {
-              // The parent narrows the selector's Frontier, so its children
-              // are still selector Tickets: labels and unblocked both apply.
-              if (
-                node.parent === null ||
-                node.parent.identifier !== effective.id ||
-                !matchesSelector(node, options) ||
-                blockedBy(node).length > 0
-              ) {
-                continue;
-              }
-            } else if (!matchesFrontier(node, options)) {
-              continue;
-            }
-            matched.push(node);
-          }
-          if (effective?.kind === "parent") {
-            const parent = issues.find((node) =>
-              node.identifier === effective.id
-            );
-            refuseTicketLie(effective.id, parent);
+        const answer = await read(root);
+        for (const ticket of answer.frontier) {
+          const branch = fetched.get(ticket.id)?.branchName;
+          if (branch !== undefined && branch !== null && branch.length > 0) {
+            suggestedBranches.set(ticket.id, branch);
           }
         }
-        const tickets: Ticket[] = [];
-        for (const node of matched) {
-          const ticket = toTicket(node);
-          tickets.push(ticket);
-          if (node.branchName !== null && node.branchName.length > 0) {
-            suggestedBranches.set(ticket.id, node.branchName);
-          }
-        }
-        return tickets.sort((a, b) =>
-          a.id.localeCompare(b.id, undefined, { numeric: true }),
-        );
+        return [...answer.frontier];
       },
-      async waiting(root) {
-        const blocking = await canExpressBlocking();
-        if (!blocking) {
-          throw new Error("Linear cannot express blocking");
-        }
-        const effective = root ?? optionalRoot(options.parent, options.ids);
-        const issues = await paginate<FrontierData, IssueNode>(
-          "Frontier",
-          frontierQuery,
-          (data) => data.issues,
-        );
-        let waiting: IssueNode[];
-        if (effective?.kind === "list") {
-          const byId = new Map(issues.map((node) => [node.identifier, node]));
-          waiting = [];
-          for (const id of effective.ids) {
-            const node = byId.get(id);
-            // A named Ticket is unblocked (the Frontier's), waiting here, or
-            // a lie — closed or missing is refused as `frontier` does.
-            refuseTicketLie(id, node);
-            if (node !== undefined && blockedBy(node).length > 0) {
-              waiting.push(node);
-            }
-          }
-        } else if (effective?.kind === "parent") {
-          waiting = issues.filter((node) =>
-            node.parent !== null &&
-            node.parent.identifier === effective.id &&
-            matchesSelector(node, options) &&
-            blockedBy(node).length > 0
-          );
-          const parent = issues.find((node) =>
-            node.identifier === effective.id
-          );
-          refuseTicketLie(effective.id, parent);
-        } else {
-          waiting = issues.filter((node) =>
-            matchesSelectorOptions(node, options) &&
-            blockedBy(node).length > 0
-          );
-        }
-        return waiting.map(toTicket).sort((a, b) =>
-          a.id.localeCompare(b.id, undefined, { numeric: true }),
-        );
-      },
-      // One scan answers the whole tree: the same candidates `frontier` and
-      // `waiting` split, partitioned here, plus the named parent's own
-      // Ticket — refuseTicketLie has already refused one that is not a
-      // live candidate (#142). Read-only: unlike `frontier`, it seeds no
-      // suggested Branch names.
-      async tree(root) {
-        const blocking = await canExpressBlocking();
-        if (!blocking) {
-          throw new Error("Linear cannot express blocking");
-        }
-        const effective = root ?? optionalRoot(options.parent, options.ids);
-        const issues = await paginate<FrontierData, IssueNode>(
-          "Frontier",
-          frontierQuery,
-          (data) => data.issues,
-        );
-        let candidates: IssueNode[];
-        let parent: Ticket | undefined;
-        if (effective?.kind === "list") {
-          const byId = new Map(issues.map((node) => [node.identifier, node]));
-          candidates = [];
-          for (const id of effective.ids) {
-            const node = byId.get(id);
-            // A named Ticket is unblocked (the Frontier's), waiting, or a
-            // lie — closed or missing is refused as `frontier` does.
-            refuseTicketLie(id, node);
-            if (node !== undefined) {
-              candidates.push(node);
-            }
-          }
-        } else if (effective?.kind === "parent") {
-          // The parent narrows the selector's candidates, so its children
-          // are still selector Tickets: the selector applies, unblocked
-          // does not.
-          candidates = issues.filter((node) =>
-            node.parent !== null &&
-            node.parent.identifier === effective.id &&
-            matchesSelector(node, options)
-          );
-          const parentNode = issues.find((node) =>
-            node.identifier === effective.id
-          );
-          refuseTicketLie(effective.id, parentNode);
-          parent = parentNode === undefined ? undefined : toTicket(parentNode);
-        } else {
-          candidates = issues.filter((node) =>
-            matchesSelectorOptions(node, options)
-          );
-        }
-        const byPickOrder = (a: Ticket, b: Ticket) =>
-          a.id.localeCompare(b.id, undefined, { numeric: true });
-        const tickets = candidates.map(toTicket);
-        return {
-          parent,
-          frontier: tickets.filter((ticket) =>
-            ticket.blockedBy.length === 0
-          ).sort(byPickOrder),
-          waiting: tickets.filter((ticket) =>
-            ticket.blockedBy.length > 0
-          ).sort(byPickOrder),
-        };
-      },
+      waiting: (root) => read(root).then((answer) => [...answer.waiting]),
+      tree: read,
       branchName(ticket) {
         return suggestedBranches.get(ticket.id) ?? `readyrun/${ticket.id}`;
       },
@@ -523,43 +447,13 @@ export function linear(
   );
 }
 
-function matchesFrontier(
-  node: IssueNode,
-  options: LinearTrackerOptions,
-): boolean {
-  return matchesSelectorOptions(node, options) &&
-    blockedBy(node).length === 0;
-}
-
-// The selector's own facts — state, label, project, config parent, config
-// ids — without the unblocked clause, so `frontier` and `waiting` split the
-// same candidates.
-function matchesSelectorOptions(
-  node: IssueNode,
-  options: LinearTrackerOptions,
-): boolean {
-  if (!matchesSelector(node, options)) {
-    return false;
-  }
-  if (
-    options.parent !== undefined &&
-    (node.parent === null || node.parent.identifier !== options.parent)
-  ) {
-    return false;
-  }
-  if (options.ids !== undefined && !options.ids.includes(node.identifier)) {
-    return false;
-  }
-  return true;
-}
-
+// The selector's own facts — state, label, or project (ADR 0016). Open
+// candidates only reach it: whether a Ticket has left the Frontier is the
+// candidates read's fact, not the selector's.
 function matchesSelector(
   node: IssueNode,
   options: LinearTrackerOptions,
 ): boolean {
-  if (options.state === undefined && hasLeftFrontier(node.state)) {
-    return false;
-  }
   if (
     options.label !== undefined &&
     !names(node.labels.nodes).includes(options.label)
@@ -629,38 +523,4 @@ class LinearAuthError extends Error {
     );
     this.name = "LinearAuthError";
   }
-}
-
-async function linearGraphql<T>(
-  http: typeof fetch,
-  token: string,
-  operationName: string,
-  query: string,
-  variables: Record<string, unknown>,
-): Promise<T> {
-  const response = await http("https://api.linear.app/graphql", {
-    method: "POST",
-    headers: {
-      Authorization: token,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ query, variables, operationName }),
-  });
-  const payload = await response.json() as {
-    data?: T;
-    errors?: { message: string }[];
-  };
-  if (!response.ok) {
-    if (response.status === 401) {
-      throw new LinearAuthError();
-    }
-    throw new LinearUnreachableError(`Linear GraphQL HTTP ${response.status}`);
-  }
-  if (payload.errors !== undefined && payload.errors.length > 0) {
-    throw new LinearUnreachableError(payload.errors[0]?.message ?? "Linear GraphQL error");
-  }
-  if (payload.data === undefined) {
-    throw new LinearUnreachableError("Linear GraphQL returned no data");
-  }
-  return payload.data;
 }
