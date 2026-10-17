@@ -93,14 +93,13 @@ export async function computePlan(options: RunOptions): Promise<Plan> {
   const { cap, source } = resolveCap(options, config);
   const cwd = options.cwd ?? process.cwd();
   const root = options.root;
-  const doctorFailures = await collectDoctorFailures(
+  const doctorFailures = await collectDoctorFailures({
     config,
     cwd,
-    options.effort ?? config.effort,
-    options.permissions ?? config.permissions,
     root,
-    { probe: false },
-  );
+    overrides: options,
+    probe: false,
+  });
   const base = await resolveRunBase(cwd, options.base);
   // The same frontier call the Run's first iteration makes; a Tracker that
   // cannot be reached is a failure the preview reports, not an empty Plan.

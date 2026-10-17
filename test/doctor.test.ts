@@ -983,8 +983,8 @@ test("a Worker Adapter that never exits fails Doctor's cwd-fidelity probe via ti
       const previousHang = process.env.READYRUN_PROBE_HANG;
       process.env.READYRUN_PROBE_HANG = "1";
       try {
-        const failures = await collectDoctorFailures(
-          defineConfig({
+        const failures = await collectDoctorFailures({
+          config: defineConfig({
             tracker: memoryTracker({
               tickets: [ticket({ id: "52" })],
               ready: "unblocked",
@@ -993,12 +993,9 @@ test("a Worker Adapter that never exits fails Doctor's cwd-fidelity probe via ti
             worker: custom({ bin, unattendedFlag: "--go" }),
             model: "composer-2",
           }),
-          repo.cwd,
-          undefined,
-          "ask",
-          undefined,
-          { probeTimeoutMs: 300 },
-        );
+          cwd: repo.cwd,
+          probeTimeoutMs: 300,
+        });
         const output: string[] = [];
         writeDoctorFailures(
           {
