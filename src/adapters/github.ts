@@ -352,9 +352,6 @@ export function github(
       frontier: (root) => read(root).then((answer) => [...answer.frontier]),
       waiting: (root) => read(root).then((answer) => [...answer.waiting]),
       tree: read,
-      branchName(ticket) {
-        return `readyrun/${ticket.id}`;
-      },
       async leaveFrontier(ticket, landing) {
         for (const label of options.labels) {
           await rest(

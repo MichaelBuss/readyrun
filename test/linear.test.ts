@@ -98,20 +98,45 @@ test("a comment failure is a Tracker failure, not a quiet continue", async () =>
   assert.equal(bodies.includes(linearDoneStateId), false);
 });
 
-test("when Linear exposes a suggested branch name, that is the Branch", async () => {
+test("Linear's suggested Branch name travels on the answer, whatever the caller reads first", async () => {
   const { adapter } = linearFromWorld({
     ...world,
-    suggestedBranchNames: { "52": "feature/eng-52-ticket-52" },
+    tickets: [ticket({ id: "52", suggestedBranch: "feature/eng-52-ticket-52" })],
   });
-  const [picked] = await adapter.frontier();
+  // The tree, not the Frontier: the suggestion rides the answer that
+  // discovered it, so no earlier read can be a prerequisite.
+  const answer = await adapter.tree();
+  const [picked] = answer.frontier;
   assert.ok(picked);
+  assert.equal(picked.suggestedBranch, "feature/eng-52-ticket-52");
   assert.equal(adapter.branchName(picked), "feature/eng-52-ticket-52");
+});
+
+test("a waiting Ticket carries its suggested Branch name off the same answer", async () => {
+  const { adapter } = linearFromWorld({
+    tickets: [
+      ticket({ id: "52" }),
+      ticket({
+        id: "53",
+        blockedBy: ["52"],
+        suggestedBranch: "feature/eng-53-ticket-53",
+      }),
+    ],
+    ready: "unblocked",
+    labels: ["ready-for-agent"],
+  });
+  const [waiting] = await adapter.waiting();
+  assert.ok(waiting);
+  assert.equal(waiting.suggestedBranch, "feature/eng-53-ticket-53");
+  assert.equal(adapter.branchName(waiting), "feature/eng-53-ticket-53");
 });
 
 test("when Linear has no suggested branch name, the Branch is a convention over the identifier", async () => {
   const { adapter } = linearFromWorld(world);
-  const [picked] = await adapter.frontier();
+  const answer = await adapter.tree();
+  const [picked] = answer.frontier;
   assert.ok(picked);
+  assert.equal(picked.suggestedBranch, undefined);
   assert.equal(adapter.branchName(picked), "readyrun/52");
 });
 

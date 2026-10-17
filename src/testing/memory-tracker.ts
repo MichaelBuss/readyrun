@@ -95,9 +95,6 @@ export function memoryTracker(options: MemoryTrackerOptions): TrackerAdapter {
         waiting: pickOrder(all.filter((ticket) => !unblocked(ticket))),
       };
     },
-    branchName(ticket) {
-      return `readyrun/${ticket.id}`;
-    },
     leaveFrontier(ticket) {
       ineligible.add(ticket.id);
       return Promise.resolve();
