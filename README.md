@@ -143,7 +143,7 @@ Cwd-fidelity probe: not run; the Run proves it at start
 Run with: readyrun run --max 3
 ```
 
-An npm install puts `readyrun` on PATH (Node's type stripping runs the CLI directly):
+An npm install puts `readyrun` on PATH (the npm tarball ships compiled JavaScript — Node refuses to strip types under `node_modules`, so the published sources cannot be the entry points):
 
 ```sh
 npx readyrun init
@@ -184,4 +184,4 @@ pnpm readyrun doctor
 pnpm readyrun run --max 5
 ```
 
-From this repo, `package.json` `bin` maps `readyrun` to `src/cli.ts` (Node 24).
+From this repo, `npm run readyrun` runs `src/cli.ts` directly (Node 24). The published `bin` points at `dist/cli.js`: `npm run build` compiles `src/` to `dist/`, and `npm pack`/`npm publish` build first via `prepack`.

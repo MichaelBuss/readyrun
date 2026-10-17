@@ -1,6 +1,6 @@
 {
   "name": "@readyrun/readyrun",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Walk a tracker Frontier and run one coding Worker per Ticket.",
   "license": "MIT",
   "type": "module",
@@ -9,18 +9,20 @@
     "url": "git+https://github.com/MichaelBuss/readyrun.git"
   },
   "bin": {
-    "readyrun": "src/cli.ts"
+    "readyrun": "dist/cli.js"
   },
   "exports": {
-    ".": "./src/mod.ts",
-    "./cli": "./src/cli.ts"
+    ".": "./dist/mod.js",
+    "./cli": "./dist/cli.js"
   },
   "files": [
-    "src",
+    "dist",
     "LICENSE",
     "README.md"
   ],
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "npm run build",
     "test": "node --test test/**/*.test.ts",
     "typecheck": "tsc --noEmit",
     "readyrun": "node src/cli.ts",
