@@ -2,17 +2,52 @@ import { defineConfig, type ReadyRunConfig } from "./config.ts";
 import {
   collectDoctorFailures,
   discloseBase,
+  resolveRunSettings,
   writeDoctorFailures,
 } from "./doctor.ts";
-import {
-  resolveRunBase,
-  runBranchName,
-  type RunBase,
-} from "./git.ts";
+import { resolveRunBase, type RunBase, runBranchName } from "./git.ts";
+import type { Liveness, LivenessStdout } from "./liveness.ts";
 import type { Ticket } from "./ticket.ts";
 import type { FrontierRoot } from "./tracker-adapter.ts";
 import type { Effort, Permissions } from "./worker-adapter.ts";
-import type { RunOptions } from "./run.ts";
+
+/**
+ * What a Run assembler hands the Plan's computation: the Consumer's config,
+ * the cap, an optional base, the Root naming this Run's Frontier, and the
+ * Run-named model, Effort, and Permissions. The flag surface `readyrun run`
+ * parses maps one-to-one onto these. Owned here so the Plan is typed against
+ * its own input and not the Run's option shape.
+ */
+export type PlanInput = {
+  /** The Consumer's config, as `defineConfig` built it. */
+  config: ReadyRunConfig;
+  /** The cap: the most Tickets this Run may start. Required, one way or another. */
+  cap?: number;
+  /**
+   * The commit-ish every Worktree is cut from, and what the Run Branch
+   * collects onto. Defaults to the Consumer's checkout; naming the previous
+   * Run Branch is how a capped Run is continued (ADR 0034). There is no config
+   * key for it, because a permanently overridden base is nobody's workflow.
+   */
+  base?: string;
+  /**
+   * The Frontier's root for this Run (ADR 0038): a parent whose children
+   * become the Frontier, or an explicit list that bypasses the Consumer
+   * selector. A root named here replaces any config-level root, as --max and
+   * --model do.
+   */
+  root?: FrontierRoot;
+  /** The Consumer root the Run works from. Defaults to the process's. */
+  cwd?: string;
+  /** Where the Run's lines are written. Defaults to process stdout. */
+  stdout?: LivenessStdout;
+  /** The model for this Run; overrides the config default, not the label map. */
+  model?: string;
+  /** The Permissions for this Run; overrides the config default. */
+  permissions?: Permissions;
+  /** The Effort for this Run; must be in the Adapter's declared vocabulary. */
+  effort?: Effort;
+};
 
 /**
  * A Run cannot start without a cap (there is no unlimited Run). The
@@ -32,7 +67,7 @@ export class RunCapRequiredError extends Error {
 export type CapSource = "--max" | "config cap" | "the --ticket list's length";
 
 export function resolveCap(
-  options: Pick<RunOptions, "cap" | "root">,
+  options: Pick<PlanInput, "cap" | "root">,
   config: ReadyRunConfig,
 ): { cap: number; source: CapSource } {
   if (options.cap !== undefined) {
@@ -42,15 +77,18 @@ export function resolveCap(
     return { cap: config.cap, source: "config cap" };
   }
   if (options.root?.kind === "list") {
-    return { cap: options.root.ids.length, source: "the --ticket list's length" };
+    return {
+      cap: options.root.ids.length,
+      source: "the --ticket list's length",
+    };
   }
   throw new RunCapRequiredError();
 }
 
-// The Run Branch is derived from the moment the Run starts, the way the
-// Branch of a Ticket is; a Plan names the one its Run would collect onto.
-// The naming rule lives in git.ts beside the HEAD trap that matches the
-// namespace it names into.
+// The Run Branch is named when the Plan is computed, the way the Branch of a
+// Ticket is named when it is picked; the Run collects onto the name the Plan
+// stamped. The naming rule lives in git.ts beside the HEAD trap that matches
+// the namespace it names into.
 export { runBranchName };
 
 /**
@@ -66,33 +104,68 @@ export type PlanWaiting =
 /**
  * Everything a Run resolves before its first side effect (ADR 0039): Doctor's
  * verdict, the Frontier in stable pick order, the resolved base, the Run
- * Branch it would collect onto, the resolved cap and where it came from, and
- * the Tickets waiting off the Frontier. Doctor is the single authority on
- * validity; this computation derives none of its rules. The preview skips the
+ * Branch it collects onto, the resolved cap and where it came from, the
+ * Tickets waiting off the Frontier, and the resolved Effort, Permissions, and
+ * model the Workers spawn under. Doctor is the single authority on validity;
+ * this computation derives none of its rules. The preview skips the
  * cwd-fidelity probe (ADR 0037) — proving cwd fidelity is the Run's, at start.
  */
 export type Plan = {
   doctorFailures: string[];
   frontier: Ticket[];
   waiting: PlanWaiting;
-  base?: RunBase;
+  base: RunBase;
   runBranch: string;
   cap: number;
   capSource: CapSource;
   root?: FrontierRoot;
   command: string;
+  /** The Effort and Permissions this Run's Workers spawn under. */
+  settings: { effort?: Effort; permissions: Permissions };
+  /** The Run-named model override; absent reads the config and the label map. */
+  model?: string;
 };
 
 /**
- * Resolve the Plan: Doctor's verdict, the Frontier, the waiting Tickets, the
- * base, the Run Branch, the cap and its source, and the equivalent command.
- * Read-only end to end — it creates nothing and spawns no Worker.
+ * The two reads the Plan's computation can fail on name where they failed,
+ * so the Run's report says the same stage it always said: the Tracker read
+ * failed at the tracker, the base failed at git.
  */
-export async function computePlan(options: RunOptions): Promise<Plan> {
+export type PlanResolutionStage = "tracker" | "git";
+
+export class PlanResolutionError extends Error {
+  readonly stage: PlanResolutionStage;
+  /** Doctor's verdict, when the refusal was already known (ADR 0039). */
+  readonly doctorFailures: string[];
+
+  constructor(
+    stage: PlanResolutionStage,
+    message: string,
+    doctorFailures: string[] = [],
+  ) {
+    super(message);
+    this.name = "PlanResolutionError";
+    this.stage = stage;
+    this.doctorFailures = doctorFailures;
+  }
+}
+
+/**
+ * Resolve the Plan: Doctor's verdict, the Frontier, the waiting Tickets, the
+ * base, the Run Branch, the cap and its source, the Workers' settings, and
+ * the equivalent command. Read-only end to end — it creates nothing and
+ * spawns no Worker. The liveness sink is the Run's: the reads it stages are
+ * the reads the loop used to stage, now that the Run consumes this Plan.
+ */
+export async function computePlan(
+  options: PlanInput,
+  live?: Pick<Liveness, "stage" | "stop">,
+): Promise<Plan> {
   const config = defineConfig(options.config);
   const { cap, source } = resolveCap(options, config);
   const cwd = options.cwd ?? process.cwd();
   const root = options.root;
+  live?.stage("Doctor");
   const verdict = await collectDoctorFailures({
     config,
     cwd,
@@ -100,12 +173,43 @@ export async function computePlan(options: RunOptions): Promise<Plan> {
     overrides: options,
     probe: false,
   });
-  const base = await resolveRunBase(cwd, options.base);
+  let base;
+  try {
+    base = await resolveRunBase(cwd, options.base);
+  } catch (error) {
+    // A read that fails after Doctor refused carries the refusal with it:
+    // the Run renders Doctor's verdict rather than the read's stage, the way
+    // it always refused before the Plan carried it.
+    throw new PlanResolutionError(
+      "git",
+      error instanceof Error ? error.message : String(error),
+      verdict.failures,
+    );
+  }
+  // A refused Plan is still computed whole — the preview renders its full
+  // shape even on failure (ADR 0039) — but the Run that consumes it renders
+  // the refusal and stops, so the read it will not act on takes no stage
+  // line.
+  if (verdict.failures.length === 0) {
+    live?.stage("Frontier");
+  }
   // The same read Doctor's check made when a Root is named; unrooted, this is
   // the one read. A Tracker that cannot be reached is a failure the preview
   // reports, not an empty Plan.
-  const frontier = verdict.frontier ??
-    await config.tracker.frontier(root);
+  let frontier;
+  if (verdict.frontier !== undefined) {
+    frontier = verdict.frontier;
+  } else {
+    try {
+      frontier = await config.tracker.frontier(root);
+    } catch (error) {
+      throw new PlanResolutionError(
+        "tracker",
+        error instanceof Error ? error.message : String(error),
+        verdict.failures,
+      );
+    }
+  }
   let waiting: PlanWaiting;
   try {
     waiting = { kind: "answered", tickets: await config.tracker.waiting(root) };
@@ -132,6 +236,8 @@ export async function computePlan(options: RunOptions): Promise<Plan> {
       permissions: options.permissions,
       effort: options.effort,
     }),
+    settings: resolveRunSettings(config, options),
+    model: options.model,
   };
 }
 
@@ -203,7 +309,9 @@ export async function renderPlan(
     stdout.write("Frontier: empty\n");
   } else {
     stdout.write(
-      `Frontier: ${plan.frontier.length} ${ticketNoun(plan.frontier.length)} in pick order\n`,
+      `Frontier: ${plan.frontier.length} ${
+        ticketNoun(plan.frontier.length)
+      } in pick order\n`,
     );
     plan.frontier.forEach((ticket, index) => {
       stdout.write(`  ${index + 1}. ${ticket.id} ${ticket.title}\n`);
@@ -216,19 +324,21 @@ export async function renderPlan(
   } else {
     const tickets = plan.waiting.tickets;
     stdout.write(
-      `Waiting: ${tickets.length} ${ticketNoun(tickets.length)} off the Frontier\n`,
+      `Waiting: ${tickets.length} ${
+        ticketNoun(tickets.length)
+      } off the Frontier\n`,
     );
     for (const ticket of tickets) {
       stdout.write(`${waitingLine(ticket)}\n`);
     }
   }
-  if (plan.base !== undefined) {
-    await discloseBase(stdout, plan.base, cwd);
-  }
+  await discloseBase(stdout, plan.base, cwd);
   stdout.write(
-    `Run Branch: ${plan.runBranch} (named when the Run starts)\n`,
+    `Run Branch: ${plan.runBranch} (named when the Plan is computed)\n`,
   );
-  stdout.write(`Cap: ${plan.cap} ${ticketNoun(plan.cap)} from ${plan.capSource}\n`);
+  stdout.write(
+    `Cap: ${plan.cap} ${ticketNoun(plan.cap)} from ${plan.capSource}\n`,
+  );
   stdout.write("Cwd-fidelity probe: not run; the Run proves it at start\n");
   stdout.write(`Run with: ${plan.command}\n`);
 }
@@ -241,7 +351,7 @@ export async function renderPlan(
  *
  * @returns 0 when the previewed Run would start, 1 when Doctor would refuse it.
  */
-export async function preview(options: RunOptions): Promise<number> {
+export async function preview(options: PlanInput): Promise<number> {
   const stdout = options.stdout ?? process.stdout;
   const cwd = options.cwd ?? process.cwd();
   let plan: Plan;

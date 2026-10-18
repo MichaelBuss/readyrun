@@ -2,9 +2,8 @@ import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { defineConfig, type ReadyRunConfig } from "./config.ts";
 import {
-  collectDoctorFailures,
   discloseBase,
-  resolveRunSettings,
+  probeRunStart,
   writeDoctorFailures,
   warnUnusedModelsByLabel,
 } from "./doctor.ts";
@@ -15,7 +14,6 @@ import {
   collectTicket,
   createTicketWorktree,
   describeEscape,
-  resolveRunBase,
   shortCommit,
   worktreeIsClean,
   WorktreeNotRemovedError,
@@ -23,9 +21,11 @@ import {
 import { composeWorkerPrompt } from "./prompt.ts";
 import { installWorktreeDependencies } from "./install.ts";
 import {
-  resolveCap,
-  runBranchName,
+  computePlan,
+  PlanResolutionError,
   RunCapRequiredError,
+  type Plan,
+  type PlanInput,
 } from "./plan.ts";
 import {
   describeRoot,
@@ -34,44 +34,25 @@ import {
 } from "./frontier-root.ts";
 import type { Ticket } from "./ticket.ts";
 import type { FrontierRoot, Landing } from "./tracker-adapter.ts";
-import type { Effort, Permissions } from "./worker-adapter.ts";
 
 type RunStdout = LivenessStdout;
 
 /**
- * What a Run takes beyond the config: the cap, an optional base, and the
- * Root naming this Run's Frontier. The flag surface `readyrun run` parses
- * maps one-to-one onto these.
+ * What a Run takes beyond the runtime: the same surface the Plan's
+ * computation reads. The flag surface `readyrun run` parses maps one-to-one
+ * onto these.
  */
-export type RunOptions = {
-  /** The Consumer's config, as `defineConfig` built it. */
+export type RunOptions = PlanInput;
+
+/**
+ * What the Run's loop takes beyond the Plan it consumes: where it works, and
+ * where its lines are written. The config arrives already named by the
+ * surface that resolved the Plan.
+ */
+export type RunRuntime = {
   config: ReadyRunConfig;
-  /** The cap: the most Tickets this Run may start. Required, one way or another. */
-  cap?: number;
-  /**
-   * The commit-ish every Worktree is cut from, and what the Run Branch
-   * collects onto. Defaults to the Consumer's checkout; naming the previous
-   * Run Branch is how a capped Run is continued (ADR 0034). There is no config
-   * key for it, because a permanently overridden base is nobody's workflow.
-   */
-  base?: string;
-  /**
-   * The Frontier's root for this Run (ADR 0038): a parent whose children
-   * become the Frontier, or an explicit list that bypasses the Consumer
-   * selector. A root named here replaces any config-level root, as --max and
-   * --model do.
-   */
-  root?: FrontierRoot;
-  /** The Consumer root the Run works from. Defaults to the process's. */
-  cwd?: string;
-  /** Where the Run's lines are written. Defaults to process stdout. */
-  stdout?: RunStdout;
-  /** The model for this Run; overrides the config default, not the label map. */
-  model?: string;
-  /** The Permissions for this Run; overrides the config default. */
-  permissions?: Permissions;
-  /** The Effort for this Run; must be in the Adapter's declared vocabulary. */
-  effort?: Effort;
+  cwd: string;
+  stdout: RunStdout;
 };
 
 export { RunCapRequiredError };
@@ -200,300 +181,339 @@ function completionReport(
 
 /**
  * One invocation of the Run: `readyrun run` and the library surface for it.
- * Doctor gates the start; then the loop picks the next Ticket off the
- * Frontier, gives it one Worker in one Worktree on one Branch, and on
- * success merges that Branch into the Run Branch as exactly one merge
- * commit. Serial in v0. Hard stops on Tracker, git, spawn, or Worker
- * failure; empty Frontier and the cap are clean stops. A Run cannot start
- * without a cap.
+ * It resolves the Plan — Doctor's verdict, the Frontier in pick order, the
+ * base, the Run Branch, the cap — and hands it to {@link runPlan}, whose loop
+ * consumes it and re-verifies only what can change mid-loop (ADR 0039).
  *
  * @returns 0 for a clean stop, 1 for a hard stop or a Doctor refusal.
  */
 export async function run(options: RunOptions): Promise<number> {
   const config = defineConfig(options.config);
-  const { cap } = resolveCap(options, config);
-
   const cwd = options.cwd ?? process.cwd();
   const stdout = options.stdout ?? process.stdout;
   const live = startLiveness(stdout);
   try {
-    return await runWithLiveness(options, config, cap, cwd, stdout, live);
+    let plan: Plan;
+    try {
+      plan = await computePlan(options, live);
+    } catch (error) {
+      live.stop();
+      if (error instanceof RunCapRequiredError) {
+        throw error;
+      }
+      // Doctor's refusal outranks a read that failed after it: the Run
+      // renders the verdict it always rendered, read failure or not.
+      if (
+        error instanceof PlanResolutionError && error.doctorFailures.length > 0
+      ) {
+        writeDoctorFailures(stdout, error.doctorFailures);
+        return 1;
+      }
+      // The two reads the Plan's computation can fail on name where they
+      // failed, so the report says the stage it always said.
+      const stage = error instanceof PlanResolutionError
+        ? error.stage
+        : "tracker";
+      return hardStop(
+        stdout,
+        stage,
+        undefined,
+        caughtMessage(error),
+        0,
+        "",
+        undefined,
+        stage === "tracker" ? "Check Tracker auth and network" : undefined,
+      );
+    }
+    live.stop();
+    return await runPlan(plan, { config, cwd, stdout });
   } finally {
     live.stop();
   }
 }
 
-async function runWithLiveness(
-  options: RunOptions,
-  config: ReadyRunConfig & { permissions: Permissions },
-  cap: number,
-  cwd: string,
-  stdout: RunStdout,
-  live: Liveness,
+/**
+ * The Run's loop, consuming a resolved Plan: no first-iteration re-derivation
+ * of Doctor's rules, the base, the Run Branch, the cap, or the Frontier — the
+ * Plan's snapshot is the first pick (ADR 0039). What the loop re-verifies is
+ * what can change mid-loop: the cwd-fidelity probe at start, and a fresh
+ * Frontier read every iteration after the first, which is what lets waiting
+ * Tickets join when their blockers clear. The loop picks the next Ticket off
+ * the Frontier, gives it one Worker in one Worktree on one Branch, and on
+ * success merges that Branch into the Run Branch as exactly one merge commit.
+ * Serial in v0. Hard stops on Tracker, git, spawn, or Worker failure; empty
+ * Frontier and the cap are clean stops.
+ *
+ * @returns 0 for a clean stop, 1 for a hard stop or a Doctor refusal.
+ */
+export async function runPlan(
+  plan: Plan,
+  runtime: RunRuntime,
 ): Promise<number> {
-  // The Run's Effort and Permissions resolve once, where the Run starts;
-  // Doctor's verdict and every Worker spawn read the same answer.
-  const settings = resolveRunSettings(config, options);
-  live.stage("Doctor");
-  const verdict = await collectDoctorFailures({
-    config,
-    cwd,
-    root: options.root,
-    overrides: options,
-    stdout,
-  });
-  live.stop();
-  if (writeDoctorFailures(stdout, verdict.failures) === 1) {
-    return 1;
-  }
-  const runBranch = runBranchName(new Date());
-  let landed = 0;
-  let keptWorktree: string | undefined;
-  const stop = (
-    stage: HardStopStage,
-    ticketId?: string,
-    detail?: string,
-    nextAction?: string,
-  ): 1 => {
-    live.stop();
-    return hardStop(
-      stdout,
-      stage,
-      ticketId,
-      detail,
-      landed,
-      runBranch,
-      keptWorktree,
-      nextAction,
-    );
-  };
-  let base;
+  const config = defineConfig(runtime.config);
+  const cwd = runtime.cwd;
+  const stdout = runtime.stdout;
+  const live = startLiveness(stdout);
   try {
-    base = await resolveRunBase(cwd, options.base);
-  } catch (error) {
-    return stop(
-      "git",
-      undefined,
-      caughtMessage(error),
-    );
-  }
-  await discloseBase(stdout, base, cwd);
-  stdout.write(`Run Branch: ${runBranch}\n`);
-  const complete = (reason: CleanStop): 0 => {
-    live.stop();
-    return completionReport(
-      stdout,
-      reason,
-      cap,
-      landed,
-      runBranch,
-      base.commit,
-      options.root,
-    );
-  };
-  // A Ticket's Branch is cut from the Run Branch's tip, which until the first
-  // Ticket lands is the base the Run resolved at start (ADR 0028).
-  let runBranchTip = base.commit;
-  const context = config.contextFile === undefined
-    ? undefined
-    : await readFile(join(cwd, config.contextFile), "utf8");
-  let started = 0;
-  let unusedModelsWarned = false;
-  let waitingWorkWarned = false;
-
-  while (started < cap) {
-    live.stage("Frontier");
-    let frontier;
-    try {
-      frontier = await config.tracker.frontier(options.root);
-    } catch (error) {
-      return stop(
-        "tracker",
-        undefined,
-        caughtMessage(error),
-        "Check Tracker auth and network",
-      );
+    if (writeDoctorFailures(stdout, plan.doctorFailures) === 1) {
+      return 1;
     }
-    live.stop();
-    const root = options.root;
-    if (root !== undefined) {
-      const violations = rootViolationMessages(frontier, root);
-      if (violations.length > 0) {
-        return stop("tracker", undefined, violations[0]);
-      }
-      if (!waitingWorkWarned) {
-        warnWaitingRootTickets(stdout, root, frontier);
-        waitingWorkWarned = true;
-      }
+    // The one fact the Plan could not carry: the checkout's cwd fidelity
+    // (ADR 0037), proved at start by the Run itself.
+    const probeFailure = await probeRunStart(config, cwd, stdout);
+    if (probeFailure !== undefined) {
+      return writeDoctorFailures(stdout, [probeFailure]) === 1 ? 1 : 1;
     }
-    if (!unusedModelsWarned) {
-      warnUnusedModelsByLabel(stdout, config.modelsByLabel, frontier);
-      unusedModelsWarned = true;
-    }
-    const ticket = frontier[0];
-    if (ticket === undefined) {
-      return complete("frontier-empty");
-    }
-
-    const branch = config.tracker.branchName(ticket);
-    live.stage("Worktree");
-    let worktree;
-    try {
-      // Absolute, because the prompt names it (ADR 0036) and a relative cwd
-      // would make "Your working directory is ..." point somewhere else.
-      worktree = resolve(await createTicketWorktree(cwd, branch, runBranchTip));
-      // Dependency install is a step at its own seam, and the Run is its
-      // caller: the Worktree exists before its dependencies do.
-      await installWorktreeDependencies(worktree);
-      keptWorktree = worktree;
-    } catch (error) {
-      return stop(
-        "git",
-        ticket.id,
-        caughtMessage(error),
-      );
-    }
-    started += 1;
-    live.ticket({
-      id: ticket.id,
-      title: ticket.title,
-      branch,
-      started,
-      cap,
-    });
-    live.stage("Worker");
-    // Repo-global state is snapshotted per spawn and diffed after the Worker
-    // exits, so work that landed anywhere but the Ticket's Worktree and Branch
-    // is named as the escape it is instead of mistaken for nothing (ADR 0037).
-    let beforeSpawn;
-    try {
-      beforeSpawn = await captureRepoSnapshot(cwd, branch);
-    } catch (error) {
-      return stop("git", ticket.id, caughtMessage(error));
-    }
-    let result;
-    try {
-      result = await config.worker.spawn({
-        ticket,
-        cwd: worktree,
-        model: resolveModel(ticket, config, options.model),
-        permissions: settings.permissions,
-        effort: settings.effort,
-        prompt: composeWorkerPrompt(
-          config.tracker.promptCopy(ticket),
-          worktree,
-          branch,
-          context,
-        ),
-      });
-    } catch (error) {
-      return stop(
-        "spawn",
-        ticket.id,
-        caughtMessage(error),
-        "Check the Worker binary and that it is logged in",
-      );
-    }
-    let afterSpawn;
-    try {
-      afterSpawn = await captureRepoSnapshot(cwd, branch);
-    } catch (error) {
-      return stop("git", ticket.id, caughtMessage(error));
-    }
-    const escaped = describeEscape(beforeSpawn, afterSpawn);
-    if (escaped !== undefined) {
-      return stop(
-        "worker",
-        ticket.id,
-        escaped,
-        "The Ticket remains on the Frontier",
-      );
-    }
-    if (result.exitCode !== 0) {
-      return stop(
-        "worker",
-        ticket.id,
-        `exit code ${result.exitCode}`,
-        "The Ticket remains on the Frontier",
-      );
-    }
-    // Exit 0 is not success on its own: a Worker that did nothing also exits 0
-    // and also leaves a clean tree (ADR 0029).
-    let clean;
-    let changed;
-    try {
-      clean = await worktreeIsClean(worktree);
-      changed = await branchTreeDiffersFrom(cwd, branch, runBranchTip);
-    } catch (error) {
-      return stop(
-        "git",
-        ticket.id,
-        caughtMessage(error),
-      );
-    }
-    if (!clean) {
-      return stop(
-        "worker",
-        ticket.id,
-        `left work uncommitted in ${worktree}`,
-        "The Ticket remains on the Frontier",
-      );
-    }
-    if (!changed) {
-      return stop(
-        "worker",
-        ticket.id,
-        `produced nothing on ${branch}`,
-        "The Ticket remains on the Frontier",
-      );
-    }
-    // After the success checks, so that a hard stop at any earlier stage leaves
-    // the Worktree on disk for the Consumer to look at (ADR 0029). One call:
-    // the collect removes the Worktree, merges, and deletes the Branch in the
-    // order that implies, and hands back the Landing the Ticket leaves with.
-    let landing: Landing;
-    try {
-      landing = await collectTicket(cwd, {
+    const cap = plan.cap;
+    const runBranch = plan.runBranch;
+    const root = plan.root;
+    let landed = 0;
+    let keptWorktree: string | undefined;
+    const stop = (
+      stage: HardStopStage,
+      ticketId?: string,
+      detail?: string,
+      nextAction?: string,
+    ): 1 => {
+      live.stop();
+      return hardStop(
+        stdout,
+        stage,
+        ticketId,
+        detail,
+        landed,
         runBranch,
-        branch,
-        base: base.commit,
-        message: mergeMessage(ticket),
-        worktree,
-      });
-    } catch (error) {
-      // The removal is the one collect failure that leaves the Worktree on
-      // disk: the collect removes before it merges, so a merge failure has
-      // nothing left to keep and the report must not claim one.
-      const kept = error instanceof WorktreeNotRemovedError;
-      if (!kept) {
-        keptWorktree = undefined;
-      }
-      const gitError = caughtMessage(error);
-      const mergeFailure = gitError === undefined
-        ? "ReadyRun could not merge the Ticket's Branch into the Run Branch"
-        : `ReadyRun could not merge the Ticket's Branch into the Run Branch. ${gitError}`;
-      return stop("git", ticket.id, kept ? gitError : mergeFailure);
-    }
-    keptWorktree = undefined;
-    runBranchTip = landing.mergeCommit;
-    landed += 1;
-    // After the merge, because the Landing the Ticket is about to name did not
-    // exist before it — and because a merge that fails must leave the Ticket
-    // on the Frontier rather than off it with nothing landed (ADR 0033).
-    try {
-      if (config.leaveFrontier) {
-        await config.leaveFrontier(ticket, landing);
-      } else {
-        await config.tracker.leaveFrontier(ticket, landing);
-      }
-    } catch (error) {
-      return stop(
-        "tracker",
-        ticket.id,
-        caughtMessage(error),
-        "Check the Tracker",
+        keptWorktree,
+        nextAction,
       );
+    };
+    const base = plan.base;
+    await discloseBase(stdout, base, cwd);
+    stdout.write(`Run Branch: ${runBranch}\n`);
+    const complete = (reason: CleanStop): 0 => {
+      live.stop();
+      return completionReport(
+        stdout,
+        reason,
+        cap,
+        landed,
+        runBranch,
+        base.commit,
+        root,
+      );
+    };
+    // A Ticket's Branch is cut from the Run Branch's tip, which until the first
+    // Ticket lands is the base the Run resolved at start (ADR 0028).
+    let runBranchTip = base.commit;
+    const context = config.contextFile === undefined
+      ? undefined
+      : await readFile(join(cwd, config.contextFile), "utf8");
+    let started = 0;
+    let unusedModelsWarned = false;
+    let waitingWorkWarned = false;
+    let frontier = plan.frontier;
+    // The Plan's snapshot is the loop's first pick; from the second iteration
+    // on the Frontier is re-read, which is what lets waiting Tickets join
+    // when their blockers clear (ADR 0039).
+    let reRead = false;
+
+    while (started < cap) {
+      if (reRead) {
+        live.stage("Frontier");
+        try {
+          frontier = await config.tracker.frontier(root);
+        } catch (error) {
+          return stop(
+            "tracker",
+            undefined,
+            caughtMessage(error),
+            "Check Tracker auth and network",
+          );
+        }
+        live.stop();
+      }
+      reRead = true;
+      if (root !== undefined) {
+        const violations = rootViolationMessages(frontier, root);
+        if (violations.length > 0) {
+          return stop("tracker", undefined, violations[0]);
+        }
+        if (!waitingWorkWarned) {
+          warnWaitingRootTickets(stdout, root, frontier);
+          waitingWorkWarned = true;
+        }
+      }
+      if (!unusedModelsWarned) {
+        warnUnusedModelsByLabel(stdout, config.modelsByLabel, frontier);
+        unusedModelsWarned = true;
+      }
+      const ticket = frontier[0];
+      if (ticket === undefined) {
+        return complete("frontier-empty");
+      }
+  
+      const branch = config.tracker.branchName(ticket);
+      live.stage("Worktree");
+      let worktree;
+      try {
+        // Absolute, because the prompt names it (ADR 0036) and a relative cwd
+        // would make "Your working directory is ..." point somewhere else.
+        worktree = resolve(await createTicketWorktree(cwd, branch, runBranchTip));
+        // Dependency install is a step at its own seam, and the Run is its
+        // caller: the Worktree exists before its dependencies do.
+        await installWorktreeDependencies(worktree);
+        keptWorktree = worktree;
+      } catch (error) {
+        return stop(
+          "git",
+          ticket.id,
+          caughtMessage(error),
+        );
+      }
+      started += 1;
+      live.ticket({
+        id: ticket.id,
+        title: ticket.title,
+        branch,
+        started,
+        cap,
+      });
+      live.stage("Worker");
+      // Repo-global state is snapshotted per spawn and diffed after the Worker
+      // exits, so work that landed anywhere but the Ticket's Worktree and Branch
+      // is named as the escape it is instead of mistaken for nothing (ADR 0037).
+      let beforeSpawn;
+      try {
+        beforeSpawn = await captureRepoSnapshot(cwd, branch);
+      } catch (error) {
+        return stop("git", ticket.id, caughtMessage(error));
+      }
+      let result;
+      try {
+        result = await config.worker.spawn({
+          ticket,
+          cwd: worktree,
+        model: resolveModel(ticket, config, plan.model),
+        permissions: plan.settings.permissions,
+        effort: plan.settings.effort,
+          prompt: composeWorkerPrompt(
+            config.tracker.promptCopy(ticket),
+            worktree,
+            branch,
+            context,
+          ),
+        });
+      } catch (error) {
+        return stop(
+          "spawn",
+          ticket.id,
+          caughtMessage(error),
+          "Check the Worker binary and that it is logged in",
+        );
+      }
+      let afterSpawn;
+      try {
+        afterSpawn = await captureRepoSnapshot(cwd, branch);
+      } catch (error) {
+        return stop("git", ticket.id, caughtMessage(error));
+      }
+      const escaped = describeEscape(beforeSpawn, afterSpawn);
+      if (escaped !== undefined) {
+        return stop(
+          "worker",
+          ticket.id,
+          escaped,
+          "The Ticket remains on the Frontier",
+        );
+      }
+      if (result.exitCode !== 0) {
+        return stop(
+          "worker",
+          ticket.id,
+          `exit code ${result.exitCode}`,
+          "The Ticket remains on the Frontier",
+        );
+      }
+      // Exit 0 is not success on its own: a Worker that did nothing also exits 0
+      // and also leaves a clean tree (ADR 0029).
+      let clean;
+      let changed;
+      try {
+        clean = await worktreeIsClean(worktree);
+        changed = await branchTreeDiffersFrom(cwd, branch, runBranchTip);
+      } catch (error) {
+        return stop(
+          "git",
+          ticket.id,
+          caughtMessage(error),
+        );
+      }
+      if (!clean) {
+        return stop(
+          "worker",
+          ticket.id,
+          `left work uncommitted in ${worktree}`,
+          "The Ticket remains on the Frontier",
+        );
+      }
+      if (!changed) {
+        return stop(
+          "worker",
+          ticket.id,
+          `produced nothing on ${branch}`,
+          "The Ticket remains on the Frontier",
+        );
+      }
+      // After the success checks, so that a hard stop at any earlier stage leaves
+      // the Worktree on disk for the Consumer to look at (ADR 0029). One call:
+      // the collect removes the Worktree, merges, and deletes the Branch in the
+      // order that implies, and hands back the Landing the Ticket leaves with.
+      let landing: Landing;
+      try {
+        landing = await collectTicket(cwd, {
+          runBranch,
+          branch,
+          base: base.commit,
+          message: mergeMessage(ticket),
+          worktree,
+        });
+      } catch (error) {
+        // The removal is the one collect failure that leaves the Worktree on
+        // disk: the collect removes before it merges, so a merge failure has
+        // nothing left to keep and the report must not claim one.
+        const kept = error instanceof WorktreeNotRemovedError;
+        if (!kept) {
+          keptWorktree = undefined;
+        }
+        const gitError = caughtMessage(error);
+        const mergeFailure = gitError === undefined
+          ? "ReadyRun could not merge the Ticket's Branch into the Run Branch"
+          : `ReadyRun could not merge the Ticket's Branch into the Run Branch. ${gitError}`;
+        return stop("git", ticket.id, kept ? gitError : mergeFailure);
+      }
+      keptWorktree = undefined;
+      runBranchTip = landing.mergeCommit;
+      landed += 1;
+      // After the merge, because the Landing the Ticket is about to name did not
+      // exist before it — and because a merge that fails must leave the Ticket
+      // on the Frontier rather than off it with nothing landed (ADR 0033).
+      try {
+        if (config.leaveFrontier) {
+          await config.leaveFrontier(ticket, landing);
+        } else {
+          await config.tracker.leaveFrontier(ticket, landing);
+        }
+      } catch (error) {
+        return stop(
+          "tracker",
+          ticket.id,
+          caughtMessage(error),
+          "Check the Tracker",
+        );
+      }
     }
+    return complete("cap");
+  } finally {
+    live.stop();
   }
-  return complete("cap");
 }

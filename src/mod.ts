@@ -37,10 +37,10 @@ export { init } from "./init.ts";
 export type { InitAnswers, InitOptions } from "./init.ts";
 export { launcher } from "./launcher.ts";
 export type { LauncherIO, LauncherOptions } from "./launcher.ts";
-export { run, RunCapRequiredError } from "./run.ts";
-export type { RunOptions } from "./run.ts";
+export { run, runPlan, RunCapRequiredError } from "./run.ts";
+export type { RunOptions, RunRuntime } from "./run.ts";
 export { computePlan, preview, renderPlan } from "./plan.ts";
-export type { Plan, PlanWaiting } from "./plan.ts";
+export type { Plan, PlanInput, PlanWaiting } from "./plan.ts";
 export {
   BaseNotFoundError,
   DefaultBranchError,
