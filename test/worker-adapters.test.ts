@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { describe, test } from "node:test";
-import { spawnWorkerBinary } from "../src/worker-adapter.ts";
 import { claude, cursor, custom, defineConfig, doctor, opencode, run, UnknownPlaceholderError } from "../src/mod.ts";
 import type { ReadyRunConfig, WorkerAdapter } from "../src/mod.ts";
 import { memoryTracker } from "../src/testing/mod.ts";
@@ -1310,17 +1309,19 @@ describe("Worker Adapters", { concurrency: false }, () => {
     }
   });
 
-  test("spawnWorkerBinary with capture pipes the Worker's stdout back instead of inheriting it", async () => {
+  test("a custom Worker Adapter's capture spawn pipes the Worker's stdout back instead of inheriting it", async () => {
     const previousStdout = process.env.READYRUN_STUB_STDOUT;
     process.env.READYRUN_STUB_STDOUT = "auth ok\n";
     try {
       await withRecordingPath(["readyrun-worker"], async ({ bin }) => {
-        const result = await spawnWorkerBinary(
-          bin,
-          ["--model", "composer-2", "hello"],
-          process.cwd(),
-          { capture: true },
-        );
+        const result = await custom({ bin, unattendedFlag: "--go" }).spawn({
+          ticket: ticket({ id: "52" }),
+          cwd: process.cwd(),
+          model: "composer-2",
+          permissions: "ask",
+          prompt: "hello",
+          capture: true,
+        });
         assert.equal(result.exitCode, 0);
         assert.equal(result.stdout, "auth ok\n");
       });
@@ -1333,18 +1334,21 @@ describe("Worker Adapters", { concurrency: false }, () => {
     }
   });
 
-  test("spawnWorkerBinary with capture and a timeout kills a Worker that never exits and reports timedOut", async () => {
+  test("a custom Worker Adapter's capture spawn with a timeout kills a Worker that never exits and reports timedOut", async () => {
     const previousHang = process.env.READYRUN_PROBE_HANG;
     process.env.READYRUN_PROBE_HANG = "1";
     try {
       await withRecordingPath(["readyrun-worker"], async ({ bin }) => {
         const started = Date.now();
-        const result = await spawnWorkerBinary(
-          bin,
-          ["Print the output of `git rev-parse --show-toplevel` and nothing else."],
-          process.cwd(),
-          { capture: true, timeoutMs: 300 },
-        );
+        const result = await custom({ bin, unattendedFlag: "--go" }).spawn({
+          ticket: ticket({ id: "52" }),
+          cwd: process.cwd(),
+          model: "composer-2",
+          permissions: "ask",
+          prompt: "Print the output of `git rev-parse --show-toplevel` and nothing else.",
+          capture: true,
+          timeoutMs: 300,
+        });
         assert.equal(result.timedOut, true);
         assert.equal(result.stdout, process.cwd());
         const elapsed = Date.now() - started;

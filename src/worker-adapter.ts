@@ -235,7 +235,7 @@ export class UnknownPlaceholderError extends Error {
   }
 }
 
-export function unknownPlaceholdersIn(arg: string): string[] {
+function unknownPlaceholdersIn(arg: string): string[] {
   const unknown: string[] = [];
   for (const match of arg.matchAll(placeholderShape)) {
     if (match[0] !== cwdPlaceholder) {
@@ -253,11 +253,11 @@ export function assertKnownPlaceholders(option: string, args: string[]): void {
   }
 }
 
-export function interpolateCwdArgs(args: string[], cwd: string): string[] {
+function interpolateCwdArgs(args: string[], cwd: string): string[] {
   return args.map((arg) => arg.replaceAll(cwdPlaceholder, cwd));
 }
 
-export function spawnWorkerBinary(
+function spawnWorkerBinary(
   bin: string,
   args: string[],
   cwd: string,
@@ -381,14 +381,27 @@ export function execListOutput(bin: string, args: string[]): Promise<string> {
   }).then(({ stdout }) => stdout);
 }
 
-export type PrintModeWorkerOptions<Vocabulary extends readonly Effort[] = readonly Effort[]> = {
+/**
+ * The options the one argv assembly takes: the facts the shipped Worker
+ * Adapter factories declare about the same grammar — `--model`, the Effort
+ * flag when Effort is in play, the unattended flag when Permissions are
+ * `"unattended"`, and the prompt, all behind the leading args.
+ */
+export type AssembledWorkerOptions<Vocabulary extends readonly Effort[] = readonly Effort[]> = {
   effortFlag?: string;
   effortVocabulary?: Vocabulary;
-  // The argv that puts the CLI into print mode, `{cwd}`-interpolated: a
-  // leading flag (`-p`) or a leading subcommand with its own flags
-  // (`run --dir {cwd}`). Defaults to `-p`, the shared CLIs' flag.
+  // The argv that leads, `{cwd}`-interpolated: a leading flag (`-p`) or a
+  // leading subcommand with its own flags (`run --dir {cwd}`). Defaults to
+  // `-p`, the shared CLIs' flag.
   leadingArgs?: string[];
   extraArgs?: string[];
+  /**
+   * Declares the Adapter spawns print mode, where `"ask"` cannot reach the
+   * Consumer (ADR 0027). True by default — the shipped Adapters' grammar was
+   * print mode's first; `custom()` suppresses it, since the binary it wraps
+   * may still be able to ask.
+   */
+  printMode?: boolean;
   probeArgs?: string[];
   // A probe probeArgs cannot express: `opencode auth list` exits 0 whether
   // or not any credential exists, so its Adapter judges the captured output.
@@ -399,36 +412,45 @@ export type PrintModeWorkerOptions<Vocabulary extends readonly Effort[] = readon
   typedModelPlaceholder?: string;
 };
 
-export function printModeWorker<Vocabulary extends readonly Effort[] = readonly Effort[]>(
+/**
+ * The one argv assembly all four shipped Worker Adapter factories ride:
+ * leading args, extra args, `--model <model>`, the declared effort flag when
+ * Effort is in play, the unattended flag when Permissions are `"unattended"`,
+ * and the prompt. The placeholder rule is enforced here: static argv
+ * interpolates `{cwd}` and nothing else, refused as the Adapter is built.
+ */
+export function assembledWorker<Vocabulary extends readonly Effort[] = readonly Effort[]>(
   bin: string,
   unattendedFlag: string,
-  options: PrintModeWorkerOptions<Vocabulary> = {},
+  options: AssembledWorkerOptions<Vocabulary> = {},
 ): WorkerAdapter<Vocabulary> {
   const {
     effortFlag,
     effortVocabulary,
     leadingArgs,
     extraArgs,
+    printMode = true,
     probeArgs,
     probe,
     listModels,
     typedModelPlaceholder,
   } = options;
+  const leading = leadingArgs ?? ["-p"];
   // The static argv interpolates exactly one placeholder, `{cwd}`; the lie
   // is refused here, where the argv is assembled, not at Doctor or spawn.
-  assertKnownPlaceholders("leadingArgs", leadingArgs ?? ["-p"]);
+  assertKnownPlaceholders("leadingArgs", leading);
   assertKnownPlaceholders("extraArgs", extraArgs ?? []);
   return createWorkerAdapter({
     bin,
     effortFlag,
     effortVocabulary,
-    printMode: true,
+    ...(printMode ? { printMode: true as const } : {}),
     probe: probe ?? (probeArgs === undefined ? undefined : () => execProbe(bin, probeArgs)),
     listModels,
     typedModelPlaceholder,
     spawn(request: SpawnRequest) {
       const args = [
-        ...interpolateCwdArgs(leadingArgs ?? ["-p"], request.cwd),
+        ...interpolateCwdArgs(leading, request.cwd),
         ...interpolateCwdArgs(extraArgs ?? [], request.cwd),
         "--model",
         request.model,

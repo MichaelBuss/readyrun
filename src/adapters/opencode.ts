@@ -1,7 +1,7 @@
 import {
   captureProbeOutput,
   execListOutput,
-  printModeWorker,
+  assembledWorker,
   stripAnsi,
   type ListedModel,
   type ProbeResult,
@@ -99,7 +99,7 @@ export function opencode(
   options: OpencodeWorkerOptions = {},
 ): WorkerAdapter<OpencodeEffortVocabulary> {
   assertKnownKeys(options, knownOpencodeKeys);
-  return printModeWorker("opencode", "--auto", {
+  return assembledWorker("opencode", "--auto", {
     effortFlag: "--variant",
     effortVocabulary: opencodeEffortVocabulary,
     leadingArgs: ["run", "--dir", "{cwd}"],
