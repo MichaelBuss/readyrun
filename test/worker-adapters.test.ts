@@ -277,41 +277,14 @@ describe("Worker Adapters", { concurrency: false }, () => {
     );
   });
 
-  test("an unknown {token} placeholder in a print-mode Worker Adapter's extraArgs fails Doctor", async () => {
-    const repo = await throwawayRepo();
-    const chunks: string[] = [];
-    try {
-      await withRecordingPath(["claude"], async ({ receiptPath }) => {
-        const doctorExit = await doctor({
-          config: defineConfig({
-            tracker: memoryTracker({
-              tickets: [ticket({ id: "52" })],
-              ready: "unblocked",
-              labels: ["ready-for-agent"],
-            }),
-            worker: claude({ extraArgs: ["--dir", "{cw}"] }),
-            model: "opus",
-            permissions: "unattended",
-          }),
-          cwd: repo.cwd,
-          stdout: {
-            write(chunk: string) {
-              chunks.push(chunk);
-              return true;
-            },
-          },
-        });
-        assert.equal(doctorExit, 1);
-        assert.match(
-          chunks.join(""),
-          /Doctor: Worker Adapter option "extraArgs" has unknown placeholder "\{cw\}"\. Only \{cwd\} is available\./,
-        );
-        const receipt = await readReceipt(receiptPath);
-        assert.deepEqual(receipt.argv, ["auth", "status"]);
-      });
-    } finally {
-      await repo.cleanup();
-    }
+  test("an unknown {token} placeholder in a print-mode Worker Adapter's extraArgs is refused when the Adapter is built", () => {
+    assert.throws(
+      () => claude({ extraArgs: ["--dir", "{cw}"] }),
+      (error: unknown) =>
+        error instanceof UnknownPlaceholderError &&
+        error.message ===
+          'Worker Adapter option "extraArgs" has unknown placeholder "{cw}". Only {cwd} is available.',
+    );
   });
 
   test("a Cursor Worker Adapter Run spawns the Worker with the prompt, model, Worktree cwd, and Cursor's unattended flag", async () => {

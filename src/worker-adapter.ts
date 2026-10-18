@@ -133,8 +133,6 @@ export type SpawnResult = {
 
 export type ProbeResult = { ok: true } | { ok: false; detail: string };
 
-export type StaticArgv = { option: string; args: string[] };
-
 /**
  * One model a setup surface offers for a CLI: the id a config's `model`
  * accepts, the label the question renders, and an optional hint naming the
@@ -169,8 +167,6 @@ export type WorkerAdapter<Vocabulary extends readonly Effort[] = readonly Effort
   readonly printMode?: true;
   /** The cheap health check Doctor runs (binary present, logged in). */
   readonly probe?: () => Promise<ProbeResult>;
-  /** Extra argv the Adapter always passes, named by its option for Doctor's messages. */
-  readonly staticArgv?: StaticArgv;
   /**
    * The model facts a setup surface asks for: one live listing where the CLI
    * can list, a static catalog where it cannot, and an empty answer where no
@@ -200,7 +196,6 @@ export function createWorkerAdapter<
       | "effortVocabulary"
       | "printMode"
       | "probe"
-      | "staticArgv"
       | "listModels"
       | "typedModelPlaceholder"
     >
@@ -419,6 +414,10 @@ export function printModeWorker<Vocabulary extends readonly Effort[] = readonly 
     listModels,
     typedModelPlaceholder,
   } = options;
+  // The static argv interpolates exactly one placeholder, `{cwd}`; the lie
+  // is refused here, where the argv is assembled, not at Doctor or spawn.
+  assertKnownPlaceholders("leadingArgs", leadingArgs ?? ["-p"]);
+  assertKnownPlaceholders("extraArgs", extraArgs ?? []);
   return createWorkerAdapter({
     bin,
     effortFlag,
@@ -427,8 +426,6 @@ export function printModeWorker<Vocabulary extends readonly Effort[] = readonly 
     probe: probe ?? (probeArgs === undefined ? undefined : () => execProbe(bin, probeArgs)),
     listModels,
     typedModelPlaceholder,
-    staticArgv:
-      extraArgs === undefined ? undefined : { option: "extraArgs", args: extraArgs },
     spawn(request: SpawnRequest) {
       const args = [
         ...interpolateCwdArgs(leadingArgs ?? ["-p"], request.cwd),

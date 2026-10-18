@@ -20,7 +20,6 @@ import type { Ticket } from "./ticket.ts";
 import type { FrontierRoot } from "./tracker-adapter.ts";
 import {
   declaredEffortVocabulary,
-  unknownPlaceholdersIn,
   type Effort,
   type Permissions,
 } from "./worker-adapter.ts";
@@ -109,20 +108,9 @@ export async function collectDoctorFailures(
   if (!modelOk) {
     failures.push("missing model default. Set model in config or pass --model.");
   }
-  // The Worker argv's honesty is checked before any spawn: the cwd-fidelity
-  // probe below must not run for a config whose spawn cannot be believed.
-  let argvPlaceholderLies = false;
-  if (config.worker.staticArgv !== undefined) {
-    const { option, args } = config.worker.staticArgv;
-    for (const arg of args) {
-      for (const token of unknownPlaceholdersIn(arg)) {
-        argvPlaceholderLies = true;
-        failures.push(
-          `Worker Adapter option "${option}" has unknown placeholder "${token}". Only {cwd} is available.`,
-        );
-      }
-    }
-  }
+  // The Worker Adapter's argv honesty is its factories': an Adapter is built
+  // refusing unknown placeholders, so there is no argv shape left to
+  // lie-check here. What stays Doctor's is the spawn it can still believe.
   const askPrintMode = config.worker.printMode === true && permissions === "ask";
   if (askPrintMode) {
     failures.push(
@@ -183,7 +171,6 @@ export async function collectDoctorFailures(
     if (
       modelOk &&
       config.worker.bin !== undefined &&
-      !argvPlaceholderLies &&
       !askPrintMode &&
       input.probe !== false
     ) {

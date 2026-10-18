@@ -76,8 +76,6 @@ export function custom<Vocabulary extends readonly Effort[] = readonly []>(
       ...(options.effortVocabulary === undefined
         ? {}
         : { effortVocabulary: options.effortVocabulary }),
-      staticArgv:
-        options.args === undefined ? undefined : { option: "args", args: options.args },
       spawn(request: SpawnRequest) {
         const args = [
           ...interpolateCwdArgs(options.args ?? [], request.cwd),
