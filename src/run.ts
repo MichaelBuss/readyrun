@@ -262,7 +262,8 @@ export async function runPlan(
     // (ADR 0037), proved at start by the Run itself.
     const probeFailure = await probeRunStart(config, cwd, stdout);
     if (probeFailure !== undefined) {
-      return writeDoctorFailures(stdout, [probeFailure]) === 1 ? 1 : 1;
+      writeDoctorFailures(stdout, [probeFailure]);
+      return 1;
     }
     const cap = plan.cap;
     const runBranch = plan.runBranch;
@@ -351,7 +352,6 @@ export async function runPlan(
       if (ticket === undefined) {
         return complete("frontier-empty");
       }
-  
       const branch = config.tracker.branchName(ticket);
       live.stage("Worktree");
       let worktree;
@@ -393,9 +393,9 @@ export async function runPlan(
         result = await config.worker.spawn({
           ticket,
           cwd: worktree,
-        model: resolveModel(ticket, config, plan.model),
-        permissions: plan.settings.permissions,
-        effort: plan.settings.effort,
+          model: resolveModel(ticket, config, plan.model),
+          permissions: plan.settings.permissions,
+          effort: plan.settings.effort,
           prompt: composeWorkerPrompt(
             config.tracker.promptCopy(ticket),
             worktree,
