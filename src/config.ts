@@ -1,4 +1,5 @@
 import type { Ticket } from "./ticket.ts";
+import type { DeliveryStrategy } from "./delivery.ts";
 import type { Landing, TrackerAdapter } from "./tracker-adapter.ts";
 import type { Effort, Permissions, WorkerAdapter } from "./worker-adapter.ts";
 import { assertKnownKeys } from "./unknown-keys.ts";
@@ -13,6 +14,7 @@ const knownConfigKeys = new Set([
   "contextFile",
   "cap",
   "leaveFrontier",
+  "deliveries",
 ]);
 
 /**
@@ -49,6 +51,12 @@ export type ReadyRunConfig<Vocabulary extends readonly Effort[] = readonly Effor
    * Linear: In Review). Receives the Ticket and its Landing.
    */
   leaveFrontier?: (ticket: Ticket, landing: Landing) => void | Promise<void>;
+  /**
+   * The Delivery strategies `readyrun deliver --mode <name>` can resolve,
+   * each built through `createDelivery` (ADR 0048). Declaring what exists is
+   * config's whole say: which mode runs is the flag's, never config's.
+   */
+  deliveries?: DeliveryStrategy[];
 };
 
 /**

@@ -92,6 +92,103 @@ export async function originRepository(cwd: string): Promise<string | undefined>
   }
 }
 
+// The default branch's name, as this checkout resolves it (ADR 0034): the
+// fact delivery and the Run both need, exported for the surface that reads
+// it without resolving a whole base.
+export async function defaultBranchOf(cwd: string): Promise<string> {
+  return await defaultBranch(cwd);
+}
+
+// Whether commit is an ancestor of ref — the containment question the
+// integrated-base check and the fast-forward check both ask of the DAG.
+export async function isAncestor(
+  cwd: string,
+  commit: string,
+  ref: string,
+): Promise<boolean> {
+  return await mergeBaseIsAncestor(cwd, commit, ref);
+}
+
+// One ls-remote read of the named branch refs: what the remote has, and
+// where. The reconcile check for delivery heads is existence by name
+// (ADR 0048), so one network read prices the whole set.
+export async function remoteRefTips(
+  cwd: string,
+  branches: readonly string[],
+): Promise<Map<string, string>> {
+  const tips = new Map<string, string>();
+  if (branches.length === 0) {
+    return tips;
+  }
+  const out = await git(cwd, [
+    "ls-remote",
+    "origin",
+    ...branches.map((branch) => `refs/heads/${branch}`),
+  ]);
+  for (const line of out.split("\n")) {
+    const at = line.indexOf("\t");
+    if (at <= 0) {
+      continue;
+    }
+    const refname = line.slice(at + 1).trim();
+    if (refname.startsWith("refs/heads/")) {
+      tips.set(refname.slice("refs/heads/".length), line.slice(0, at));
+    }
+  }
+  return tips;
+}
+
+// One first-parent commit of a Run Branch: its subject is the merge message
+// the Run wrote, from which delivery reads which Ticket it collected.
+export type FirstParentCommit = {
+  commit: string;
+  subject: string;
+  parents: number;
+};
+
+// The first-parent commits of the branch that the named ref does not
+// contain, newest first — the range a Delivery renders over (ADR 0048).
+// Everything below the range's oldest commit is, by construction, contained.
+export async function firstParentRange(
+  cwd: string,
+  branch: string,
+  contained: string,
+): Promise<FirstParentCommit[]> {
+  const lines = await gitLines(cwd, [
+    "rev-list",
+    "--first-parent",
+    "--format=%H%x00%P%x00%s",
+    `${contained}..${branch}`,
+  ]);
+  const commits: FirstParentCommit[] = [];
+  for (const line of lines) {
+    const at = line.indexOf("\0");
+    // `--format` writes a `commit <sha>` header line before each formatted
+    // one; the formatted line is the one carrying the separators.
+    if (at <= 0) {
+      continue;
+    }
+    const fields = line.split("\0");
+    const parents = fields[1]?.trim();
+    commits.push({
+      commit: fields[0] ?? "",
+      parents: parents === undefined || parents === "" ? 0 : parents.split(" ").length,
+      subject: fields[2] ?? "",
+    });
+  }
+  return commits;
+}
+
+// The tip of a local branch, or none when git has no such ref. Delivery's
+// Doctor reads it for the Run Branch's existence and the fast-forward's
+// source, the same fact `branchTip` gives the collect.
+export async function localBranchTip(
+  cwd: string,
+  branch: string,
+): Promise<string | undefined> {
+  return await branchTip(cwd, branch);
+}
+
 async function branchTip(
   cwd: string,
   branch: string,
@@ -114,6 +211,77 @@ async function pathExists(path: string): Promise<boolean> {
 
 export async function headCommit(cwd: string): Promise<string> {
   return await git(cwd, ["rev-parse", "HEAD"]);
+}
+
+// HEAD's branch name, or none on a detached checkout — the fact `main`
+// mode's Doctor rule reads: the primary checkout sitting on the default
+// branch is where the default branch cannot be fetched forward.
+export async function headBranch(cwd: string): Promise<string | undefined> {
+  const branch = await git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]);
+  return branch === "HEAD" ? undefined : branch;
+}
+
+// The first of the named refs that exists, with its tip — the ordered
+// containment read behind delivery's measure of "already in the default
+// branch", which asks origin's tracking ref first, the side a pull request's
+// diff is computed against.
+export async function firstRefTip(
+  cwd: string,
+  refs: readonly string[],
+): Promise<{ ref: string; tip: string } | undefined> {
+  for (const ref of refs) {
+    try {
+      return { ref, tip: await git(cwd, ["rev-parse", "--verify", ref]) };
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
+}
+
+// The merge base of two commits — the boundary a range's diff hangs from.
+export async function mergeBase(
+  cwd: string,
+  one: string,
+  other: string,
+): Promise<string> {
+  return await git(cwd, ["merge-base", one, other]);
+}
+
+// Push one ref to origin at an exact commit: delivery's only write to the
+// remote's refspace (ADR 0048), keyed by the head-branch name that is the
+// artifact's identity. Never forced — a ref that moved is refused upstream
+// of here, because rewriting is never delivery's.
+export async function pushRefToOrigin(
+  cwd: string,
+  branch: string,
+  commit: string,
+): Promise<void> {
+  await exec("git", [
+    "-C",
+    cwd,
+    "push",
+    "origin",
+    `${commit}:refs/heads/${branch}`,
+  ]);
+}
+
+// Fast-forward one local branch to a source branch's tip with plumbing —
+// `git fetch . <source>:<target>`, the no-checkout-moves write `main` mode
+// performs (ADR 0048). A target the checkout sits on fails here, which is
+// the Doctor rule's backstop; a non-fast-forward fails in git itself.
+export async function fastForwardRef(
+  cwd: string,
+  sourceBranch: string,
+  targetBranch: string,
+): Promise<void> {
+  await exec("git", [
+    "-C",
+    cwd,
+    "fetch",
+    ".",
+    `${sourceBranch}:refs/heads/${targetBranch}`,
+  ]);
 }
 
 export async function worktreeIsClean(worktreePath: string): Promise<boolean> {

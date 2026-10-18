@@ -5,9 +5,9 @@
  * default-exporting {@link defineConfig}, picking one Tracker Adapter —
  * {@link github} or {@link linear} — and one Worker Adapter — {@link cursor},
  * {@link claude}, {@link opencode}, or {@link custom}. The `readyrun`
- * commands (`init`, `run`, `doctor`, and the bare Launcher) live at the
- * `./cli` entrypoint. Vocabulary is GLOSSARY.md's: Ticket, Frontier, Tracker
- * Adapter, Worker Adapter, Run, Root.
+ * commands (`init`, `run`, `doctor`, `deliver`, and the bare Launcher) live
+ * at the `./cli` entrypoint. Vocabulary is GLOSSARY.md's: Ticket, Frontier,
+ * Tracker Adapter, Worker Adapter, Run, Root, Delivery.
  *
  * @example
  * ```ts
@@ -33,6 +33,42 @@ export { defineConfig } from "./config.ts";
 export type { ReadyRunConfig } from "./config.ts";
 export { doctor } from "./doctor.ts";
 export type { DoctorOptions } from "./doctor.ts";
+export {
+  computeDeliveryPlan,
+  deliver,
+  deliverPlan,
+  previewDelivery,
+  renderDeliveryPlan,
+} from "./deliver.ts";
+export type {
+  DeliverInput,
+  DeliverRuntime,
+  DeliveryPlan,
+  FastForwardPlan,
+  PublicationPlan,
+} from "./deliver.ts";
+export {
+  createDelivery,
+  deliveryModes,
+  familyPr,
+  main,
+  resolveDeliveryMode,
+  stack,
+} from "./delivery.ts";
+export type {
+  Desired,
+  DesiredAnswer,
+  DeliveryInput,
+  DeliveryStrategy,
+  LandedTicket,
+} from "./delivery.ts";
+export { githubForge, resolveForge } from "./forge.ts";
+export type {
+  ForgeCreateInput,
+  ForgePort,
+  ForgePullRequest,
+  GitHubForgeRuntime,
+} from "./forge.ts";
 export { init } from "./init.ts";
 export type { InitAnswers, InitOptions } from "./init.ts";
 export { launcher } from "./launcher.ts";
