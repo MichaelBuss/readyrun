@@ -286,13 +286,18 @@ async function probeBaseFreshness(
 }
 
 // Origin's tip of one branch. The full refname is the pattern, so a branch
-// called `main` is not read as `bugfix/main` or a tag of the same name.
+// called `main` is not read as `bugfix/main` or a tag of the same name; a
+// line without the sha<TAB>ref shape is no answer, and no shaped line at all
+// is the empty answer the outage warning names.
 async function lsRemoteTip(
   cwd: string,
   branch: string,
 ): Promise<string | undefined> {
   const out = await git(cwd, ["ls-remote", "origin", `refs/heads/${branch}`]);
-  const line = out.split("\n").find((entry) => entry.trim() !== "");
+  const line = out.split("\n").find((entry) => {
+    const at = entry.indexOf("\t");
+    return at > 0 && entry.slice(0, at).trim() !== "";
+  });
   return line === undefined ? undefined : line.slice(0, line.indexOf("\t"));
 }
 

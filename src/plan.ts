@@ -195,9 +195,6 @@ export async function computePlan(
     allowStaleBase: options.allowStaleBase,
   });
   if (base === undefined) {
-    // A read that fails after Doctor refused carries the refusal with it:
-    // the Run renders Doctor's verdict rather than the read's stage, the way
-    // it always refused before the Plan carried it.
     throw new PlanResolutionError(
       "git",
       baseError instanceof Error ? baseError.message : String(baseError),
