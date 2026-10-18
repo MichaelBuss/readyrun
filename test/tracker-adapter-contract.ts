@@ -562,4 +562,36 @@ export function trackerAdapterContract(
       ["53"],
     );
   });
+
+  test(`${name}: tickets answers named Tickets by id, including one that left the Frontier`, async () => {
+    const adapter = await create({
+      tickets: [
+        ticket({ id: "52" }),
+        ticket({ id: "57", parent: "8" }),
+      ],
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+    });
+
+    const [first] = await adapter.frontier();
+    assert.ok(first);
+    await adapter.leaveFrontier(first, landing());
+
+    const answered = await adapter.tickets(["52", "57"]);
+    assert.deepEqual(answered.map((ticket) => ticket.id), ["52", "57"]);
+    assert.equal(answered[1]?.parent, "8");
+  });
+
+  test(`${name}: tickets refuses a named Ticket that does not exist rather than answering absent`, async () => {
+    const adapter = await create({
+      tickets: [ticket({ id: "52" })],
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+    });
+
+    await assert.rejects(
+      () => adapter.tickets(["52", "999"]),
+      /999/,
+    );
+  });
 }

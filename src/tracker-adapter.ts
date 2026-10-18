@@ -11,6 +11,7 @@ const knownTrackerAdapterKeys = new Set([
   "leaveFrontier",
   "promptCopy",
   "inspect",
+  "tickets",
 ]);
 
 /**
@@ -35,6 +36,13 @@ export type TrackerInspect = {
   readonly repository?: string;
   /** Whether the Tracker can express blocking; `false` is a Doctor failure. */
   readonly canExpressBlocking: boolean;
+  /**
+   * The forge the Tracker is backed by, when its Tracker is one (`"github"`
+   * for the shipped GitHub Adapter). A fact deliver reads to resolve the
+   * forge port (ADR 0048) — a fact, not a power: the Adapter never writes
+   * forge artifacts; deliver does.
+   */
+  readonly forge?: string;
 };
 
 /**
@@ -116,6 +124,16 @@ export type TrackerAdapter = {
   branchName(ticket: Ticket): string;
   /** Where a finished Ticket goes when it leaves the Frontier. */
   leaveFrontier(ticket: Ticket, landing: Landing): Promise<void>;
+  /**
+   * The named Tickets answered by id, each carrying its Tracker facts —
+   * `parent` among them — whether or not it still sits on the Frontier. A
+   * Ticket that has left the Frontier is still on the Tracker the way a
+   * label-dropped GitHub issue is open, and delivery reads these facts to
+   * key its artifacts on Tracker identity (ADR 0048). A named Ticket that
+   * is closed or does not exist is refused as a lie, never answered absent.
+   * Shipped by Adapters whose Tracker can answer it; the default refuses.
+   */
+  tickets(ids: readonly string[]): Promise<Ticket[]>;
   /** The Adapter's own copy of the Ticket, as the Worker prompt names it. */
   promptCopy(ticket: Ticket): string;
   /** What the Adapter's Tracker actually has, for Doctor to lie-check against. */
@@ -139,6 +157,7 @@ const defaults: Pick<
   | "tree"
   | "branchName"
   | "leaveFrontier"
+  | "tickets"
   | "promptCopy"
   | "inspect"
 > = {
@@ -184,6 +203,16 @@ const defaults: Pick<
   leaveFrontier() {
     return Promise.resolve();
   },
+  // Tickets by id are answered by Tracker Adapters whose Tracker can; one
+  // that has not must refuse rather than answer empty, which would read as
+  // "none of these exist" (ADR 0048).
+  tickets() {
+    return Promise.reject(
+      new Error(
+        "This Tracker Adapter does not answer Tickets by id. Pick a Tracker Adapter that does, such as the shipped GitHub Adapter.",
+      ),
+    );
+  },
   promptCopy(ticket) {
     return `Ticket ${ticket.id}: ${ticket.title}\n\n${ticket.body}\n\n${ticket.url}`;
   },
@@ -214,6 +243,7 @@ export function createTrackerAdapter(
       | "tree"
       | "branchName"
       | "leaveFrontier"
+      | "tickets"
       | "promptCopy"
       | "inspect"
     >
