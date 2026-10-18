@@ -47,6 +47,12 @@ export type PlanInput = {
   permissions?: Permissions;
   /** The Effort for this Run; must be in the Adapter's declared vocabulary. */
   effort?: Effort;
+  /**
+   * The escape from the one base gate (ADR 0046): a stale base nobody named
+   * refuses the Run in Doctor's verdict, and this downgrades the refusal to
+   * the warning a base named by `--base` gets. It does not skip the probe.
+   */
+  allowStaleBase?: boolean;
 };
 
 /**
@@ -166,23 +172,32 @@ export async function computePlan(
   const cwd = options.cwd ?? process.cwd();
   const root = options.root;
   live?.stage("Doctor");
+  // The base is resolved before the verdict, not after: the freshness gate is
+  // one of Doctor's rules (ADR 0046), so the probe rides base resolution once
+  // and the verdict reads what it resolved. A base read that fails is held
+  // until after the verdict, which it carries — the Run renders Doctor's
+  // refusal rather than the read's stage, the way it always refused before
+  // the Plan carried it.
+  let base: RunBase | undefined;
+  let baseError: unknown;
+  try {
+    base = await resolveRunBase(cwd, options.base);
+  } catch (error) {
+    baseError = error;
+  }
   const verdict = await collectDoctorFailures({
     config,
     cwd,
     root,
     overrides: options,
     probe: false,
+    base,
+    allowStaleBase: options.allowStaleBase,
   });
-  let base;
-  try {
-    base = await resolveRunBase(cwd, options.base);
-  } catch (error) {
-    // A read that fails after Doctor refused carries the refusal with it:
-    // the Run renders Doctor's verdict rather than the read's stage, the way
-    // it always refused before the Plan carried it.
+  if (base === undefined) {
     throw new PlanResolutionError(
       "git",
-      error instanceof Error ? error.message : String(error),
+      baseError instanceof Error ? baseError.message : String(baseError),
       verdict.failures,
     );
   }
@@ -231,6 +246,7 @@ export async function computePlan(
     command: equivalentRunCommand({
       cap,
       base: options.base,
+      allowStaleBase: options.allowStaleBase,
       root,
       model: options.model,
       permissions: options.permissions,
@@ -248,6 +264,7 @@ export function equivalentRunCommand(
   plan: {
     cap: number;
     base?: string;
+    allowStaleBase?: boolean;
     root?: FrontierRoot;
     model?: string;
     permissions?: Permissions;
@@ -257,6 +274,9 @@ export function equivalentRunCommand(
   const parts = ["readyrun", "run", "--max", String(plan.cap)];
   if (plan.base !== undefined) {
     parts.push("--base", plan.base);
+  }
+  if (plan.allowStaleBase === true) {
+    parts.push("--allow-stale-base");
   }
   if (plan.root?.kind === "list") {
     parts.push("--ticket", ...plan.root.ids);

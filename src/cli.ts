@@ -47,10 +47,10 @@ const usage = `Usage: readyrun <command>
 
 Commands:
   init [--answers <file>]
-  run [--preview] --max <n> [--base <commit-ish>] [--ticket <id-or-url> ...] [--root <parent>] [--model <id>] [--permissions ask|unattended] [--effort low|medium|high|xhigh|max]
-  doctor [--ticket <id-or-url> ...] [--root <parent>]
+  run [--preview] --max <n> [--base <commit-ish>] [--allow-stale-base] [--ticket <id-or-url> ...] [--root <parent>] [--model <id>] [--permissions ask|unattended] [--effort low|medium|high|xhigh|max]
+  doctor [--ticket <id-or-url> ...] [--root <parent>] [--allow-stale-base]
 
-A Run cannot start without a cap; an explicit --ticket list defaults the cap to its length. --root runs a parent's children; the parent is never worked. run --preview prints the Plan — Doctor's verdict, the Frontier in pick order, the base, the Run Branch, the cap, the Tickets waiting — and the equivalent run command; nothing starts.
+A Run cannot start without a cap; an explicit --ticket list defaults the cap to its length. --root runs a parent's children; the parent is never worked. A base nobody named that stands stale behind origin refuses the Run until --allow-stale-base says otherwise; a base named by --base is only warned. run --preview prints the Plan — Doctor's verdict, the Frontier in pick order, the base, the Run Branch, the cap, the Tickets waiting — and the equivalent run command; nothing starts.
 `;
 
 /**
@@ -88,6 +88,7 @@ export type CliOptions = {
 type RunFlags = {
   cap?: number;
   base?: string;
+  allowStaleBase?: boolean;
   permissions?: Permissions;
   model?: string;
   effort?: Effort;
@@ -151,6 +152,22 @@ function namedRoot(
   return undefined;
 }
 
+// The one flag `doctor` takes beyond the root flags (ADR 0046): the base
+// gate's escape, so Doctor can pre-flight exactly the Run the escape names.
+// It takes no value, so filtering it out ahead of the root parse is safe.
+function parseDoctorFlags(
+  args: string[],
+): { ok: true; allowStaleBase: boolean; tickets: string[]; root?: string } |
+  { ok: false; message: string } {
+  const escape = "--allow-stale-base";
+  const allowStaleBase = args.includes(escape);
+  const roots = parseRootFlags(args.filter((arg) => arg !== escape));
+  if (!roots.ok) {
+    return roots;
+  }
+  return { ok: true, allowStaleBase, tickets: roots.tickets, root: roots.root };
+}
+
 function parseRunFlags(args: string[]):
   | ({ ok: true } & RunFlags)
   | { ok: false; message: string } {
@@ -160,6 +177,7 @@ function parseRunFlags(args: string[]):
   }
   let cap: number | undefined;
   let base: string | undefined;
+  let allowStaleBase: boolean | undefined;
   let permissions: Permissions | undefined;
   let model: string | undefined;
   let effort: Effort | undefined;
@@ -180,6 +198,8 @@ function parseRunFlags(args: string[]):
       }
       base = value;
       i += 1;
+    } else if (arg === "--allow-stale-base") {
+      allowStaleBase = true;
     } else if (arg === "--permissions") {
       const value = args[i + 1];
       if (value !== "ask" && value !== "unattended") {
@@ -211,6 +231,7 @@ function parseRunFlags(args: string[]):
     ok: true,
     cap,
     base,
+    allowStaleBase,
     permissions,
     model,
     effort,
@@ -315,6 +336,7 @@ export async function cli(options: CliOptions): Promise<number> {
   }
   let runFlags: RunFlags | undefined;
   let root: FrontierRoot | undefined;
+  let allowStaleBase: boolean | undefined;
   if (command === "run") {
     const flags = parseRunFlags(options.argv.slice(1));
     if (!flags.ok) {
@@ -323,13 +345,15 @@ export async function cli(options: CliOptions): Promise<number> {
     }
     runFlags = flags;
     root = namedRoot(flags.tickets, flags.root);
+    allowStaleBase = flags.allowStaleBase;
   } else {
-    const flags = parseRootFlags(options.argv.slice(1));
+    const flags = parseDoctorFlags(options.argv.slice(1));
     if (!flags.ok) {
       stdout.write(`${flags.message}\n`);
       return 1;
     }
     root = namedRoot(flags.tickets, flags.root);
+    allowStaleBase = flags.allowStaleBase;
   }
   const cwd = options.cwd ?? process.cwd();
   let config: ReadyRunConfig;
@@ -348,6 +372,7 @@ export async function cli(options: CliOptions): Promise<number> {
         config,
         cap: runFlags.cap,
         base: runFlags.base,
+        allowStaleBase,
         root,
         cwd,
         stdout,
@@ -364,7 +389,7 @@ export async function cli(options: CliOptions): Promise<number> {
     }
   }
   const invoke = options.doctor ?? doctorEntry;
-  return invoke({ config, root, cwd, stdout });
+  return invoke({ config, root, cwd, stdout, allowStaleBase });
 }
 
 function isCliEntry(): boolean {

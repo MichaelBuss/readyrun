@@ -39,6 +39,13 @@ export type DoctorOptions = {
   cwd?: string;
   /** Where Doctor's verdict is written. Defaults to process stdout. */
   stdout?: DoctorStdout;
+  /**
+   * The escape from the one base gate (ADR 0046), the flag `run` and
+   * `doctor` both take: a stale base nobody named refuses, and this
+   * downgrades the refusal to the warning a named base gets. It does not
+   * skip the probe.
+   */
+  allowStaleBase?: boolean;
 };
 
 /**
@@ -85,6 +92,14 @@ export type DoctorInput = {
   // The Plan's preview reads Doctor's verdict without the probe (ADR 0039):
   // proving cwd fidelity is the Run's, at start. Default runs it.
   probe?: boolean;
+  /**
+   * The base the Run would start from, resolved by the caller so the
+   * freshness probe rides base resolution once (ADR 0046). The gate reads
+   * its verdict; absent — a checkout git cannot answer for — nothing gates.
+   */
+  base?: RunBase;
+  /** The escape from the one base gate; downgrades the refusal to the warning. */
+  allowStaleBase?: boolean;
 };
 
 /**
@@ -250,6 +265,22 @@ export async function collectDoctorFailures(
       `install output ${installOutput} is neither tracked nor ignored; add it to .gitignore`,
     );
   }
+  // The one carve-out from disclosure-not-a-gate (ADR 0046): a base nobody
+  // named — HEAD standing stale on the default branch — is closer to a lie
+  // than a choice, and gates with the escape named rather than skipped. A
+  // base the Consumer named by --base was chosen on purpose and is only ever
+  // warned, which is discloseBase's work wherever the base renders. The
+  // freshness verdict itself never gates an outage: unknown renders as a
+  // warning and the Run proceeds (#113 family).
+  const staleGap = input.base !== undefined &&
+      input.base.kind === "checkout"
+    ? staleBaseGap(input.base)
+    : undefined;
+  if (staleGap !== undefined && input.allowStaleBase !== true) {
+    failures.push(
+      `${staleGap} Pull first, or pass --allow-stale-base to start from it anyway.`,
+    );
+  }
   if (root !== undefined) {
     let rooted;
     try {
@@ -289,6 +320,24 @@ function baseLine(base: RunBase): string {
   return `Base: ${commit} on ${base.branch}${callout}`;
 }
 
+// The gap a stale base has, the same words wherever the base renders
+// (ADR 0046): the behind-count when the tip's objects made it nameable, the
+// two SHAs when they did not. Undefined for every verdict but stale — fresh
+// and ahead are silent, and an outage is named by its own line below.
+function staleBaseGap(base: RunBase): string | undefined {
+  const freshness = base.freshness;
+  if (freshness?.kind !== "stale") {
+    return undefined;
+  }
+  const remote = `origin/${freshness.defaultBranch}`;
+  const gap = freshness.behind === undefined
+    ? `is behind ${remote} (tip ${shortCommit(freshness.tip)})`
+    : `is ${freshness.behind} ${
+      freshness.behind === 1 ? "commit" : "commits"
+    } behind ${remote}`;
+  return `Base ${shortCommit(base.commit)} ${gap}. Worktrees will cut from stale history.`;
+}
+
 // Disclosure, not a gate: a base off the default branch and a dirty checkout
 // are both things a Consumer may have meant, so neither stops a Run. The same
 // words render the base wherever a human looks — Run start, Doctor, and the
@@ -301,6 +350,21 @@ export async function discloseBase(
   cwd: string,
 ): Promise<void> {
   stdout.write(`${baseLine(base)}\n`);
+  // The freshness verdict renders wherever the base renders — Run start,
+  // Doctor, and the Plan's preview say the same words (ADR 0046). Stale on a
+  // base the Consumer named is the warning form; on an unnamed base the gate
+  // in collectDoctorFailures refuses before a Run reaches this line. An
+  // unreachable probe never blocks: it names why and the Run proceeds.
+  const staleGap = staleBaseGap(base);
+  if (staleGap !== undefined) {
+    stdout.write(`Warning: ${staleGap} Pull first\n`);
+  }
+  const freshness = base.freshness;
+  if (freshness?.kind === "unknown") {
+    stdout.write(
+      `Warning: could not compare the base against origin/${freshness.defaultBranch} (${freshness.reason}); the Run starts on it anyway\n`,
+    );
+  }
   if (base.dirty) {
     stdout.write(
       "Warning: uncommitted changes in the primary checkout reach no Worktree\n",
@@ -350,9 +414,13 @@ export function writeDoctorFailures(
  * Frontier that lies: labels, states, or projects that do not exist, a
  * repository that is not the git remote, blocking that cannot be expressed,
  * an Effort the Worker Adapter does not declare, a missing model default,
- * install output that is neither tracked nor ignored. Also probes the Worker
- * binary, its login, and — unless told not to — cwd fidelity in a throwaway
- * Worktree. A Run will not start if Doctor fails.
+ * install output that is neither tracked nor ignored, and — the one
+ * disclosure carve-out (ADR 0046) — a base nobody named standing stale
+ * behind origin's tip of the default branch, refused until
+ * `--allow-stale-base` says otherwise. Also probes the Worker binary, its
+ * login, the base's freshness against origin (read-only, once), and — unless
+ * told not to — cwd fidelity in a throwaway Worktree. A Run will not start
+ * if Doctor fails.
  *
  * @returns 0 when config and Root are honest, 1 with the failures written.
  */
@@ -363,21 +431,31 @@ export async function doctor(options: DoctorOptions): Promise<number> {
   const live = startLiveness(stdout);
   try {
     live.stage("Doctor");
+    // The base is resolved once, before the verdict: the freshness gate is
+    // one of Doctor's rules (ADR 0046), so the probe rides base resolution
+    // and the same base renders below.
+    let base: RunBase | undefined;
+    try {
+      base = await resolveRunBase(cwd);
+    } catch {
+      // A checkout git cannot answer for — no commit yet, or no repository.
+      // Has no base to check or disclose. A Run hard-stops at git there,
+      // which is where that gets reported.
+    }
     const verdict = await collectDoctorFailures({
       config,
       cwd,
       root: options.root,
       stdout,
+      base,
+      allowStaleBase: options.allowStaleBase,
     });
     live.stop();
     if (writeDoctorFailures(stdout, verdict.failures) === 1) {
       return 1;
     }
-    try {
-      await discloseBase(stdout, await resolveRunBase(cwd), cwd);
-    } catch {
-      // A checkout git cannot answer for — no commit yet, or no repository.
-      // Has no base to disclose. A Run hard-stops at git there, which is where that gets reported.
+    if (base !== undefined) {
+      await discloseBase(stdout, base, cwd);
     }
     live.stage("Frontier");
     // The check's rooted read already answered; reading again would fetch the
