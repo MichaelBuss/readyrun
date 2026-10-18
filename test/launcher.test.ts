@@ -16,9 +16,10 @@ import {
   launcher,
   type LauncherIO,
 } from "../src/launcher.ts";
-import { defineConfig, type RunOptions } from "../src/mod.ts";
+import { defineConfig, type Plan, type RunRuntime } from "../src/mod.ts";
 import { memoryTracker, recordingWorker } from "../src/testing/mod.ts";
 import { createWorkerAdapter } from "../src/worker-adapter.ts";
+import { githubFromWorld } from "./github-http-fixture.ts";
 import {
   commitRepoFiles,
   git,
@@ -107,6 +108,12 @@ function capturing(): { chunks: string[]; stdout: { write(chunk: string): true }
       },
     },
   };
+}
+
+// The commit-ish the Consumer named, as the Plan resolved it: a named base
+// lands as a commit-ish base, the checkout default as the checkout kind.
+function baseCommitish(plan: Plan | undefined): string | undefined {
+  return plan?.base.kind === "commit-ish" ? plan.base.commitish : undefined;
 }
 
 function launcherConfig(
@@ -212,7 +219,7 @@ test("capAnswer demands a whole number of at least 1", () => {
 test("the tree question goes first, rendering the tree grouped by parent with both halves", async () => {
   const repo = await throwawayRepo();
   const out = capturing();
-  const runs: RunOptions[] = [];
+  const runs: Plan[] = [];
   const { io, prompts } = scripted([
     goFromTop,
     "1",
@@ -226,8 +233,8 @@ test("the tree question goes first, rendering the tree grouped by parent with bo
       cwd: repo.cwd,
       stdout: out.stdout,
       loadConfig: async () => treeConfig(),
-      run: async (options) => {
-        runs.push(options);
+      run: async (plan, runtime) => {
+        runs.push(plan);
         return 0;
       },
       io,
@@ -272,7 +279,7 @@ test("the tree question goes first, rendering the tree grouped by parent with bo
 test("a multi-select across the tree emits the explicit --ticket list and confirms its waiting Tickets once", async () => {
   const repo = await throwawayRepo();
   const out = capturing();
-  const runs: RunOptions[] = [];
+  const runs: Plan[] = [];
   const { io, prompts } = scripted([
     "42 44 54 52",
     true,
@@ -287,8 +294,8 @@ test("a multi-select across the tree emits the explicit --ticket list and confir
       cwd: repo.cwd,
       stdout: out.stdout,
       loadConfig: async () => treeConfig(),
-      run: async (options) => {
-        runs.push(options);
+      run: async (plan, runtime) => {
+        runs.push(plan);
         return 0;
       },
       io,
@@ -319,7 +326,7 @@ test("a multi-select across the tree emits the explicit --ticket list and confir
 test("declining the waiting confirm drops the waiting Tickets from the list", async () => {
   const repo = await throwawayRepo();
   const out = capturing();
-  const runs: RunOptions[] = [];
+  const runs: Plan[] = [];
   const { io, prompts } = scripted([
     "42 54",
     false,
@@ -334,8 +341,8 @@ test("declining the waiting confirm drops the waiting Tickets from the list", as
       cwd: repo.cwd,
       stdout: out.stdout,
       loadConfig: async () => treeConfig(),
-      run: async (options) => {
-        runs.push(options);
+      run: async (plan, runtime) => {
+        runs.push(plan);
         return 0;
       },
       io,
@@ -354,7 +361,7 @@ test("declining the waiting confirm drops the waiting Tickets from the list", as
 test("declining every picked waiting Ticket re-asks the tree question", async () => {
   const repo = await throwawayRepo();
   const out = capturing();
-  const runs: RunOptions[] = [];
+  const runs: Plan[] = [];
   const { io, prompts } = scripted([
     "54",
     false,
@@ -370,8 +377,8 @@ test("declining every picked waiting Ticket re-asks the tree question", async ()
       cwd: repo.cwd,
       stdout: out.stdout,
       loadConfig: async () => treeConfig(),
-      run: async (options) => {
-        runs.push(options);
+      run: async (plan, runtime) => {
+        runs.push(plan);
         return 0;
       },
       io,
@@ -400,7 +407,7 @@ test("declining every picked waiting Ticket re-asks the tree question", async ()
 test("a Tracker Adapter that refuses the tree falls back to the root flags as text prompts", async () => {
   const repo = await throwawayRepo();
   const out = capturing();
-  const runs: RunOptions[] = [];
+  const runs: Plan[] = [];
   const { io, prompts } = scripted([
     "",
     "https://example.test/54",
@@ -415,8 +422,8 @@ test("a Tracker Adapter that refuses the tree falls back to the root flags as te
       cwd: repo.cwd,
       stdout: out.stdout,
       loadConfig: async () => fallbackConfig(),
-      run: async (options) => {
-        runs.push(options);
+      run: async (plan, runtime) => {
+        runs.push(plan);
         return 0;
       },
       io,
@@ -441,7 +448,7 @@ test("a Tracker Adapter that refuses the tree falls back to the root flags as te
 test("the fallback names a parent with --root when one is given", async () => {
   const repo = await throwawayRepo();
   const out = capturing();
-  const runs: RunOptions[] = [];
+  const runs: Plan[] = [];
   const { io, prompts } = scripted([
     "41",
     "",
@@ -476,8 +483,8 @@ test("the fallback names a parent with --root when one is given", async () => {
           worker: recordingWorker({ exitCode: 0 }),
           model: "composer-2",
         }),
-      run: async (options) => {
-        runs.push(options);
+      run: async (plan, runtime) => {
+        runs.push(plan);
         return 0;
       },
       io,
@@ -600,7 +607,8 @@ test("headBaseState: among unmerged Run Branches a merged one is never listed", 
 test("the launcher collects answers, renders the Plan, and hands the Run its options on confirm", async () => {
   const repo = await throwawayRepo();
   const out = capturing();
-  const runs: RunOptions[] = [];
+  const runs: Plan[] = [];
+  let handedRuntime: RunRuntime | undefined;
   const { io, prompts } = scripted([
     goFromTop,
     "4",
@@ -614,8 +622,9 @@ test("the launcher collects answers, renders the Plan, and hands the Run its opt
       cwd: repo.cwd,
       stdout: out.stdout,
       loadConfig: async () => launcherConfig(),
-      run: async (options) => {
-        runs.push(options);
+      run: async (plan, runtime) => {
+        runs.push(plan);
+        handedRuntime = runtime;
         return 0;
       },
       io,
@@ -625,12 +634,12 @@ test("the launcher collects answers, renders the Plan, and hands the Run its opt
     assert.equal(runs.length, 1);
     const handed = runs[0];
     assert.equal(handed?.cap, 4);
-    assert.equal(handed?.base, undefined);
+    assert.equal(handed?.base.kind, "checkout");
     assert.equal(handed?.root, undefined);
-    assert.equal(handed?.permissions, "unattended");
+    assert.equal(handed?.settings.permissions, "unattended");
     assert.equal(handed?.model, "opus");
-    assert.equal(handed?.effort, "high");
-    assert.deepEqual(handed?.cwd, repo.cwd);
+    assert.equal(handed?.settings.effort, "high");
+    assert.deepEqual(handedRuntime?.cwd, repo.cwd);
     assert.deepEqual(
       prompts.map((prompt) => prompt.kind),
       ["multiSelect", "text", "select", "text", "select", "confirm"],
@@ -661,15 +670,15 @@ test("the launcher collects answers, renders the Plan, and hands the Run its opt
 test("answers kept at their config defaults carry no flag", async () => {
   const repo = await throwawayRepo();
   const out = capturing();
-  const runs: RunOptions[] = [];
+  const runs: Plan[] = [];
   const { io } = scripted([goFromTop, "1", "ask", "composer-2", defaultEffort, true]);
   try {
     const exitCode = await launcher({
       cwd: repo.cwd,
       stdout: out.stdout,
       loadConfig: async () => launcherConfig(),
-      run: async (options) => {
-        runs.push(options);
+      run: async (plan, runtime) => {
+        runs.push(plan);
         return 0;
       },
       io,
@@ -678,9 +687,9 @@ test("answers kept at their config defaults carry no flag", async () => {
     assert.equal(exitCode, 0);
     const handed = runs[0];
     assert.equal(handed?.cap, 1);
-    assert.equal(handed?.permissions, undefined);
+    assert.equal(handed?.settings.permissions, "ask");
     assert.equal(handed?.model, undefined);
-    assert.equal(handed?.effort, undefined);
+    assert.equal(handed?.settings.effort, undefined);
     const lines = out.chunks.join("").split("\n").filter(Boolean);
     assert.ok(lines.includes("Run with: readyrun run --max 1"));
   } finally {
@@ -691,7 +700,7 @@ test("answers kept at their config defaults carry no flag", async () => {
 test("the Effort question offers exactly the values the Worker Adapter declares", async () => {
   const repo = await throwawayRepo();
   const out = capturing();
-  const runs: RunOptions[] = [];
+  const runs: Plan[] = [];
   const { io, prompts } = scripted([goFromTop, "1", "unattended", "composer-2", "high", true]);
   try {
     const exitCode = await launcher({
@@ -701,8 +710,8 @@ test("the Effort question offers exactly the values the Worker Adapter declares"
         launcherConfig({
           worker: recordingWorker({ exitCode: 0, effortVocabulary: ["high"] }),
         }),
-      run: async (options) => {
-        runs.push(options);
+      run: async (plan, runtime) => {
+        runs.push(plan);
         return 0;
       },
       io,
@@ -714,7 +723,7 @@ test("the Effort question offers exactly the values the Worker Adapter declares"
       { value: defaultEffort, label: "Worker default" },
       { value: "high", label: "High" },
     ]);
-    assert.equal(runs[0]?.effort, "high");
+    assert.equal(runs[0]?.settings.effort, "high");
   } finally {
     await repo.cleanup();
   }
@@ -723,7 +732,7 @@ test("the Effort question offers exactly the values the Worker Adapter declares"
 test("a Worker Adapter that declares no Effort is not asked", async () => {
   const repo = await throwawayRepo();
   const out = capturing();
-  const runs: RunOptions[] = [];
+  const runs: Plan[] = [];
   const { io, prompts } = scripted([goFromTop, "1", "ask", "composer-2", true]);
   try {
     const exitCode = await launcher({
@@ -733,8 +742,8 @@ test("a Worker Adapter that declares no Effort is not asked", async () => {
         launcherConfig({
           worker: recordingWorker({ exitCode: 0, effortVocabulary: [] }),
         }),
-      run: async (options) => {
-        runs.push(options);
+      run: async (plan, runtime) => {
+        runs.push(plan);
         return 0;
       },
       io,
@@ -745,7 +754,7 @@ test("a Worker Adapter that declares no Effort is not asked", async () => {
       prompts.map((prompt) => prompt.kind),
       ["multiSelect", "text", "select", "text", "confirm"],
     );
-    assert.equal(runs[0]?.effort, undefined);
+    assert.equal(runs[0]?.settings.effort, undefined);
     const lines = out.chunks.join("").split("\n").filter(Boolean);
     assert.ok(lines.includes("Run with: readyrun run --max 1"));
   } finally {
@@ -756,7 +765,7 @@ test("a Worker Adapter that declares no Effort is not asked", async () => {
 test("a Worker Adapter that declares a vocabulary but maps no flag is not asked either", async () => {
   const repo = await throwawayRepo();
   const out = capturing();
-  const runs: RunOptions[] = [];
+  const runs: Plan[] = [];
   const { io, prompts } = scripted([goFromTop, "1", "ask", "composer-2", true]);
   try {
     const exitCode = await launcher({
@@ -766,8 +775,8 @@ test("a Worker Adapter that declares a vocabulary but maps no flag is not asked 
         launcherConfig({
           worker: createWorkerAdapter({ effortVocabulary: ["high"] }),
         }),
-      run: async (options) => {
-        runs.push(options);
+      run: async (plan, runtime) => {
+        runs.push(plan);
         return 0;
       },
       io,
@@ -778,7 +787,7 @@ test("a Worker Adapter that declares a vocabulary but maps no flag is not asked 
       prompts.map((prompt) => prompt.kind),
       ["multiSelect", "text", "select", "text", "confirm"],
     );
-    assert.equal(runs[0]?.effort, undefined);
+    assert.equal(runs[0]?.settings.effort, undefined);
   } finally {
     await repo.cleanup();
   }
@@ -787,15 +796,15 @@ test("a Worker Adapter that declares a vocabulary but maps no flag is not asked 
 test("a declined confirm starts no Run", async () => {
   const repo = await throwawayRepo();
   const out = capturing();
-  const runs: RunOptions[] = [];
+  const runs: Plan[] = [];
   const { io } = scripted([goFromTop, "1", "ask", "composer-2", defaultEffort, false]);
   try {
     const exitCode = await launcher({
       cwd: repo.cwd,
       stdout: out.stdout,
       loadConfig: async () => launcherConfig(),
-      run: async (options) => {
-        runs.push(options);
+      run: async (plan, runtime) => {
+        runs.push(plan);
         return 0;
       },
       io,
@@ -811,15 +820,15 @@ test("a declined confirm starts no Run", async () => {
 test("a cancelled prompt starts no Run", async () => {
   const repo = await throwawayRepo();
   const out = capturing();
-  const runs: RunOptions[] = [];
+  const runs: Plan[] = [];
   const { io } = scripted([cancelled]);
   try {
     const exitCode = await launcher({
       cwd: repo.cwd,
       stdout: out.stdout,
       loadConfig: async () => launcherConfig(),
-      run: async (options) => {
-        runs.push(options);
+      run: async (plan, runtime) => {
+        runs.push(plan);
         return 0;
       },
       io,
@@ -834,7 +843,7 @@ test("a cancelled prompt starts no Run", async () => {
 test("a HEAD parked on an unmerged Run Branch preselects the default branch as the base", async () => {
   const repo = await throwawayRepo();
   const out = capturing();
-  const runs: RunOptions[] = [];
+  const runs: Plan[] = [];
   const { io, prompts } = scripted([
     goFromTop,
     "1",
@@ -851,15 +860,15 @@ test("a HEAD parked on an unmerged Run Branch preselects the default branch as t
       cwd: repo.cwd,
       stdout: out.stdout,
       loadConfig: async () => launcherConfig(),
-      run: async (options) => {
-        runs.push(options);
+      run: async (plan, runtime) => {
+        runs.push(plan);
         return 0;
       },
       io,
     });
 
     assert.equal(exitCode, 0);
-    assert.equal(runs[0]?.base, "main");
+    assert.equal(baseCommitish(runs[0]), "main");
     const basePrompt = prompts.find(
       (prompt) => prompt.kind === "select" && prompt.initial === "main",
     );
@@ -875,7 +884,7 @@ test("a HEAD parked on an unmerged Run Branch preselects the default branch as t
 test("the steer picker still offers the parked Run Branch, as an explicit base", async () => {
   const repo = await throwawayRepo();
   const out = capturing();
-  const runs: RunOptions[] = [];
+  const runs: Plan[] = [];
   const { io, prompts } = scripted([
     goFromTop,
     "1",
@@ -892,15 +901,15 @@ test("the steer picker still offers the parked Run Branch, as an explicit base",
       cwd: repo.cwd,
       stdout: out.stdout,
       loadConfig: async () => launcherConfig(),
-      run: async (options) => {
-        runs.push(options);
+      run: async (plan, runtime) => {
+        runs.push(plan);
         return 0;
       },
       io,
     });
 
     assert.equal(exitCode, 0);
-    assert.equal(runs[0]?.base, "readyrun/run-20260101-000000");
+    assert.equal(baseCommitish(runs[0]), "readyrun/run-20260101-000000");
     const basePrompt = prompts.find((prompt) => prompt.kind === "select" && prompt.initial === "main");
     const options = basePrompt?.options as Array<{ value: string }>;
     assert.deepEqual(
@@ -915,7 +924,7 @@ test("the steer picker still offers the parked Run Branch, as an explicit base",
 test("the base picker offers unmerged Run Branches newest first and never a merged one", async () => {
   const repo = await throwawayRepo();
   const out = capturing();
-  const runs: RunOptions[] = [];
+  const runs: Plan[] = [];
   const { io, prompts } = scripted([
     goFromTop,
     "2",
@@ -940,15 +949,15 @@ test("the base picker offers unmerged Run Branches newest first and never a merg
       cwd: repo.cwd,
       stdout: out.stdout,
       loadConfig: async () => launcherConfig(),
-      run: async (options) => {
-        runs.push(options);
+      run: async (plan, runtime) => {
+        runs.push(plan);
         return 0;
       },
       io,
     });
 
     assert.equal(exitCode, 0);
-    assert.equal(runs[0]?.base, "readyrun/run-20260102-000000");
+    assert.equal(baseCommitish(runs[0]), "readyrun/run-20260102-000000");
     const basePrompt = prompts.find(
       (prompt) =>
         prompt.kind === "select" &&
@@ -976,21 +985,21 @@ test("the base picker offers unmerged Run Branches newest first and never a merg
 
 test("a fresh Run with nothing to continue never asks for a base", async () => {
   const repo = await throwawayRepo();
-  const runs: RunOptions[] = [];
+  const runs: Plan[] = [];
   const { io, prompts } = scripted([goFromTop, "1", "ask", "composer-2", defaultEffort, true]);
   try {
     const exitCode = await launcher({
       cwd: repo.cwd,
       stdout: { write() { return true; } },
       loadConfig: async () => launcherConfig(),
-      run: async (options) => {
-        runs.push(options);
+      run: async (plan, runtime) => {
+        runs.push(plan);
         return 0;
       },
       io,
     });
     assert.equal(exitCode, 0);
-    assert.equal(runs[0]?.base, undefined);
+    assert.equal(runs[0]?.base.kind, "checkout");
     assert.equal(
       prompts.some((prompt) => prompt.kind === "select" && prompt.message.includes("base")),
       false,
@@ -1003,7 +1012,7 @@ test("a fresh Run with nothing to continue never asks for a base", async () => {
 test("with no config the launcher offers Init first, then continues", async () => {
   const repo = await throwawayRepo();
   const out = capturing();
-  const runs: RunOptions[] = [];
+  const runs: Plan[] = [];
   const inits: number[] = [];
   let loads = 0;
   const { io, prompts } = scripted([
@@ -1031,8 +1040,8 @@ test("with no config the launcher offers Init first, then continues", async () =
         inits.push(1);
         return 0;
       },
-      run: async (options) => {
-        runs.push(options);
+      run: async (plan, runtime) => {
+        runs.push(plan);
         return 0;
       },
       io,
@@ -1055,7 +1064,7 @@ test("with no config the launcher offers Init first, then continues", async () =
 
 test("a declined Init starts nothing", async () => {
   const repo = await throwawayRepo();
-  const runs: RunOptions[] = [];
+  const runs: Plan[] = [];
   const inits: number[] = [];
   const { io } = scripted([false]);
   try {
@@ -1069,8 +1078,8 @@ test("a declined Init starts nothing", async () => {
         inits.push(1);
         return 0;
       },
-      run: async (options) => {
-        runs.push(options);
+      run: async (plan, runtime) => {
+        runs.push(plan);
         return 0;
       },
       io,
@@ -1086,7 +1095,7 @@ test("a declined Init starts nothing", async () => {
 test("fresh off Init, a declined Run gate ends a success with no Run asked", async () => {
   const repo = await throwawayRepo();
   const out = capturing();
-  const runs: RunOptions[] = [];
+  const runs: Plan[] = [];
   const inits: number[] = [];
   let loads = 0;
   const { io, prompts } = scripted([true, false]);
@@ -1105,8 +1114,8 @@ test("fresh off Init, a declined Run gate ends a success with no Run asked", asy
         inits.push(1);
         return 0;
       },
-      run: async (options) => {
-        runs.push(options);
+      run: async (plan, runtime) => {
+        runs.push(plan);
         return 0;
       },
       io,
@@ -1127,7 +1136,7 @@ test("fresh off Init, a declined Run gate ends a success with no Run asked", asy
 
 test("a cancelled Run gate after Init starts nothing", async () => {
   const repo = await throwawayRepo();
-  const runs: RunOptions[] = [];
+  const runs: Plan[] = [];
   let loads = 0;
   const { io } = scripted([true, cancelled]);
   try {
@@ -1142,8 +1151,8 @@ test("a cancelled Run gate after Init starts nothing", async () => {
         return launcherConfig();
       },
       init: async () => 0,
-      run: async (options) => {
-        runs.push(options);
+      run: async (plan, runtime) => {
+        runs.push(plan);
         return 0;
       },
       io,
@@ -1157,7 +1166,7 @@ test("a cancelled Run gate after Init starts nothing", async () => {
 
 test("a real Init hand-off assembles a Run from the config Init wrote", async () => {
   const repo = await throwawayRepo();
-  const runs: RunOptions[] = [];
+  const runs: Plan[] = [];
   const { io } = scripted([
     true,
     true,
@@ -1191,8 +1200,8 @@ export default defineConfig({
         );
         return 0;
       },
-      run: async (options) => {
-        runs.push(options);
+      run: async (plan, runtime) => {
+        runs.push(plan);
         return 0;
       },
       io,
@@ -1200,7 +1209,71 @@ export default defineConfig({
     assert.equal(exitCode, 0);
     assert.equal(runs.length, 1);
     assert.equal(runs[0]?.cap, 1);
-    assert.equal(runs[0]?.permissions, "unattended");
+    assert.equal(runs[0]?.settings.permissions, "unattended");
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("a Launcher-to-Run session reads the Tracker once per fact: the Run adds no start reads", async () => {
+  const repo = await throwawayRepo();
+  await exec("git", [
+    "-C",
+    repo.cwd,
+    "remote",
+    "add",
+    "origin",
+    "git@github.com:acme/widgets.git",
+  ]);
+  const { adapter, fixture } = githubFromWorld({
+    tickets: [
+      ticket({
+        id: "52",
+        title: "First up",
+        url: "https://github.com/acme/widgets/issues/52",
+      }),
+      ticket({
+        id: "54",
+        title: "Blocked behind 52",
+        blockedBy: ["52"],
+        url: "https://github.com/acme/widgets/issues/54",
+      }),
+    ],
+    ready: "unblocked",
+    labels: ["ready-for-agent"],
+  });
+  const out = capturing();
+  const worker = recordingWorker({ exitCode: 0 });
+  const { io } = scripted([
+    goFromTop,
+    "1",
+    "ask",
+    "composer-2",
+    defaultEffort,
+    true,
+  ]);
+  try {
+    const exitCode = await launcher({
+      cwd: repo.cwd,
+      stdout: out.stdout,
+      loadConfig: async () =>
+        defineConfig({ tracker: adapter, worker, model: "composer-2" }),
+      io,
+    });
+
+    assert.equal(exitCode, 0);
+    // The session's candidate reads, one per fact: the tree the Launcher
+    // renders, the Plan's Frontier in pick order (the same read Doctor's
+    // verdict made), and the waiting half. The Run itself adds none at
+    // start — its first pick is the Plan's snapshot (ADR 0039) — and the
+    // cap stops the loop before any mid-Run re-read.
+    const frontierReads = fixture.requests.filter((request) =>
+      (JSON.parse(request.body ?? "{}") as { operationName?: string })
+        .operationName === "Frontier"
+    );
+    assert.equal(frontierReads.length, 3);
+    assert.equal(worker.spawns.length, 1);
+    assert.equal((await runBranches(repo.cwd)).length, 1);
   } finally {
     await repo.cleanup();
   }

@@ -76,7 +76,7 @@ test("a preview prints the Plan read-only and starts nothing", async () => {
     assert.deepEqual(
       lines(out.chunks).map((line) =>
         line.replace(
-          /^Run Branch: readyrun\/run-\d{8}-\d{6} \(named when the Run starts\)$/,
+          /^Run Branch: readyrun\/run-\d{8}-\d{6} \(named when the Plan is computed\)$/,
           "Run Branch: <stamp>",
         )
       ),
@@ -96,7 +96,7 @@ test("a preview prints the Plan read-only and starts nothing", async () => {
     );
     assert.match(
       out.chunks.join(""),
-      /^Run Branch: readyrun\/run-\d{8}-\d{6} \(named when the Run starts\)$/m,
+      /^Run Branch: readyrun\/run-\d{8}-\d{6} \(named when the Plan is computed\)$/m,
     );
     assert.deepEqual(worker.spawns, []);
     assert.deepEqual(await runBranches(repo.cwd), []);

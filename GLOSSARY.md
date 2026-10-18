@@ -79,7 +79,7 @@ A repo that depends on the package and supplies `defineConfig`. SpeechDeck (GitH
 _Avoid_: host, target repo (as a noun)
 
 **Plan**:
-What a **Run** resolves before its first side effect: **Doctor**'s verdict, the **Frontier** in pick order, the resolved base, the **Run Branch** it would collect onto, the resolved cap, and which **Tickets** wait off the **Frontier**. Computed once and rendered read-only: `run --preview` is its opt-in stdout rendering, and run-start disclosure is the always-on one. A surface that assembles a **Run** renders the **Plan**; it never re-derives **Doctor**'s rules.
+What a **Run** resolves before its first side effect: **Doctor**'s verdict, the **Frontier** in pick order, the resolved base, the **Run Branch** it collects onto, the resolved cap, and which **Tickets** wait off the **Frontier**. Computed once and rendered read-only: `run --preview` is its opt-in stdout rendering, and run-start disclosure is the always-on one. A surface that assembles a **Run** renders the **Plan**; it never re-derives **Doctor**'s rules, and the **Run** consumes the **Plan** rather than resolving again.
 _Avoid_: dry run, simulation, plan mode, wizard output
 
 **Run**:

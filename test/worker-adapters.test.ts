@@ -767,7 +767,16 @@ describe("Worker Adapters", { concurrency: false }, () => {
         });
         assert.equal(doctorExit, 1);
         assert.equal(runExit, 1);
-        assert.equal(doctorChunks.join(""), runChunks.join(""));
+        // Doctor probes cwd fidelity even on a refusal it already knows; the
+        // Run consumes the refusal from the Plan and starts nothing, so its
+        // probe never runs (ADR 0039). The refusal words are what must match.
+        const refusals = (chunks: string[]) =>
+          chunks.join("").split("\n").filter((line) =>
+            line !== "" &&
+            line !==
+              "Probing Worker cwd fidelity in a throwaway Worktree (runs the Worker once)"
+          ).join("\n");
+        assert.equal(refusals(doctorChunks), refusals(runChunks));
         assert.match(
           doctorChunks.join(""),
           /Doctor: effort is set but this Worker Adapter does not map it/,

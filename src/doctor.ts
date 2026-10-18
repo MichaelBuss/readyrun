@@ -98,6 +98,27 @@ export type DoctorVerdict = {
   frontier?: Ticket[];
 };
 
+/**
+ * The cwd-fidelity probe is the Run's to prove at start (ADR 0037, ADR 0039):
+ * the Run runs it itself, disclosed the same words Doctor's probe is, reading
+ * the same Worker Adapter and model. Answers the failure line, or none. An
+ * Adapter with no binary has nothing to probe.
+ */
+export async function probeRunStart(
+  config: ReadyRunConfig,
+  cwd: string,
+  stdout?: DoctorStdout,
+  timeoutMs?: number,
+): Promise<string | undefined> {
+  if (config.worker.bin === undefined) {
+    return undefined;
+  }
+  stdout?.write(
+    "Probing Worker cwd fidelity in a throwaway Worktree (runs the Worker once)\n",
+  );
+  return probeCwdFidelity(config.worker, cwd, { model: config.model, timeoutMs });
+}
+
 export async function collectDoctorFailures(
   input: DoctorInput,
 ): Promise<DoctorVerdict> {
@@ -174,13 +195,12 @@ export async function collectDoctorFailures(
       !askPrintMode &&
       input.probe !== false
     ) {
-      input.stdout?.write(
-        "Probing Worker cwd fidelity in a throwaway Worktree (runs the Worker once)\n",
+      const failure = await probeRunStart(
+        config,
+        cwd,
+        input.stdout,
+        input.probeTimeoutMs,
       );
-      const failure = await probeCwdFidelity(config.worker, cwd, {
-        model: config.model,
-        timeoutMs: input.probeTimeoutMs,
-      });
       if (failure !== undefined) {
         failures.push(failure);
       }

@@ -35,7 +35,7 @@ import { parseTicketRef } from "./frontier-root.ts";
 import { launcher as launcherEntry, type LauncherOptions } from "./launcher.ts";
 import type { FrontierRoot } from "./tracker-adapter.ts";
 import { init as initEntry, parseInitAnswers, type InitAnswers, type InitOptions } from "./init.ts";
-import { run as runEntry, RunCapRequiredError, type RunOptions } from "./run.ts";
+import { run as runEntry, runPlan, RunCapRequiredError, type RunOptions } from "./run.ts";
 import { preview as previewEntry } from "./plan.ts";
 import { isEffort, type Effort, type Permissions } from "./worker-adapter.ts";
 
@@ -282,7 +282,9 @@ export async function cli(options: CliOptions): Promise<number> {
       cwd: options.cwd ?? process.cwd(),
       stdout,
       loadConfig: options.loadConfig ?? loadConfig,
-      run: options.run ?? runEntry,
+      // The Launcher hands the Plan it rendered to the Run that consumes it
+      // (ADR 0039); the flag path's `run` seam has the options contract.
+      run: runPlan,
       init: options.init ?? initEntry,
     });
   }

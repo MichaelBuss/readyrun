@@ -546,7 +546,16 @@ test("Doctor and a Run refuse an Effort outside the declared vocabulary, naming 
       });
       assert.equal(doctorExit, 1);
       assert.equal(runExit, 1);
-      assert.equal(doctorOut.chunks.join(""), runOut.chunks.join(""));
+        // Doctor probes cwd fidelity even on a refusal it already knows; the
+        // Run consumes the refusal from the Plan and starts nothing, so its
+        // probe never runs (ADR 0039). The refusal words are what must match.
+        const refusals = (out: { chunks: string[] }) =>
+          out.chunks.join("").split("\n").filter((line) =>
+            line !== "" &&
+            line !==
+              "Probing Worker cwd fidelity in a throwaway Worktree (runs the Worker once)"
+          ).join("\n");
+        assert.equal(refusals(doctorOut), refusals(runOut));
       assert.match(
         doctorOut.chunks.join(""),
         /effort "medium" is not in the Effort vocabulary Worker Adapter "readyrun-worker" declares \(high, max\)/,
@@ -627,7 +636,16 @@ test("a Worker Adapter that maps an effort flag without declaring a vocabulary i
       });
       assert.equal(doctorExit, 1);
       assert.equal(runExit, 1);
-      assert.equal(doctorOut.chunks.join(""), runOut.chunks.join(""));
+        // Doctor probes cwd fidelity even on a refusal it already knows; the
+        // Run consumes the refusal from the Plan and starts nothing, so its
+        // probe never runs (ADR 0039). The refusal words are what must match.
+        const refusals = (out: { chunks: string[] }) =>
+          out.chunks.join("").split("\n").filter((line) =>
+            line !== "" &&
+            line !==
+              "Probing Worker cwd fidelity in a throwaway Worktree (runs the Worker once)"
+          ).join("\n");
+        assert.equal(refusals(doctorOut), refusals(runOut));
       assert.match(
         doctorOut.chunks.join(""),
         /Worker Adapter "readyrun-worker" maps --effort but declares no Effort vocabulary/,
