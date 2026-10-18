@@ -219,8 +219,25 @@ const cwdPlaceholder = "{cwd}";
 
 const placeholderShape = /\{[^{}]+\}/g;
 
-export function interpolateCwdArgs(args: string[], cwd: string): string[] {
-  return args.map((arg) => arg.replaceAll(cwdPlaceholder, cwd));
+/**
+ * An Adapter's declared argv interpolates one placeholder, `{cwd}` — the
+ * Worktree. Anything else is a lie about what the grammar can answer, and
+ * the Adapter's factory refuses it when built.
+ */
+export class UnknownPlaceholderError extends Error {
+  /** The unknown placeholder, as written. */
+  readonly token: string;
+  /** The Adapter option the placeholder was written in. */
+  readonly option: string;
+
+  constructor(token: string, option: string) {
+    super(
+      `Worker Adapter option "${option}" has unknown placeholder "${token}". Only {cwd} is available.`,
+    );
+    this.name = "UnknownPlaceholderError";
+    this.token = token;
+    this.option = option;
+  }
 }
 
 export function unknownPlaceholdersIn(arg: string): string[] {
@@ -231,6 +248,18 @@ export function unknownPlaceholdersIn(arg: string): string[] {
     }
   }
   return unknown;
+}
+
+export function assertKnownPlaceholders(option: string, args: string[]): void {
+  for (const arg of args) {
+    for (const token of unknownPlaceholdersIn(arg)) {
+      throw new UnknownPlaceholderError(token, option);
+    }
+  }
+}
+
+export function interpolateCwdArgs(args: string[], cwd: string): string[] {
+  return args.map((arg) => arg.replaceAll(cwdPlaceholder, cwd));
 }
 
 export function spawnWorkerBinary(

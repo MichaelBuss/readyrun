@@ -1,4 +1,5 @@
 import {
+  assertKnownPlaceholders,
   createWorkerAdapter,
   interpolateCwdArgs,
   spawnWorkerBinary,
@@ -65,6 +66,9 @@ export function custom<Vocabulary extends readonly Effort[] = readonly []>(
   options: CustomWorkerOptions<Vocabulary>,
 ): CustomWorkerAdapter<Vocabulary> {
   assertKnownKeys(options, knownCustomKeys);
+  // The declared argv interpolates exactly one placeholder, `{cwd}`; the lie
+  // is refused here, where the Consumer wrote it, not at Doctor or spawn.
+  assertKnownPlaceholders("args", options.args ?? []);
   return Object.assign(
     createWorkerAdapter({
       bin: options.bin,

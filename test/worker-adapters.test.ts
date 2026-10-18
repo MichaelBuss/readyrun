@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { describe, test } from "node:test";
 import { spawnWorkerBinary } from "../src/worker-adapter.ts";
-import { claude, cursor, custom, defineConfig, doctor, opencode, run } from "../src/mod.ts";
+import { claude, cursor, custom, defineConfig, doctor, opencode, run, UnknownPlaceholderError } from "../src/mod.ts";
 import type { ReadyRunConfig, WorkerAdapter } from "../src/mod.ts";
 import { memoryTracker } from "../src/testing/mod.ts";
 import { ticket } from "./tracker-adapter-contract.ts";
@@ -250,83 +250,31 @@ describe("Worker Adapters", { concurrency: false }, () => {
     }
   });
 
-  test("an unknown {token} embedded in a larger argv token fails Doctor", async () => {
-    const repo = await throwawayRepo();
-    const chunks: string[] = [];
-    try {
-      await withRecordingPath(["readyrun-worker"], async () => {
-        const doctorExit = await doctor({
-          config: defineConfig({
-            tracker: memoryTracker({
-              tickets: [ticket({ id: "52" })],
-              ready: "unblocked",
-              labels: ["ready-for-agent"],
-            }),
-            worker: custom({
-              bin: "readyrun-worker",
-              args: ["--dir={dir}"],
-              unattendedFlag: "--go",
-            }),
-            model: "composer-2",
-          }),
-          cwd: repo.cwd,
-          stdout: {
-            write(chunk: string) {
-              chunks.push(chunk);
-              return true;
-            },
-          },
-        });
-        assert.equal(doctorExit, 1);
-        assert.match(
-          chunks.join(""),
-          /Doctor: Worker Adapter option "args" has unknown placeholder "\{dir\}"\. Only \{cwd\} is available\./,
-        );
-      });
-    } finally {
-      await repo.cleanup();
-    }
+  test("an unknown {token} embedded in a larger argv token is refused when the custom Worker Adapter is built", () => {
+    assert.throws(
+      () =>
+        custom({
+          bin: "readyrun-worker",
+          args: ["--dir={dir}"],
+          unattendedFlag: "--go",
+        }),
+      UnknownPlaceholderError,
+    );
   });
 
-  test("an unknown {token} placeholder in a custom Worker Adapter's args fails Doctor and a Run does not start", async () => {
-    const repo = await throwawayRepo();
-    const chunks: string[] = [];
-    try {
-      await withRecordingPath(["readyrun-worker"], async ({ bin, receiptPath }) => {
-        const config = defineConfig({
-          tracker: memoryTracker({
-            tickets: [ticket({ id: "52" })],
-            ready: "unblocked",
-            labels: ["ready-for-agent"],
-          }),
-          worker: custom({
-            bin,
-            args: ["run", "--dir", "{dir}"],
-            unattendedFlag: "--go",
-          }),
-          model: "composer-2",
-        });
-        const stdout = {
-          write(chunk: string) {
-            chunks.push(chunk);
-            return true;
-          },
-        };
-        const doctorExit = await doctor({ config, cwd: repo.cwd, stdout });
-        assert.equal(doctorExit, 1);
-        assert.match(
-          chunks.join(""),
-          /Doctor: Worker Adapter option "args" has unknown placeholder "\{dir\}"\. Only \{cwd\} is available\./,
-        );
-        chunks.length = 0;
-        const runExit = await run({ config, cap: 1, cwd: repo.cwd, stdout });
-        assert.equal(runExit, 1);
-        assert.match(chunks.join(""), /unknown placeholder "\{dir\}"/);
-        assert.equal(existsSync(receiptPath), false);
-      });
-    } finally {
-      await repo.cleanup();
-    }
+  test("a custom Worker Adapter's unknown {token} is refused at construction with a named error naming the placeholder and the option", () => {
+    assert.throws(
+      () =>
+        custom({
+          bin: "readyrun-worker",
+          args: ["run", "--dir", "{dir}"],
+          unattendedFlag: "--go",
+        }),
+      (error: unknown) =>
+        error instanceof UnknownPlaceholderError &&
+        error.message ===
+          'Worker Adapter option "args" has unknown placeholder "{dir}". Only {cwd} is available.',
+    );
   });
 
   test("an unknown {token} placeholder in a print-mode Worker Adapter's extraArgs fails Doctor", async () => {
