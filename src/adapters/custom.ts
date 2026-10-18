@@ -69,16 +69,18 @@ export function custom<Vocabulary extends readonly Effort[] = readonly []>(
   options: CustomWorkerOptions<Vocabulary>,
 ): CustomWorkerAdapter<Vocabulary> {
   assertKnownKeys(options, knownCustomKeys);
+  const args = options.args ?? [];
   // The declared argv interpolates exactly one placeholder, `{cwd}`; the lie
-  // is refused here, where the Consumer wrote it, not at Doctor or spawn.
-  assertKnownPlaceholders("args", options.args ?? []);
+  // is refused here — under the Consumer's own option name — rather than by
+  // the assembler's leadingArgs backstop or at Doctor and spawn.
+  assertKnownPlaceholders("args", args);
   return Object.assign(
     assembledWorker(options.bin, options.unattendedFlag, {
       ...(options.effortFlag === undefined ? {} : { effortFlag: options.effortFlag }),
       ...(options.effortVocabulary === undefined
         ? {}
         : { effortVocabulary: options.effortVocabulary }),
-      leadingArgs: options.args ?? [],
+      leadingArgs: args,
       printMode: false,
     }),
     { options },

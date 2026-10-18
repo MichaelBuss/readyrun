@@ -2,7 +2,16 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { describe, test } from "node:test";
-import { claude, cursor, custom, defineConfig, doctor, opencode, run, UnknownPlaceholderError } from "../src/mod.ts";
+import {
+  claude,
+  cursor,
+  custom,
+  defineConfig,
+  doctor,
+  opencode,
+  run,
+  UnknownPlaceholderError,
+} from "../src/mod.ts";
 import type { ReadyRunConfig, WorkerAdapter } from "../src/mod.ts";
 import { memoryTracker } from "../src/testing/mod.ts";
 import { ticket } from "./tracker-adapter-contract.ts";
