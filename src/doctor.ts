@@ -42,7 +42,44 @@ export type DoctorOptions = {
   stdout?: DoctorStdout;
 };
 
-export type DoctorCheckOptions = {
+/**
+ * The Effort and Permissions a Run names beyond the config: the CLI flags
+ * `run` parses, absent where the surface kept the config default.
+ */
+export type RunOverrides = {
+  effort?: Effort;
+  permissions?: Permissions;
+};
+
+/**
+ * The one place Effort and Permissions resolve: CLI over config, `ask` when
+ * neither names one. Doctor's verdict, the Worker spawn payload, and the
+ * Plan's equivalent command all read this answer instead of re-deriving the
+ * precedence at each surface.
+ */
+export function resolveRunSettings(
+  config: ReadyRunConfig,
+  overrides: RunOverrides | undefined,
+): { effort: Effort | undefined; permissions: Permissions } {
+  return {
+    effort: overrides?.effort ?? config.effort,
+    permissions: overrides?.permissions ?? config.permissions ?? "ask",
+  };
+}
+
+/**
+ * The one input Doctor takes from a Run assembler: the config to lie-check,
+ * the same root flags `run` takes, and the Run-named Effort and Permissions.
+ */
+export type DoctorInput = {
+  /** The Consumer's config, as `defineConfig` built it. */
+  config: ReadyRunConfig;
+  /** The Consumer root. */
+  cwd: string;
+  /** The Frontier's root to lie-check (ADR 0038), or none for the selector's. */
+  root?: FrontierRoot;
+  /** The Run-named Effort and Permissions; absent keeps the config values. */
+  overrides?: RunOverrides;
   // Doctor discloses that the fidelity probe runs the Worker once (ADR 0037).
   stdout?: DoctorStdout;
   probeTimeoutMs?: number;
@@ -51,14 +88,22 @@ export type DoctorCheckOptions = {
   probe?: boolean;
 };
 
-async function check(
-  config: ReadyRunConfig,
-  cwd: string,
-  effort: Effort | undefined,
-  permissions: Permissions,
-  root: FrontierRoot | undefined,
-  options: DoctorCheckOptions = {},
-): Promise<string[]> {
+/**
+ * Doctor's verdict: the failures it found, and — when a Root was named and
+ * the read answered — the rooted Frontier that read returned. The verdict's
+ * one read is the read: Doctor and the Plan share it instead of fetching the
+ * Frontier twice in one command.
+ */
+export type DoctorVerdict = {
+  failures: string[];
+  frontier?: Ticket[];
+};
+
+export async function collectDoctorFailures(
+  input: DoctorInput,
+): Promise<DoctorVerdict> {
+  const { config, cwd, root } = input;
+  const { effort, permissions } = resolveRunSettings(config, input.overrides);
   const failures: string[] = [];
   const modelOk = typeof config.model === "string" && config.model.length > 0;
   if (!modelOk) {
@@ -89,7 +134,7 @@ async function check(
     inspect = await config.tracker.inspect();
   } catch (error) {
     failures.push(error instanceof Error ? error.message : String(error));
-    return failures;
+    return { failures };
   }
   for (const label of inspect.selectorLabels) {
     if (!inspect.existingLabels.includes(label)) {
@@ -140,14 +185,14 @@ async function check(
       config.worker.bin !== undefined &&
       !argvPlaceholderLies &&
       !askPrintMode &&
-      options.probe !== false
+      input.probe !== false
     ) {
-      options.stdout?.write(
+      input.stdout?.write(
         "Probing Worker cwd fidelity in a throwaway Worktree (runs the Worker once)\n",
       );
       const failure = await probeCwdFidelity(config.worker, cwd, {
         model: config.model,
-        timeoutMs: options.probeTimeoutMs,
+        timeoutMs: input.probeTimeoutMs,
       });
       if (failure !== undefined) {
         failures.push(failure);
@@ -204,11 +249,12 @@ async function check(
       rooted = await config.tracker.frontier(root);
     } catch (error) {
       failures.push(error instanceof Error ? error.message : String(error));
-      return failures;
+      return { failures };
     }
     failures.push(...rootViolationMessages(rooted, root));
+    return { failures, frontier: rooted };
   }
-  return failures;
+  return { failures };
 }
 
 function workerBinaryExists(bin: string): boolean {
@@ -279,17 +325,6 @@ export function warnUnusedModelsByLabel(
   }
 }
 
-export async function collectDoctorFailures(
-  config: ReadyRunConfig,
-  cwd: string,
-  effort: Effort | undefined = config.effort,
-  permissions: Permissions = config.permissions ?? "ask",
-  root: FrontierRoot | undefined = undefined,
-  options: DoctorCheckOptions = {},
-): Promise<string[]> {
-  return check(config, cwd, effort, permissions, root, options);
-}
-
 export function writeDoctorFailures(
   stdout: DoctorStdout,
   failures: string[],
@@ -321,16 +356,14 @@ export async function doctor(options: DoctorOptions): Promise<number> {
   const live = startLiveness(stdout);
   try {
     live.stage("Doctor");
-    const failures = await collectDoctorFailures(
+    const verdict = await collectDoctorFailures({
       config,
       cwd,
-      config.effort,
-      config.permissions,
-      options.root,
-      { stdout },
-    );
+      root: options.root,
+      stdout,
+    });
     live.stop();
-    if (writeDoctorFailures(stdout, failures) === 1) {
+    if (writeDoctorFailures(stdout, verdict.failures) === 1) {
       return 1;
     }
     try {
@@ -340,14 +373,15 @@ export async function doctor(options: DoctorOptions): Promise<number> {
       // Has no base to disclose. A Run hard-stops at git there, which is where that gets reported.
     }
     live.stage("Frontier");
-    const frontier = await config.tracker.frontier(options.root);
+    // The check's rooted read already answered; reading again would fetch the
+    // Frontier twice in one command. Unrooted, this is the one read.
+    const frontier = verdict.frontier ??
+      await config.tracker.frontier(options.root);
     live.stop();
     const root = options.root;
     if (root !== undefined) {
-      const violations = rootViolationMessages(frontier, root);
-      if (writeDoctorFailures(stdout, violations) === 1) {
-        return 1;
-      }
+      // Root violations rode the verdict's failures, written above; what is
+      // left to say here is which rooted Tickets wait off the Frontier.
       warnWaitingRootTickets(stdout, root, frontier);
     }
     warnUnusedModelsByLabel(stdout, config.modelsByLabel, frontier);

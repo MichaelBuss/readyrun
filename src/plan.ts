@@ -93,18 +93,19 @@ export async function computePlan(options: RunOptions): Promise<Plan> {
   const { cap, source } = resolveCap(options, config);
   const cwd = options.cwd ?? process.cwd();
   const root = options.root;
-  const doctorFailures = await collectDoctorFailures(
+  const verdict = await collectDoctorFailures({
     config,
     cwd,
-    options.effort ?? config.effort,
-    options.permissions ?? config.permissions,
     root,
-    { probe: false },
-  );
+    overrides: options,
+    probe: false,
+  });
   const base = await resolveRunBase(cwd, options.base);
-  // The same frontier call the Run's first iteration makes; a Tracker that
-  // cannot be reached is a failure the preview reports, not an empty Plan.
-  const frontier = await config.tracker.frontier(root);
+  // The same read Doctor's check made when a Root is named; unrooted, this is
+  // the one read. A Tracker that cannot be reached is a failure the preview
+  // reports, not an empty Plan.
+  const frontier = verdict.frontier ??
+    await config.tracker.frontier(root);
   let waiting: PlanWaiting;
   try {
     waiting = { kind: "answered", tickets: await config.tracker.waiting(root) };
@@ -115,7 +116,7 @@ export async function computePlan(options: RunOptions): Promise<Plan> {
     };
   }
   return {
-    doctorFailures,
+    doctorFailures: verdict.failures,
     frontier,
     waiting,
     base,

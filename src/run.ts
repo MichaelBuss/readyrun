@@ -1,7 +1,13 @@
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { defineConfig, type ReadyRunConfig } from "./config.ts";
-import { collectDoctorFailures, discloseBase, writeDoctorFailures, warnUnusedModelsByLabel } from "./doctor.ts";
+import {
+  collectDoctorFailures,
+  discloseBase,
+  resolveRunSettings,
+  writeDoctorFailures,
+  warnUnusedModelsByLabel,
+} from "./doctor.ts";
 import { startLiveness, type Liveness, type LivenessStdout } from "./liveness.ts";
 import {
   branchTreeDiffersFrom,
@@ -225,17 +231,19 @@ async function runWithLiveness(
   stdout: RunStdout,
   live: Liveness,
 ): Promise<number> {
+  // The Run's Effort and Permissions resolve once, where the Run starts;
+  // Doctor's verdict and every Worker spawn read the same answer.
+  const settings = resolveRunSettings(config, options);
   live.stage("Doctor");
-  const failures = await collectDoctorFailures(
+  const verdict = await collectDoctorFailures({
     config,
     cwd,
-    options.effort ?? config.effort,
-    options.permissions ?? config.permissions,
-    options.root,
-    { stdout },
-  );
+    root: options.root,
+    overrides: options,
+    stdout,
+  });
   live.stop();
-  if (writeDoctorFailures(stdout, failures) === 1) {
+  if (writeDoctorFailures(stdout, verdict.failures) === 1) {
     return 1;
   }
   const runBranch = runBranchName(new Date());
@@ -369,8 +377,8 @@ async function runWithLiveness(
         ticket,
         cwd: worktree,
         model: resolveModel(ticket, config, options.model),
-        permissions: options.permissions ?? config.permissions,
-        effort: options.effort ?? config.effort,
+        permissions: settings.permissions,
+        effort: settings.effort,
         prompt: composeWorkerPrompt(
           config.tracker.promptCopy(ticket),
           worktree,
