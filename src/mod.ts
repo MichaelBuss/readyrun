@@ -72,6 +72,7 @@ export {
 } from "./worker-adapter.ts";
 export type { StandardEffortVocabulary } from "./worker-adapter.ts";
 export { UnknownConfigKeyError } from "./unknown-keys.ts";
+export { UnknownPlaceholderError } from "./worker-adapter.ts";
 export { github } from "./adapters/github.ts";
 export type { GitHubTrackerOptions } from "./adapters/github.ts";
 export { linear } from "./adapters/linear.ts";

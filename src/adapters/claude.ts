@@ -1,5 +1,5 @@
 import {
-  printModeWorker,
+  assembledWorker,
   standardEffortVocabulary,
   type ListedModel,
   type StandardEffortVocabulary,
@@ -36,7 +36,7 @@ export function claude(
   options: ClaudeWorkerOptions = {},
 ): WorkerAdapter<StandardEffortVocabulary> {
   assertKnownKeys(options, knownClaudeKeys);
-  return printModeWorker("claude", "--dangerously-skip-permissions", {
+  return assembledWorker("claude", "--dangerously-skip-permissions", {
     effortFlag: "--effort",
     effortVocabulary: standardEffortVocabulary,
     extraArgs: options.extraArgs,

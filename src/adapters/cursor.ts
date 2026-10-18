@@ -1,6 +1,6 @@
 import {
   execListOutput,
-  printModeWorker,
+  assembledWorker,
   stripAnsi,
   type ListedModel,
   type WorkerAdapter,
@@ -95,7 +95,7 @@ async function listCursorModels(): Promise<readonly ListedModel[]> {
  */
 export function cursor(options: CursorWorkerOptions = {}): WorkerAdapter<readonly []> {
   assertKnownKeys(options, knownCursorKeys);
-  return printModeWorker<readonly []>("agent", "--yolo", {
+  return assembledWorker<readonly []>("agent", "--yolo", {
     effortVocabulary: [],
     extraArgs: options.extraArgs,
     probeArgs: ["status"],

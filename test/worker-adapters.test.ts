@@ -2,8 +2,16 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { describe, test } from "node:test";
-import { spawnWorkerBinary } from "../src/worker-adapter.ts";
-import { claude, cursor, custom, defineConfig, doctor, opencode, run } from "../src/mod.ts";
+import {
+  claude,
+  cursor,
+  custom,
+  defineConfig,
+  doctor,
+  opencode,
+  run,
+  UnknownPlaceholderError,
+} from "../src/mod.ts";
 import type { ReadyRunConfig, WorkerAdapter } from "../src/mod.ts";
 import { memoryTracker } from "../src/testing/mod.ts";
 import { ticket } from "./tracker-adapter-contract.ts";
@@ -250,120 +258,41 @@ describe("Worker Adapters", { concurrency: false }, () => {
     }
   });
 
-  test("an unknown {token} embedded in a larger argv token fails Doctor", async () => {
-    const repo = await throwawayRepo();
-    const chunks: string[] = [];
-    try {
-      await withRecordingPath(["readyrun-worker"], async () => {
-        const doctorExit = await doctor({
-          config: defineConfig({
-            tracker: memoryTracker({
-              tickets: [ticket({ id: "52" })],
-              ready: "unblocked",
-              labels: ["ready-for-agent"],
-            }),
-            worker: custom({
-              bin: "readyrun-worker",
-              args: ["--dir={dir}"],
-              unattendedFlag: "--go",
-            }),
-            model: "composer-2",
-          }),
-          cwd: repo.cwd,
-          stdout: {
-            write(chunk: string) {
-              chunks.push(chunk);
-              return true;
-            },
-          },
-        });
-        assert.equal(doctorExit, 1);
-        assert.match(
-          chunks.join(""),
-          /Doctor: Worker Adapter option "args" has unknown placeholder "\{dir\}"\. Only \{cwd\} is available\./,
-        );
-      });
-    } finally {
-      await repo.cleanup();
-    }
+  test("an unknown {token} embedded in a larger argv token is refused when the custom Worker Adapter is built", () => {
+    assert.throws(
+      () =>
+        custom({
+          bin: "readyrun-worker",
+          args: ["--dir={dir}"],
+          unattendedFlag: "--go",
+        }),
+      UnknownPlaceholderError,
+    );
   });
 
-  test("an unknown {token} placeholder in a custom Worker Adapter's args fails Doctor and a Run does not start", async () => {
-    const repo = await throwawayRepo();
-    const chunks: string[] = [];
-    try {
-      await withRecordingPath(["readyrun-worker"], async ({ bin, receiptPath }) => {
-        const config = defineConfig({
-          tracker: memoryTracker({
-            tickets: [ticket({ id: "52" })],
-            ready: "unblocked",
-            labels: ["ready-for-agent"],
-          }),
-          worker: custom({
-            bin,
-            args: ["run", "--dir", "{dir}"],
-            unattendedFlag: "--go",
-          }),
-          model: "composer-2",
-        });
-        const stdout = {
-          write(chunk: string) {
-            chunks.push(chunk);
-            return true;
-          },
-        };
-        const doctorExit = await doctor({ config, cwd: repo.cwd, stdout });
-        assert.equal(doctorExit, 1);
-        assert.match(
-          chunks.join(""),
-          /Doctor: Worker Adapter option "args" has unknown placeholder "\{dir\}"\. Only \{cwd\} is available\./,
-        );
-        chunks.length = 0;
-        const runExit = await run({ config, cap: 1, cwd: repo.cwd, stdout });
-        assert.equal(runExit, 1);
-        assert.match(chunks.join(""), /unknown placeholder "\{dir\}"/);
-        assert.equal(existsSync(receiptPath), false);
-      });
-    } finally {
-      await repo.cleanup();
-    }
+  test("a custom Worker Adapter's unknown {token} is refused at construction with a named error naming the placeholder and the option", () => {
+    assert.throws(
+      () =>
+        custom({
+          bin: "readyrun-worker",
+          args: ["run", "--dir", "{dir}"],
+          unattendedFlag: "--go",
+        }),
+      (error: unknown) =>
+        error instanceof UnknownPlaceholderError &&
+        error.message ===
+          'Worker Adapter option "args" has unknown placeholder "{dir}". Only {cwd} is available.',
+    );
   });
 
-  test("an unknown {token} placeholder in a print-mode Worker Adapter's extraArgs fails Doctor", async () => {
-    const repo = await throwawayRepo();
-    const chunks: string[] = [];
-    try {
-      await withRecordingPath(["claude"], async ({ receiptPath }) => {
-        const doctorExit = await doctor({
-          config: defineConfig({
-            tracker: memoryTracker({
-              tickets: [ticket({ id: "52" })],
-              ready: "unblocked",
-              labels: ["ready-for-agent"],
-            }),
-            worker: claude({ extraArgs: ["--dir", "{cw}"] }),
-            model: "opus",
-            permissions: "unattended",
-          }),
-          cwd: repo.cwd,
-          stdout: {
-            write(chunk: string) {
-              chunks.push(chunk);
-              return true;
-            },
-          },
-        });
-        assert.equal(doctorExit, 1);
-        assert.match(
-          chunks.join(""),
-          /Doctor: Worker Adapter option "extraArgs" has unknown placeholder "\{cw\}"\. Only \{cwd\} is available\./,
-        );
-        const receipt = await readReceipt(receiptPath);
-        assert.deepEqual(receipt.argv, ["auth", "status"]);
-      });
-    } finally {
-      await repo.cleanup();
-    }
+  test("an unknown {token} placeholder in a print-mode Worker Adapter's extraArgs is refused when the Adapter is built", () => {
+    assert.throws(
+      () => claude({ extraArgs: ["--dir", "{cw}"] }),
+      (error: unknown) =>
+        error instanceof UnknownPlaceholderError &&
+        error.message ===
+          'Worker Adapter option "extraArgs" has unknown placeholder "{cw}". Only {cwd} is available.',
+    );
   });
 
   test("a Cursor Worker Adapter Run spawns the Worker with the prompt, model, Worktree cwd, and Cursor's unattended flag", async () => {
@@ -1389,17 +1318,19 @@ describe("Worker Adapters", { concurrency: false }, () => {
     }
   });
 
-  test("spawnWorkerBinary with capture pipes the Worker's stdout back instead of inheriting it", async () => {
+  test("a custom Worker Adapter's capture spawn pipes the Worker's stdout back instead of inheriting it", async () => {
     const previousStdout = process.env.READYRUN_STUB_STDOUT;
     process.env.READYRUN_STUB_STDOUT = "auth ok\n";
     try {
       await withRecordingPath(["readyrun-worker"], async ({ bin }) => {
-        const result = await spawnWorkerBinary(
-          bin,
-          ["--model", "composer-2", "hello"],
-          process.cwd(),
-          { capture: true },
-        );
+        const result = await custom({ bin, unattendedFlag: "--go" }).spawn({
+          ticket: ticket({ id: "52" }),
+          cwd: process.cwd(),
+          model: "composer-2",
+          permissions: "ask",
+          prompt: "hello",
+          capture: true,
+        });
         assert.equal(result.exitCode, 0);
         assert.equal(result.stdout, "auth ok\n");
       });
@@ -1412,18 +1343,21 @@ describe("Worker Adapters", { concurrency: false }, () => {
     }
   });
 
-  test("spawnWorkerBinary with capture and a timeout kills a Worker that never exits and reports timedOut", async () => {
+  test("a custom Worker Adapter's capture spawn with a timeout kills a Worker that never exits and reports timedOut", async () => {
     const previousHang = process.env.READYRUN_PROBE_HANG;
     process.env.READYRUN_PROBE_HANG = "1";
     try {
       await withRecordingPath(["readyrun-worker"], async ({ bin }) => {
         const started = Date.now();
-        const result = await spawnWorkerBinary(
-          bin,
-          ["Print the output of `git rev-parse --show-toplevel` and nothing else."],
-          process.cwd(),
-          { capture: true, timeoutMs: 300 },
-        );
+        const result = await custom({ bin, unattendedFlag: "--go" }).spawn({
+          ticket: ticket({ id: "52" }),
+          cwd: process.cwd(),
+          model: "composer-2",
+          permissions: "ask",
+          prompt: "Print the output of `git rev-parse --show-toplevel` and nothing else.",
+          capture: true,
+          timeoutMs: 300,
+        });
         assert.equal(result.timedOut, true);
         assert.equal(result.stdout, process.cwd());
         const elapsed = Date.now() - started;

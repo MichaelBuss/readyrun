@@ -1,9 +1,7 @@
 import {
-  createWorkerAdapter,
-  interpolateCwdArgs,
-  spawnWorkerBinary,
+  assertKnownPlaceholders,
+  assembledWorker,
   type Effort,
-  type SpawnRequest,
   type WorkerAdapter,
 } from "../worker-adapter.ts";
 import { assertKnownKeys } from "../unknown-keys.ts";
@@ -29,7 +27,10 @@ export type CustomWorkerOptions<
 > = {
   /** The binary spawned once per Ticket. */
   bin: string;
-  /** The argv between the binary and `--model`; `{cwd}` interpolates to the Worktree. */
+  /**
+   * The argv between the binary and `--model`; `{cwd}` interpolates to the
+   * Worktree. An unknown `{placeholder}` is refused here, at construction.
+   */
   args?: string[];
   /** The flag passed when Permissions are `"unattended"`. */
   unattendedFlag: string;
@@ -55,41 +56,32 @@ export type CustomWorkerAdapter<
 
 /**
  * The Worker Adapter for any coding CLI: you name the binary, its static
- * argv, and its unattended flag; ReadyRun appends `--model <model>`, the
- * declared effort flag when Effort is in play, the unattended flag when
- * Permissions are `"unattended"`, and the prompt. With no
- * `effortVocabulary` option the Adapter declares the empty vocabulary, so a
- * config effort on it is a compile error (ADR 0042).
+ * argv, and its unattended flag; the shared argv grammar appends
+ * `--model <model>`, the declared effort flag when Effort is in play, the
+ * unattended flag when Permissions are `"unattended"`, and the prompt. The
+ * declared args ride the same assembly the print-mode Adapters use — as the
+ * leading args, with print mode suppressed, since the wrapped binary may
+ * still be able to ask. With no `effortVocabulary` option the Adapter
+ * declares the empty vocabulary, so a config effort on it is a compile error
+ * (ADR 0042).
  */
 export function custom<Vocabulary extends readonly Effort[] = readonly []>(
   options: CustomWorkerOptions<Vocabulary>,
 ): CustomWorkerAdapter<Vocabulary> {
   assertKnownKeys(options, knownCustomKeys);
+  const args = options.args ?? [];
+  // The declared argv interpolates exactly one placeholder, `{cwd}`; the lie
+  // is refused here — under the Consumer's own option name — rather than by
+  // the assembler's leadingArgs backstop or at Doctor and spawn.
+  assertKnownPlaceholders("args", args);
   return Object.assign(
-    createWorkerAdapter({
-      bin: options.bin,
+    assembledWorker(options.bin, options.unattendedFlag, {
       ...(options.effortFlag === undefined ? {} : { effortFlag: options.effortFlag }),
       ...(options.effortVocabulary === undefined
         ? {}
         : { effortVocabulary: options.effortVocabulary }),
-      staticArgv:
-        options.args === undefined ? undefined : { option: "args", args: options.args },
-      spawn(request: SpawnRequest) {
-        const args = [
-          ...interpolateCwdArgs(options.args ?? [], request.cwd),
-          "--model",
-          request.model,
-          ...(request.effort !== undefined && options.effortFlag !== undefined
-            ? [options.effortFlag, request.effort]
-            : []),
-          ...(request.permissions === "unattended" ? [options.unattendedFlag] : []),
-          request.prompt,
-        ];
-        return spawnWorkerBinary(options.bin, args, request.cwd, {
-          capture: request.capture,
-          timeoutMs: request.timeoutMs,
-        });
-      },
+      leadingArgs: args,
+      printMode: false,
     }),
     { options },
   );
