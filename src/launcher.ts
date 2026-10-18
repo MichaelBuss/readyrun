@@ -23,7 +23,7 @@ import {
 } from "./git.ts";
 import { init as initEntry, type InitOptions } from "./init.ts";
 import { computePlan, renderPlan, type Plan } from "./plan.ts";
-import { run as runEntry, type RunOptions } from "./run.ts";
+import { runPlan, type RunOptions, type RunRuntime } from "./run.ts";
 import { parseTicketRef } from "./frontier-root.ts";
 import type { Ticket } from "./ticket.ts";
 import {
@@ -281,8 +281,12 @@ export type LauncherOptions = {
   stdout?: { write(chunk: string): unknown };
   /** Loads the Consumer's config. Defaults to the real loader. */
   loadConfig?: (cwd: string) => Promise<ReadyRunConfig>;
-  /** The Run the confirm starts. Defaults to the real Run. */
-  run?: (options: RunOptions) => Promise<number>;
+  /**
+   * The Run the confirm starts: handed the Plan it rendered and the runtime
+   * to work from, so the session reads the Tracker once per fact (ADR 0039).
+   * Defaults to the real Run.
+   */
+  run?: (plan: Plan, runtime: RunRuntime) => Promise<number>;
   /** The Init a missing config offers. Defaults to the real Init. */
   init?: (options: InitOptions) => Promise<number>;
   /** The prompts. Defaults to Clack. */
@@ -479,9 +483,15 @@ export async function launcher(options: LauncherOptions = {}): Promise<number> {
   }
   // On confirm the Launcher exits its own UI; the Run's ADR 0035 renderer
   // owns the terminal from here (ADR 0040). Nothing above created anything:
-  // every read was Plan work, so a Ctrl-C leaves no half-created Run.
+  // every read was Plan work, so a Ctrl-C leaves no half-created Run. The
+  // Run consumes this Plan — the session reads each Tracker fact once
+  // (ADR 0039).
   io.outro("Starting the Run");
-  return await (options.run ?? runEntry)(runOptions);
+  return await (options.run ?? runPlan)(plan, {
+    config: resolved,
+    cwd,
+    stdout,
+  });
 }
 
 // The Effort option value that means "leave it to the config and the

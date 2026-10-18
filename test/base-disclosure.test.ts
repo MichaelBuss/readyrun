@@ -55,9 +55,9 @@ test("a Run names the base commit and the Run Branch before it claims a Ticket, 
     assert.equal(exitCode, 0);
     assert.deepEqual(lines(out.chunks), [
       "Doctor",
+      "Frontier",
       `Base: ${base.slice(0, 7)} on main`,
       `Run Branch: ${await runBranch(repo.cwd)}`,
-      "Frontier",
       "Worktree",
       "Ticket 52  Ticket 52  1/1  readyrun/52",
       "Worker",
@@ -178,10 +178,10 @@ test("Doctor and a Run disclose a dirty, non-default base in the same words", as
     ]);
     assert.deepEqual(lines(runOut.chunks), [
       "Doctor",
+      "Frontier",
       baseLine,
       dirtyWarning,
       `Run Branch: ${await runBranch(repo.cwd)}`,
-      "Frontier",
       "Worktree",
       "Ticket 52  Ticket 52  1/1  readyrun/52",
       "Worker",
