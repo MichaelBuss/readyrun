@@ -35,6 +35,7 @@ import {
 import { doctor as doctorEntry, type DoctorOptions } from "./doctor.ts";
 import {
   deliver as deliverEntry,
+  deliverPlan,
   previewDelivery as previewDeliveryEntry,
   type DeliverInput,
 } from "./deliver.ts";
@@ -371,9 +372,11 @@ export async function cli(options: CliOptions): Promise<number> {
       cwd: options.cwd ?? process.cwd(),
       stdout,
       loadConfig: options.loadConfig ?? loadConfig,
-      // The Launcher hands the Plan it rendered to the Run that consumes it
-      // (ADR 0039); the flag path's `run` seam has the options contract.
+      // The Launcher hands the Plan it rendered to the Run or Delivery that
+      // consumes it (ADR 0039, ADR 0048); the flag path's seams have the
+      // options contracts.
       run: runPlan,
+      deliver: deliverPlan,
       init: options.init ?? initEntry,
     });
   }

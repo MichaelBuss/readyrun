@@ -21,6 +21,16 @@ import {
   resolveRunBase,
   type ListedRunBranch,
 } from "./git.ts";
+ import {
+   computeDeliveryPlan,
+   deliverPlan,
+   renderDeliveryPlan,
+   type DeliverInput,
+   type DeliveryPlan,
+   type DeliverRuntime,
+ } from "./deliver.ts";
+import { deliveryModes } from "./delivery.ts";
+import type { ForgePort } from "./forge.ts";
 import { init as initEntry, type InitOptions } from "./init.ts";
 import { computePlan, renderPlan, type Plan } from "./plan.ts";
 import { runPlan, type RunOptions, type RunRuntime } from "./run.ts";
@@ -290,6 +300,17 @@ export type LauncherOptions = {
    * Defaults to the real Run.
    */
   run?: (plan: Plan, runtime: RunRuntime) => Promise<number>;
+  /**
+   * The Delivery the confirm publishes: handed the Plan it rendered and the
+   * runtime to work from, the same shape (ADR 0048). Defaults to the real
+   * reconcile.
+   */
+  deliver?: (plan: DeliveryPlan, runtime: DeliverRuntime) => Promise<number>;
+  /**
+   * The forge the Delivery's Plan prices against, injected. Defaults to the
+   * one the Tracker's forge fact resolves (ADR 0048); tests script their own.
+   */
+  forge?: ForgePort;
   /** The Init a missing config offers. Defaults to the real Init. */
   init?: (options: InitOptions) => Promise<number>;
   /** The prompts. Defaults to Clack. */
@@ -300,21 +321,34 @@ export type LauncherOptions = {
 // `run --preview` renders, under a header that says a Run will start.
 const launcherPlanHeader = "Plan for this Run\n";
 
+// The same for a Delivery: one computation, the Launcher's own header.
+const launcherDeliveryHeader = "Plan for this Delivery\n";
+
+// The built-ins' hints, so the mode question teaches the vocabulary it
+// offers. A registered strategy needs no hint from the Launcher.
+const builtInModeHints: Record<string, string> = {
+  "family-pr": "a completed family as one pull request",
+  stack: "one pull request per Ticket, stacked on each other",
+  main: "fast-forward the default branch to the Run Branch",
+};
+
 function caughtMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
 /**
- * The Clack surface bare `readyrun` opens on a TTY. It assembles a Run:
- * the tree question (or the root prompts when the Tracker Adapter refuses
- * the tree), the cap, Permissions, model, Effort, and the base — offering
- * Init first when no config exists, then asking whether a Run is wanted at
- * all, a decline ending a success (ADR 0043). It renders the Plan, and on
- * confirm hands the terminal to the Run's own renderer. Everything it
- * collects is flag-expressible; it never re-derives Doctor's rules; it is
- * never a prompt inside a Run.
+ * The Clack surface bare `readyrun` opens on a TTY. Its first question names
+ * what to assemble — a Run or a Delivery (ADR 0048) — and a decline ends a
+ * success (ADR 0043). A Run is assembled as always: the tree question (or
+ * the root prompts when the Tracker Adapter refuses the tree), the cap,
+ * Permissions, model, Effort, and the base — offering Init first when no
+ * config exists. A Delivery collects the mode and the Run Branch (listed
+ * from the `readyrun/run-` namespace, never guessed), renders the Plan, and
+ * hands the terminal to the same stdout renderer. Everything it collects is
+ * flag-expressible; it never re-derives Doctor's rules; it is never a prompt
+ * inside a Run.
  *
- * @returns 0 when a confirmed Run finished clean or a decline ended the flow, 1 otherwise.
+ * @returns 0 when a confirmed Run or Delivery finished clean or a decline ended the flow, 1 otherwise.
  */
 export async function launcher(options: LauncherOptions = {}): Promise<number> {
   const io = options.io ?? clackLauncherIO;
@@ -372,6 +406,32 @@ export async function launcher(options: LauncherOptions = {}): Promise<number> {
     io.intro("ReadyRun");
   }
   const resolved = defineConfig(config);
+  // The first question names what to assemble (ADR 0048): a Run or a
+  // Delivery. A decline ends a success (ADR 0043) — the maintainer sat
+  // down, saw the two things, and chose neither.
+  const assembled = await io.select<"run" | "delivery">({
+    message: "What should ReadyRun assemble?",
+    initialValue: "run",
+    options: [
+      {
+        value: "run",
+        label: "A Run",
+        hint: "walk the Frontier, one Worker per Ticket",
+      },
+      {
+        value: "delivery",
+        label: "A Delivery",
+        hint: "publish a Run Branch's settled history — `readyrun deliver`",
+      },
+    ],
+  });
+  if (typeof assembled === "symbol") {
+    io.outro("Nothing assembled.");
+    return 0;
+  }
+  if (assembled === "delivery") {
+    return await assembleDelivery(io, stdout, cwd, resolved, options);
+  }
   // The tree question goes first (ADR 0041): the cap suggestion depends on
   // the selection, and the candidate tree is what the maintainer sat down to
   // see.
@@ -491,6 +551,100 @@ export async function launcher(options: LauncherOptions = {}): Promise<number> {
   // (ADR 0039).
   io.outro("Starting the Run");
   return await (options.run ?? runPlan)(plan, {
+    config: resolved,
+    cwd,
+    stdout,
+  });
+}
+
+// The Delivery half of the first question (ADR 0048): the mode, then the Run
+// Branch — listed from the `readyrun/run-` namespace, never guessed — then
+// the Delivery's Plan, rendered read-only, and on confirm the same hand-off
+// the Run gets. Everything collected is flag-expressible.
+async function assembleDelivery(
+  io: LauncherIO,
+  stdout: { write(chunk: string): unknown },
+  cwd: string,
+  resolved: ReadyRunConfig & { permissions: Permissions },
+  options: LauncherOptions,
+): Promise<number> {  const mode = await io.select<string>({
+    message: "Delivery mode",
+    options: [
+      ...Object.values(deliveryModes).map((strategy) => ({
+        value: strategy.name,
+        label: strategy.name,
+        hint: builtInModeHints[strategy.name],
+      })),
+      ...(resolved.deliveries ?? []).map((strategy) => ({
+        value: strategy.name,
+        label: strategy.name,
+        hint: "a registered Delivery strategy",
+      })),
+    ],
+  });
+  if (typeof mode === "symbol") {
+    io.cancel("Launcher cancelled.");
+    return 1;
+  }
+  let branches: ListedRunBranch[];
+  try {
+    branches = await listRunBranches(cwd);
+  } catch (error) {
+    io.cancel(`Could not list the Run Branches: ${caughtMessage(error)}`);
+    return 1;
+  }
+  if (branches.length === 0) {
+    io.cancel("No Run Branch to deliver — run one first.");
+    return 1;
+  }
+  const branch = await io.select<string>({
+    message: "Run Branch to deliver",
+    initialValue: branches.find((candidate) => !candidate.mergedIntoDefault)?.name,
+    options: branches.map((candidate) => ({
+      value: candidate.name,
+      label: candidate.name,
+      hint: candidate.mergedIntoDefault
+        ? "the default branch already contains it"
+        : "unmerged — the usual delivery",
+    })),
+  });
+  if (typeof branch === "symbol") {
+    io.cancel("Launcher cancelled.");
+    return 1;
+  }
+  const input: DeliverInput = {
+    config: resolved,
+    mode,
+    branch,
+    cwd,
+    stdout,
+    forge: options.forge,
+  };
+  let plan: DeliveryPlan;
+  try {
+    plan = await computeDeliveryPlan(input);
+  } catch (error) {
+    io.cancel(`Could not resolve the Delivery's Plan: ${caughtMessage(error)}`);
+    return 1;
+  }
+  renderDeliveryPlan(stdout, plan, launcherDeliveryHeader);
+  const publish = await io.confirm({
+    message: "Publish this Delivery?",
+    initialValue: true,
+  });
+  if (typeof publish === "symbol") {
+    io.cancel("Launcher cancelled.");
+    return 1;
+  }
+  if (!publish) {
+    io.outro("Delivery not published.");
+    return 1;
+  }
+  // On confirm the Launcher exits its own UI; nothing above published
+  // anything — every read was Plan work (ADR 0048). The reconcile consumes
+  // this Plan, the way the Run consumes its own.
+  io.outro("Publishing the Delivery");
+  return await (options.deliver ?? deliverPlan)(plan, {
     config: resolved,
     cwd,
     stdout,

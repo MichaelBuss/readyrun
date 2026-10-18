@@ -365,18 +365,19 @@ export function equivalentDeliverCommand(options: DeliverInput): string {  const
 }
 
 /**
- * Render the Delivery's Plan read-only, under the preview's header or the
- * pre-confirm one the Launcher names. Same split as the Run's Plan: Doctor's
- * verdict first, then what would be pushed, which PRs opened, and on which
- * bases (ADR 0048).
+ * Render the Delivery's Plan read-only, under whatever header the surface
+ * names. Same split as the Run's Plan: Doctor's verdict first, then what
+ * would be pushed, which PRs opened, and on which bases (ADR 0048).
+ * `deliver --preview` renders it under the preview's header; the Launcher
+ * renders the same Plan under its own before the delivery it confirmed
+ * publishes.
  */
 export function renderDeliveryPlan(
   stdout: DeliverStdout,
   plan: DeliveryPlan,
+  header = "Delivery preview: nothing is published; this Plan is read-only\n",
 ): void {
-  stdout.write(
-    "Delivery preview: nothing is published; this Plan is read-only\n",
-  );
+  stdout.write(header);
   if (plan.doctorFailures.length === 0) {
     stdout.write("Doctor: pass\n");
   } else {

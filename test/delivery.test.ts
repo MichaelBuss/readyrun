@@ -17,7 +17,13 @@ import { defineConfig } from "../src/config.ts";
 import { memoryTracker, recordingWorker } from "../src/testing/mod.ts";
 import type { Ticket } from "../src/ticket.ts";
 import { ticket } from "./tracker-adapter-contract.ts";
-import { git, throwawayClone, throwawayRepo } from "./throwaway-repo.ts";
+import {
+  createRunBranch,
+  git,
+  landTicket,
+  throwawayClone,
+  throwawayRepo,
+} from "./throwaway-repo.ts";
 
 const exec = promisify(execFile);
 
@@ -31,61 +37,6 @@ function capturing(): { chunks: string[]; stdout: { write(chunk: string): true }
         return true;
       },
     },
-  };
-}
-
-// Land one Ticket the way a Run's collect does (ADR 0028): exactly one merge
-// commit on the Run Branch's first-parent history, its message derived from
-// the Ticket. Plumbing only, so the Consumer's checkout never moves.
-async function landTicket(
-  cwd: string,
-  runBranch: string,
-  ticket: { id: string; title: string },
-): Promise<string> {
-  const existing = await git(cwd, [
-    "rev-parse",
-    "--verify",
-    "--quiet",
-    `refs/heads/${runBranch}`,
-  ]).catch(() => "");
-  const base = existing === "" ? await git(cwd, ["rev-parse", "HEAD"]) : existing;
-  const tree = await git(cwd, ["rev-parse", `${base}^{tree}`]);
-  const work = await exec("git", ["-C", cwd, "commit-tree", tree, "-m", `Ticket ${ticket.id} work`]);
-  const merge = await exec("git", [
-    "-C",
-    cwd,
-    "commit-tree",
-    tree,
-    "-p",
-    base,
-    "-p",
-    work.stdout.trim(),
-    "-m",
-    `Ticket ${ticket.id}: ${ticket.title}`,
-  ]);
-  const mergeCommit = merge.stdout.trim();
-  await exec("git", [
-    "-C",
-    cwd,
-    "update-ref",
-    `refs/heads/${runBranch}`,
-    mergeCommit,
-    existing,
-  ]);
-  return mergeCommit;
-}
-
-async function createRunBranch(
-  cwd: string,
-  landed: { id: string; title: string }[],
-  runBranch = "readyrun/run-20261018-120000",
-): Promise<{ runBranch: string; tip: string }> {
-  for (const one of landed) {
-    await landTicket(cwd, runBranch, one);
-  }
-  return {
-    runBranch,
-    tip: await git(cwd, ["rev-parse", `refs/heads/${runBranch}`]),
   };
 }
 
