@@ -125,6 +125,8 @@ Run complete: cap of 2 Tickets reached; the Frontier may still hold work
 Continue with: readyrun run --max 2 --base readyrun/run-20260904-152033
 ```
 
+The base is probed against origin once at start — one read-only `git ls-remote`, no fetch ([ADR 0046](./docs/adr/0046-a-stale-base-gates-only-when-the-consumer-did-not-name-it.md)). A base nobody named that stands stale behind origin's tip refuses the **Run** until `--allow-stale-base` says otherwise; a base named by `--base` — a feature branch, a continuation **Run** — is only warned. An unreachable probe warns too: offline must not block a Run. ReadyRun never pulls for you — `git pull` first, then start the Run.
+
 Before committing to a **Run**, `run --preview` prints the **Plan** ([ADR 0039](./docs/adr/0039-the-plan-computed-once-rendered-read-only.md)) — Doctor's verdict, the **Frontier** in pick order, which **Tickets** wait and on what, the resolved base, the **Run Branch**, and the cap with where it came from — and closes with the exact equivalent `readyrun run …` command. It starts nothing: no Worker, no Worktree, no Run Branch, and it skips Doctor's cwd-fidelity probe (the **Run** proves that at start):
 
 ```

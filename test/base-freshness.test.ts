@@ -390,6 +390,30 @@ test("the preview carries the gate in Doctor's verdict and probes even though it
   }
 });
 
+test("the preview's equivalent command names the escape it was given", async () => {
+  const { up, repo } = await staleClone();
+  const out = capturing();
+  try {
+    const exitCode = await preview({
+      config: config(),
+      cap: 1,
+      cwd: repo.cwd,
+      allowStaleBase: true,
+      stdout: out.stdout,
+    });
+
+    assert.equal(exitCode, 0);
+    assert.ok(
+      lines(out.chunks).includes(
+        "Run with: readyrun run --max 1 --allow-stale-base",
+      ),
+    );
+  } finally {
+    await up.cleanup();
+    await repo.cleanup();
+  }
+});
+
 test("an unreachable probe warns, names why, and the Run starts anyway", async () => {
   const { up, repo } = await staleClone();
   const out = capturing();
