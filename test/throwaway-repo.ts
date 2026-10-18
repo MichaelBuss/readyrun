@@ -49,6 +49,26 @@ export async function throwawayRepo(options: {
   };
 }
 
+// A Consumer's checkout cloned from a local upstream: origin named and its
+// tracking refs current as of the clone, so the upstream can move ahead of it
+// the way a real forgotten pull leaves a checkout behind.
+export async function throwawayClone(
+  upstreamPath: string,
+): Promise<ThrowawayRepo> {
+  await mkdir(tmpRoot, { recursive: true });
+  const cwd = await mkdtemp(join(tmpRoot, "clone-"));
+  await exec("git", ["clone", upstreamPath, cwd]);
+  await exec("git", ["config", "user.email", "readyrun@example.com"], { cwd });
+  await exec("git", ["config", "user.name", "ReadyRun"], { cwd });
+  await exec("git", ["config", "commit.gpgsign", "false"], { cwd });
+  return {
+    cwd,
+    async cleanup() {
+      await rm(cwd, { recursive: true, force: true });
+    },
+  };
+}
+
 export async function onDisk(path: string): Promise<boolean> {
   try {
     await access(path);

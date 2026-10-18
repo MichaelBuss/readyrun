@@ -165,7 +165,22 @@ type CommitishBase = {
 
 // Dirty belongs to neither: it is the primary checkout's tree either way, since
 // that is the work reaching no Worktree whichever commit the Run builds on.
-export type RunBase = (CheckoutBase | CommitishBase) & { dirty: boolean };
+// Freshness is the one verdict that travels on the base (ADR 0046): undefined
+// where freshness is not a meaningful question for it.
+export type RunBase = (CheckoutBase | CommitishBase) & {
+  dirty: boolean;
+  freshness?: BaseFreshness;
+};
+
+// What one read-only `git ls-remote origin <default-branch>` says about the
+// resolved base against origin's tip (ADR 0046). Stale is containment, not a
+// count — ls-remote returns a SHA and ReadyRun does not fetch to count — and
+// `unknown` is every probe failure, named why and never a failure: offline
+// must not block a Run (the #113 family).
+export type BaseFreshness =
+  | { kind: "fresh" }
+  | { kind: "stale"; tip: string; behind?: number }
+  | { kind: "unknown"; reason: string };
 
 // How a commit is named to a Consumer, wherever one is named: the base a Run
 // discloses at start and the base its report says the Run Branch was cut from
@@ -191,7 +206,131 @@ export async function resolveRunBase(
       commit: await resolveCommitish(cwd, commitish),
       commitish,
     };
-  return { ...from, dirty: !await worktreeIsClean(cwd) };
+  return {
+    ...from,
+    dirty: !await worktreeIsClean(cwd),
+    freshness: await probeBaseFreshness(cwd, from),
+  };
+}
+
+// The freshness probe (ADR 0046), computed as part of base resolution so every
+// surface that resolves a base — Run start, Doctor, the Plan — probes once and
+// says the same words about the answer. The verdict speaks only where
+// freshness is a meaningful question: HEAD standing on the default branch, or
+// `--base` naming the default branch itself. A feature branch, any other
+// commit-ish, and a continuation Run's `--base readyrun/run-<stamp>` get none —
+// the existing non-default-base callout already discloses those — and a
+// detached HEAD has no branch name to stand on nominally. A checkout with no
+// `origin` remote has nothing to compare against and skips silently.
+async function probeBaseFreshness(
+  cwd: string,
+  base: CheckoutBase | CommitishBase,
+): Promise<BaseFreshness | undefined> {
+  // The default branch is a fact about the checkout either way (ADR 0034);
+  // a commit-ish base resolves it here to be compared against, the same
+  // resolution the checkout base already carries.
+  const defaultBranchName = base.kind === "checkout"
+    ? base.defaultBranch
+    : await defaultBranch(cwd);
+  // What the Consumer stood on nominally: the checkout's branch, or the name
+  // they typed. Freshness is compared against that name, not the commit.
+  const named = base.kind === "checkout" ? base.branch : base.commitish;
+  if (named === undefined || named !== defaultBranchName) {
+    return undefined;
+  }
+  try {
+    await git(cwd, ["remote", "get-url", "origin"]);
+  } catch {
+    return undefined;
+  }
+  let tip: string | undefined;
+  try {
+    tip = await lsRemoteTip(cwd, defaultBranchName);
+  } catch (error) {
+    return { kind: "unknown", reason: probeFailureReason(error) };
+  }
+  // An empty answer is the remote holding no ref matching the locally
+  // resolved default branch — as when the init.defaultBranch fallback guesses
+  // wrong on a never-fetched clone — which warns like any other outage.
+  if (tip === undefined) {
+    return {
+      kind: "unknown",
+      reason: `origin has no branch named ${defaultBranchName}`,
+    };
+  }
+  if (tip === base.commit) {
+    return { kind: "fresh" };
+  }
+  if (await baseContains(cwd, base.commit, tip)) {
+    return { kind: "fresh" };
+  }
+  return {
+    kind: "stale",
+    tip,
+    behind: await behindCount(cwd, base.commit, tip),
+  };
+}
+
+// Origin's tip of one branch. The full refname is the pattern, so a branch
+// called `main` is not read as `bugfix/main` or a tag of the same name.
+async function lsRemoteTip(
+  cwd: string,
+  branch: string,
+): Promise<string | undefined> {
+  const out = await git(cwd, ["ls-remote", "origin", `refs/heads/${branch}`]);
+  const line = out.split("\n").find((entry) => entry.trim() !== "");
+  return line === undefined ? undefined : line.slice(0, line.indexOf("\t"));
+}
+
+// Whether the base contains origin's tip, asked of the local object store and
+// read as a fact about the DAG: a base that contained the tip would have the
+// tip's objects, so any failure to answer — a shallow clone, a never-fetched
+// tip — reads as not contained (ADR 0046).
+async function baseContains(
+  cwd: string,
+  base: string,
+  tip: string,
+): Promise<boolean> {
+  try {
+    return await mergeBaseIsAncestor(cwd, tip, base);
+  } catch {
+    return false;
+  }
+}
+
+// The best-effort "N commits behind", nameable only when the tip's objects
+// happen to be local — the fetched-but-not-pulled checkout, the exact
+// forgotten case this probe exists for. Anything else leaves the gap to the
+// two SHAs, and a zero never names a gap.
+async function behindCount(
+  cwd: string,
+  base: string,
+  tip: string,
+): Promise<number | undefined> {
+  try {
+    const count = Number(
+      await git(cwd, ["rev-list", "--count", `${base}..${tip}`]),
+    );
+    return Number.isInteger(count) && count > 0 ? count : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// The one-line why an unreachable probe names: git's own stderr where it has
+// one, the failure's message where it does not.
+function probeFailureReason(error: unknown): string {
+  const stderr = error !== null && typeof error === "object" &&
+      "stderr" in error && typeof error.stderr === "string"
+    ? error.stderr
+    : "";
+  const text = (stderr.trim() === ""
+    ? error instanceof Error ? error.message : String(error)
+    : stderr)
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line !== "");
+  return text ?? "git ls-remote failed";
 }
 
 // The commit is read first, so a checkout with nothing to branch from fails
