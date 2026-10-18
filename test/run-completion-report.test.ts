@@ -243,3 +243,115 @@ test("off a TTY the completion report is plain lines, with no spinner control ch
     await repo.cleanup();
   }
 });
+
+test("when a family's Tickets have all landed, the report names deliver — ReadyRun's own next invocation", async () => {
+  const repo = await throwawayRepo();
+  const out = capturing();
+  try {
+    const exitCode = await run({
+      config: defineConfig({
+        tracker: memoryTracker({
+          tickets: [
+            ticket({ id: "8", title: "The family", labels: [] }),
+            ticket({ id: "52", title: "Left side", parent: "8" }),
+            ticket({ id: "57", title: "Right side", parent: "8" }),
+          ],
+          ready: "unblocked",
+          labels: ["ready-for-agent"],
+        }),
+        worker: recordingWorker({ exitCode: 0 }),
+        model: "composer-2",
+      }),
+      cap: 5,
+      root: { kind: "parent", id: "8" },
+      cwd: repo.cwd,
+      stdout: out.stdout,
+    });
+
+    assert.equal(exitCode, 0);
+    assert.deepEqual(reportLines(out.chunks), [
+      "Run complete: the Frontier is empty",
+      `2 Tickets landed on ${await runBranch(repo.cwd)}, cut from ${
+        (await git(repo.cwd, ["rev-parse", "HEAD"])).slice(0, 7)
+      }.`,
+      `Deliver with: readyrun deliver --mode family-pr --branch ${await runBranch(repo.cwd)}`,
+    ]);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("a family that is still landing names no deliver command", async () => {
+  const repo = await throwawayRepo();
+  const out = capturing();
+  try {
+    const exitCode = await run({
+      config: defineConfig({
+        tracker: memoryTracker({
+          tickets: [
+            ticket({ id: "8", title: "The family", labels: [] }),
+            ticket({ id: "52", title: "Left side", parent: "8" }),
+            ticket({
+              id: "57",
+              title: "Right side",
+              parent: "8",
+              blockedBy: ["99"],
+            }),
+          ],
+          ready: "unblocked",
+          labels: ["ready-for-agent"],
+        }),
+        worker: recordingWorker({ exitCode: 0 }),
+        model: "composer-2",
+      }),
+      cap: 5,
+      root: { kind: "parent", id: "8" },
+      cwd: repo.cwd,
+      stdout: out.stdout,
+    });
+
+    assert.equal(exitCode, 0);
+    assert.equal(
+      reportLines(out.chunks).some((line) => line.includes("deliver")),
+      false,
+    );
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("a cap stop on a family names the continue command, never deliver", async () => {
+  const repo = await throwawayRepo();
+  const out = capturing();
+  try {
+    const exitCode = await run({
+      config: defineConfig({
+        tracker: memoryTracker({
+          tickets: [
+            ticket({ id: "8", title: "The family", labels: [] }),
+            ticket({ id: "52", title: "Left side", parent: "8" }),
+            ticket({ id: "57", title: "Right side", parent: "8" }),
+          ],
+          ready: "unblocked",
+          labels: ["ready-for-agent"],
+        }),
+        worker: recordingWorker({ exitCode: 0 }),
+        model: "composer-2",
+      }),
+      cap: 1,
+      root: { kind: "parent", id: "8" },
+      cwd: repo.cwd,
+      stdout: out.stdout,
+    });
+
+    assert.equal(exitCode, 0);
+    const report = reportLines(out.chunks);
+    assert.equal(
+      report.some((line) => line.startsWith("Deliver with:")),
+      false,
+    );
+    assert.match(report.at(-1)!, /^Continue with: readyrun run --max 1 --base /);
+  } finally {
+    await repo.cleanup();
+  }
+});

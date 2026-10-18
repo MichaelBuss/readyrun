@@ -150,6 +150,10 @@ function hardStop(
 // declining to own integration does not stop it explaining (ADR 0034). The
 // landing is what the base must be, so the line waits on a Run Branch existing
 // rather than on the cap alone.
+//
+// When a family's Tickets have all landed, the report likewise names
+// `deliver` — ReadyRun's own next invocation, the same rhyme (ADR 0048) —
+// but never runs it.
 function completionReport(
   stdout: RunStdout,
   reason: CleanStop,
@@ -158,6 +162,7 @@ function completionReport(
   runBranch: string,
   base: string,
   root: FrontierRoot | undefined,
+  familyReady = false,
 ): 0 {
   separateReport(stdout);
   stdout.write(
@@ -176,7 +181,27 @@ function completionReport(
       `Continue with: readyrun run --max ${cap} --base ${runBranch}${rooted}\n`,
     );
   }
+  if (familyReady) {
+    stdout.write(
+      `Deliver with: readyrun deliver --mode family-pr --branch ${runBranch}\n`,
+    );
+  }
   return 0;
+}
+
+// Whether the Run's root names a family whose Tickets have all landed: the
+// parent's open children, read once at the stop, are none left to land. A
+// read that fails discloses nothing — the line is a rhyme, not a verdict.
+async function familyCompleted(
+  tracker: ReadyRunConfig["tracker"],
+  root: FrontierRoot & { kind: "parent" },
+): Promise<boolean> {
+  try {
+    const tree = await tracker.tree(root);
+    return tree.frontier.length === 0 && tree.waiting.length === 0;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -291,7 +316,7 @@ export async function runPlan(
     const base = plan.base;
     await discloseBase(stdout, base, cwd);
     stdout.write(`Run Branch: ${runBranch}\n`);
-    const complete = (reason: CleanStop): 0 => {
+    const complete = async (reason: CleanStop): Promise<0> => {
       live.stop();
       return completionReport(
         stdout,
@@ -301,6 +326,12 @@ export async function runPlan(
         runBranch,
         base.commit,
         root,
+        // The family rhyme is named only where a family could have
+        // completed: a parent root, emptied, with work landed (ADR 0048).
+        reason === "frontier-empty" && landed > 0 &&
+            root?.kind === "parent"
+          ? await familyCompleted(config.tracker, root)
+          : false,
       );
     };
     // A Ticket's Branch is cut from the Run Branch's tip, which until the first
@@ -350,7 +381,7 @@ export async function runPlan(
       }
       const ticket = frontier[0];
       if (ticket === undefined) {
-        return complete("frontier-empty");
+        return await complete("frontier-empty");
       }
       const branch = config.tracker.branchName(ticket);
       live.stage("Worktree");
@@ -512,7 +543,7 @@ export async function runPlan(
         );
       }
     }
-    return complete("cap");
+    return await complete("cap");
   } finally {
     live.stop();
   }
