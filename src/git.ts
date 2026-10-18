@@ -176,11 +176,12 @@ export type RunBase = (CheckoutBase | CommitishBase) & {
 // resolved base against origin's tip (ADR 0046). Stale is containment, not a
 // count — ls-remote returns a SHA and ReadyRun does not fetch to count — and
 // `unknown` is every probe failure, named why and never a failure: offline
-// must not block a Run (the #113 family).
+// must not block a Run (the #113 family). The verdict carries the branch name
+// it probed, so every renderer names the same remote ref without re-resolving.
 export type BaseFreshness =
   | { kind: "fresh" }
-  | { kind: "stale"; tip: string; behind?: number }
-  | { kind: "unknown"; reason: string };
+  | { kind: "stale"; defaultBranch: string; tip: string; behind?: number }
+  | { kind: "unknown"; defaultBranch: string; reason: string };
 
 // How a commit is named to a Consumer, wherever one is named: the base a Run
 // discloses at start and the base its report says the Run Branch was cut from
@@ -247,7 +248,11 @@ async function probeBaseFreshness(
   try {
     tip = await lsRemoteTip(cwd, defaultBranchName);
   } catch (error) {
-    return { kind: "unknown", reason: probeFailureReason(error) };
+    return {
+      kind: "unknown",
+      defaultBranch: defaultBranchName,
+      reason: probeFailureReason(error),
+    };
   }
   // An empty answer is the remote holding no ref matching the locally
   // resolved default branch — as when the init.defaultBranch fallback guesses
@@ -255,6 +260,7 @@ async function probeBaseFreshness(
   if (tip === undefined) {
     return {
       kind: "unknown",
+      defaultBranch: defaultBranchName,
       reason: `origin has no branch named ${defaultBranchName}`,
     };
   }
@@ -266,6 +272,7 @@ async function probeBaseFreshness(
   }
   return {
     kind: "stale",
+    defaultBranch: defaultBranchName,
     tip,
     behind: await behindCount(cwd, base.commit, tip),
   };
