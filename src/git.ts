@@ -199,6 +199,7 @@ export function shortCommit(commit: string): string {
 export async function resolveRunBase(
   cwd: string,
   commitish?: string,
+  options: { probe?: boolean } = {},
 ): Promise<RunBase> {
   const from: CheckoutBase | CommitishBase = commitish === undefined
     ? await resolveCheckoutBase(cwd)
@@ -210,7 +211,13 @@ export async function resolveRunBase(
   return {
     ...from,
     dirty: !await worktreeIsClean(cwd),
-    freshness: await probeBaseFreshness(cwd, from),
+    // The freshness probe is one network read per command (ADR 0046); a
+    // caller resolving a base for a fact the Plan will re-resolve — the
+    // Launcher's HEAD-state read before its questions — skips it, the way
+    // the Plan's verdict skips the cwd-fidelity probe (ADR 0039).
+    freshness: options.probe === false
+      ? undefined
+      : await probeBaseFreshness(cwd, from),
   };
 }
 

@@ -59,10 +59,10 @@ const usageText = `Usage: readyrun <command>
 
 Commands:
   init [--answers <file>]
-  run [--preview] --max <n> [--base <commit-ish>] [--ticket <id-or-url> ...] [--root <parent>] [--model <id>] [--permissions ask|unattended] [--effort low|medium|high|xhigh|max]
-  doctor [--ticket <id-or-url> ...] [--root <parent>]
+  run [--preview] --max <n> [--base <commit-ish>] [--allow-stale-base] [--ticket <id-or-url> ...] [--root <parent>] [--model <id>] [--permissions ask|unattended] [--effort low|medium|high|xhigh|max]
+  doctor [--ticket <id-or-url> ...] [--root <parent>] [--allow-stale-base]
 
-A Run cannot start without a cap; an explicit --ticket list defaults the cap to its length. --root runs a parent's children; the parent is never worked. run --preview prints the Plan — Doctor's verdict, the Frontier in pick order, the base, the Run Branch, the cap, the Tickets waiting — and the equivalent run command; nothing starts.
+A Run cannot start without a cap; an explicit --ticket list defaults the cap to its length. --root runs a parent's children; the parent is never worked. A base nobody named that stands stale behind origin refuses the Run until --allow-stale-base says otherwise; a base named by --base is only warned. run --preview prints the Plan — Doctor's verdict, the Frontier in pick order, the base, the Run Branch, the cap, the Tickets waiting — and the equivalent run command; nothing starts.
 `;
 
 test("bare readyrun prints usage rather than opening the Launcher", async () => {
@@ -449,6 +449,49 @@ test("doctor takes the same root flags", async () => {
     },
   });
   assert.deepEqual(received[0]?.root, { kind: "list", ids: ["53"] });
+});
+
+test("--allow-stale-base rides the Run options as the base gate's escape", async () => {
+  const received: RunOptions[] = [];
+  await cli({
+    argv: ["run", "--max", "1", "--allow-stale-base"],
+    stdout: silent,
+    loadConfig: async () => config,
+    run: async (options) => {
+      received.push(options);
+      return 0;
+    },
+  });
+  assert.equal(received[0]?.allowStaleBase, true);
+});
+
+test("a Run without --allow-stale-base leaves the base gate untouched", async () => {
+  const received: RunOptions[] = [];
+  await cli({
+    argv: ["run", "--max", "1"],
+    stdout: silent,
+    loadConfig: async () => config,
+    run: async (options) => {
+      received.push(options);
+      return 0;
+    },
+  });
+  assert.equal(received[0]?.allowStaleBase, undefined);
+});
+
+test("doctor takes the base gate's escape alongside the root flags", async () => {
+  const received: DoctorOptions[] = [];
+  await cli({
+    argv: ["doctor", "--root", "40", "--allow-stale-base"],
+    stdout: silent,
+    loadConfig: async () => config,
+    doctor: async (options) => {
+      received.push(options);
+      return 0;
+    },
+  });
+  assert.equal(received[0]?.allowStaleBase, true);
+  assert.deepEqual(received[0]?.root, { kind: "parent", id: "40" });
 });
 
 test("readyrun doctor runs the shared check with the loaded config", async () => {

@@ -249,7 +249,10 @@ export type HeadBaseState =
 export async function headBaseState(cwd: string): Promise<HeadBaseState> {
   const branches = await listRunBranches(cwd);
   const unmerged = branches.filter((branch) => !branch.mergedIntoDefault);
-  const base = await resolveRunBase(cwd);
+  // No freshness probe here: this base is the HEAD-state read that shapes the
+  // questions, not the base the Run starts from — the Plan resolves that one,
+  // probes it once (ADR 0046), and renders its verdict.
+  const base = await resolveRunBase(cwd, undefined, { probe: false });
   const trap = await headRunBranchTrap(cwd, base);
   if (trap !== undefined) {
     return {
