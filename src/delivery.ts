@@ -207,7 +207,7 @@ async function parentOf(
  * completed across continuation Runs compose: the range is read off the
  * first-parent chain, keyed on Tracker identity, never off one Run's memory.
  */
-export const familyPr = createDelivery({
+export const familyPr: DeliveryStrategy = createDelivery({
   name: "family-pr",
   requiresForge: true,
   async describe(input) {
@@ -330,7 +330,7 @@ export const familyPr = createDelivery({
  * the act the next delivery reconciles around — this mode never rewrites
  * history and never re-bases an open PR.
  */
-export const stack = createDelivery({
+export const stack: DeliveryStrategy = createDelivery({
   name: "stack",
   requiresForge: true,
   async describe(input) {
@@ -374,7 +374,7 @@ export const stack = createDelivery({
  * the PR modes it discloses rather than refuses on unintegrated history:
  * the Plan shows exactly what would move.
  */
-export const main = createDelivery({
+export const main: DeliveryStrategy = createDelivery({
   name: "main",
   async describe(input) {
     return {
