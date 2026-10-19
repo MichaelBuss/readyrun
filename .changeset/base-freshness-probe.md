@@ -1,5 +1,0 @@
----
-"@readyrun/readyrun": minor
----
-
-A Run's base is probed against origin once at start: one read-only `git ls-remote origin <default-branch>` — no fetch, no ref mutation — joins Doctor's check family, and the verdict rides the resolved base wherever it renders (Run start, `doctor`, and the Plan's preview, ADR 0046). Stale means containment: the base does not contain origin's tip of the default branch. Fresh and ahead are silent, the behind-count is best-effort naming (rendered only when the tip's objects are local, the two SHAs otherwise), and every probe failure — network down, credentials rejected, an empty answer — warns, names why, and lets the Run proceed; no `origin` remote and a detached HEAD skip silently. Warn versus gate is keyed on who named the base: a base nobody named — HEAD standing stale on the default branch — refuses the Run and `doctor`, naming `--allow-stale-base` as the escape, which downgrades the refusal to the warning a base named by `--base` gets; the flag does not skip the probe. This is the single carve-out from disclosure-not-a-gate (#186).
