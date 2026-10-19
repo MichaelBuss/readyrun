@@ -1,4 +1,5 @@
 import { defineConfig, type ReadyRunConfig } from "./config.ts";
+import { writeDoctorFailures } from "./doctor.ts";
 import {
   deliveryModes,
   parseTicketMerge,
@@ -131,9 +132,7 @@ function readMerges(
 
 function describeFailure(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-/**
+}/**
  * Resolve the Delivery's Plan (ADR 0048): Doctor's verdict — mode known, Run
  * Branch present, remote and forge where the mode publishes, the checkout
  * off the default branch for `main` — then the strategy's desired state,
@@ -267,10 +266,33 @@ export async function computeDeliveryPlan(
 
   // One ls-remote prices every head by name (ADR 0048), and one read per
   // head prices the forge's open PRs — existence by head branch, the exact
-  // key the reconcile writes.
-  const remoteTips = pulls.length > 0 && forge !== undefined
-    ? await remoteRefTips(cwd, pulls.map((desired) => desired.head))
-    : new Map<string, string>();
+  // key the reconcile writes. A read that fails prices nothing: the refusal
+  // names it, and the reconcile never crosses a priced failure.
+  const remoteTips = new Map<string, string>();
+  if (pulls.length > 0 && forge !== undefined) {
+    try {
+      const tips = await remoteRefTips(
+        cwd,
+        pulls.map((desired) => desired.head),
+      );
+      for (const [head, tip] of tips) {
+        remoteTips.set(head, tip);
+      }
+    } catch (error) {
+      plan.doctorFailures.push(
+        `could not read the remote's refs to price the delivery: ${
+          describeFailure(error)
+        }`,
+      );
+      return plan;
+    }
+  }
+  if (pulls.length > 0 && forge === undefined) {
+    plan.doctorFailures.push(
+      "the strategy desired pull-request publications, and no forge is resolvable",
+    );
+    return plan;
+  }
   for (const desired of pulls) {
     const remoteTip = remoteTips.get(desired.head);
     const priced: PublicationPlan = {
@@ -449,19 +471,6 @@ export function renderDeliveryPlan(
     );
   }
   stdout.write(`Deliver with: ${plan.command}\n`);
-}
-
-function writeDoctorFailures(
-  stdout: DeliverStdout,
-  failures: readonly string[],
-): 0 | 1 {
-  if (failures.length === 0) {
-    return 0;
-  }
-  for (const failure of failures) {
-    stdout.write(`Doctor: ${failure}\n`);
-  }
-  return 1;
 }
 
 /**
