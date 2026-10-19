@@ -395,6 +395,24 @@ export function linear(
       frontier: (root) => read(root).then((answer) => [...answer.frontier]),
       waiting: (root) => read(root).then((answer) => [...answer.waiting]),
       tree: read,
+      async tickets(ids) {
+        // One paged candidates read fills answersById with every Issue the
+        // Tracker answers, whatever its state; the named ids answer from it
+        // with their Tracker facts (ADR 0048). A Ticket that has left the
+        // Frontier answers — In Review included, which is where a landed
+        // Ticket sits — while missing and closed stay lies, refused.
+        await paginate((cursor) => readCandidatesPage(cursor));
+        for (const id of ids) {
+          const node = answersById.get(id);
+          if (node === undefined) {
+            throw new Error(`Ticket ${id} does not exist on Linear`);
+          }
+          if (node.state.type === "completed" || node.state.type === "canceled") {
+            throw new Error(`Ticket ${id} is closed on Linear`);
+          }
+        }
+        return ids.map((id) => toTicket(answersById.get(id)!));
+      },
       async leaveFrontier(ticket, landing) {
         const data = await graphql<IssueStatesData>(
           "IssueStates",

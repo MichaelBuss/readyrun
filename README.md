@@ -145,8 +145,22 @@ Cwd-fidelity probe: not run; the Run proves it at start
 Run with: readyrun run --max 3
 ```
 
-An npm install puts `readyrun` on PATH (the npm tarball ships compiled JavaScript — Node refuses to strip types under `node_modules`, so the published sources cannot be the entry points):
+## Delivering finished work
 
+A **Run** ends with the work on a local **Run Branch** — and there it stays until you say otherwise. `readyrun deliver` is the opt-in second command ([ADR 0048](./docs/adr/0048-delivery-is-a-second-command-over-the-run-branch.md)): it renders what the Run already built — one merge commit per **Ticket**, stacked — into published state on the forge. It never merges anything and never touches a Run; report-only stays the default until you run it.
+
+```sh
+readyrun deliver --mode family-pr --branch readyrun/run-20260920-101500
+readyrun deliver --mode stack --branch readyrun/run-20260920-101500
+readyrun deliver --mode main --branch readyrun/run-20260920-101500
+readyrun deliver --mode family-pr --branch readyrun/run-20261018-120000 --preview
+```
+
+Three modes ship. `family-pr` publishes a completed family — a parent whose children have all landed — as one pull request titled after the parent, refusing honestly when the family's merge commits are interleaved with unrelated **Tickets** or the commit below them is not already in the default branch (the pull request's diff must be exactly the family's work). `stack` publishes one branch and one pull request per **Ticket**, each based on the previous. `main` fast-forwards the default branch to the **Run Branch**, refusing while your checkout stands on it. The mode may also name a strategy you registered in config through `createDelivery` — declaring one exists is config's whole say; which one runs is the flag's.
+
+Deliver reconciles rather than performs: every artifact is keyed by a head-branch name derived from **Tracker** identity (`readyrun/deliver/<id>`), so a retried delivery finds its own half-done work and finishes it — it opens nothing twice and rewrites nothing. `deliver --preview` prices the whole thing read-only first: what would be pushed, which pull requests opened, on which bases. Pull requests are born from `--draft` and `--label`; their life afterwards is your pipeline's. Forge access rides the credentials you already have — git push and `gh` — and a forgeless **Tracker** such as Linear refuses the pull-request modes by name (`main` works everywhere). The **Launcher** (bare `readyrun` on a TTY) asks first what to assemble — a **Run** or a **Delivery** — and walks the same flow.
+
+An npm install puts `readyrun` on PATH (the npm tarball ships compiled JavaScript — Node refuses to strip types under `node_modules`, so the published sources cannot be the entry points):
 ```sh
 npx readyrun init
 npx readyrun init --answers answers.json

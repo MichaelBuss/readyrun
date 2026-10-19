@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * The `readyrun` command line: three commands plus the bare command.
+ * The `readyrun` command line: four commands plus the bare command.
  *
  * - `init [--answers <file>]` — write the Consumer's `readyrun.config.ts`
  *   stub and cover `.readyrun/` in `.gitignore`; interactive by default,
@@ -10,6 +10,8 @@
  *   Ticket, collecting each Ticket's Branch onto the Run Branch.
  * - `doctor` — check config and any named Root against the Tracker without
  *   starting a Run.
+ * - `deliver --mode <name> --branch <run-branch>` — publish a Run Branch's
+ *   settled history per the named Delivery strategy (ADR 0048).
  * - bare `readyrun` — the Launcher on a TTY; usage off one.
  *
  * This module is the bin, not the library surface: Consumers import from the
@@ -31,6 +33,12 @@ import {
   loadConfig,
 } from "./consumer-config.ts";
 import { doctor as doctorEntry, type DoctorOptions } from "./doctor.ts";
+import {
+  deliver as deliverEntry,
+  deliverPlan,
+  previewDelivery as previewDeliveryEntry,
+  type DeliverInput,
+} from "./deliver.ts";
 import { parseTicketRef } from "./frontier-root.ts";
 import { launcher as launcherEntry, type LauncherOptions } from "./launcher.ts";
 import type { FrontierRoot } from "./tracker-adapter.ts";
@@ -49,8 +57,10 @@ Commands:
   init [--answers <file>]
   run [--preview] --max <n> [--base <commit-ish>] [--allow-stale-base] [--ticket <id-or-url> ...] [--root <parent>] [--model <id>] [--permissions ask|unattended] [--effort low|medium|high|xhigh|max]
   doctor [--ticket <id-or-url> ...] [--root <parent>] [--allow-stale-base]
+  deliver --mode <name> --branch <run-branch> [--preview] [--draft] [--label <name> ...]
 
 A Run cannot start without a cap; an explicit --ticket list defaults the cap to its length. --root runs a parent's children; the parent is never worked. A base nobody named that stands stale behind origin refuses the Run until --allow-stale-base says otherwise; a base named by --base is only warned. run --preview prints the Plan — Doctor's verdict, the Frontier in pick order, the base, the Run Branch, the cap, the Tickets waiting — and the equivalent run command; nothing starts.
+deliver publishes a Run Branch's settled history (ADR 0048): --mode is a built-in (family-pr, stack, main) or a registered Delivery strategy, --branch names the Run Branch, and --draft/--label are creation options of the pull requests. deliver --preview prints the Delivery's Plan — what would be pushed, which PRs opened, on which bases — and the equivalent command; nothing is published.
 `;
 
 /**
@@ -77,6 +87,10 @@ export type CliOptions = {
   preview?: (options: RunOptions) => Promise<number>;
   /** The `doctor` implementation invoked. Defaults to the real Doctor. */
   doctor?: (options: DoctorOptions) => Promise<number>;
+  /** The `deliver` implementation invoked. Defaults to the real Delivery. */
+  deliver?: (options: DeliverInput) => Promise<number>;
+  /** The `deliver --preview` implementation invoked. Defaults to the real preview. */
+  previewDelivery?: (options: DeliverInput) => Promise<number>;
   /** The `init` implementation invoked. Defaults to the real Init. */
   init?: (options: InitOptions) => Promise<number>;
   /** The bare command's Launcher. Defaults to the real Launcher. */
@@ -241,10 +255,65 @@ function parseRunFlags(args: string[]):
   };
 }
 
+// The delivery's flags (ADR 0048): the mode and the Run Branch, both
+// explicit — a delivery is never guessed — plus the pull-request creation
+// options and the preview. Both required flags refuse their absence by name.
+function parseDeliverFlags(
+  args: string[],
+): { ok: true; mode: string; branch: string; draft: boolean; labels: string[]; preview: boolean } |
+  { ok: false; message: string } {
+  let mode: string | undefined;
+  let branch: string | undefined;
+  let draft = false;
+  const labels: string[] = [];
+  let preview = false;
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === "--mode") {
+      const value = args[i + 1];
+      if (value === undefined || value.trim().length === 0) {
+        return { ok: false, message: "--mode requires a Delivery mode name" };
+      }
+      mode = value;
+      i += 1;
+    } else if (arg === "--branch") {
+      const value = args[i + 1];
+      if (value === undefined || value.trim().length === 0) {
+        return { ok: false, message: "--branch requires a Run Branch name" };
+      }
+      branch = value;
+      i += 1;
+    } else if (arg === "--draft") {
+      draft = true;
+    } else if (arg === "--label") {
+      const value = args[i + 1];
+      if (value === undefined || value.trim().length === 0) {
+        return { ok: false, message: "--label requires a label name" };
+      }
+      labels.push(value);
+      i += 1;
+    } else if (arg === "--preview") {
+      preview = true;
+    } else {
+      return {
+        ok: false,
+        message:
+          "deliver accepts --mode <name>, --branch <run-branch>, --draft, --label <name>, and --preview",
+      };
+    }
+  }
+  if (mode === undefined) {
+    return { ok: false, message: "deliver requires --mode <name>" };
+  }
+  if (branch === undefined) {
+    return { ok: false, message: "deliver requires --branch <run-branch>" };
+  }
+  return { ok: true, mode, branch, draft, labels, preview };
+}
+
 function parseInitFlags(args: string[]):
   | { ok: true; answersPath?: string }
-  | { ok: false; message: string } {
-  if (args.length === 0) {
+  | { ok: false; message: string } {  if (args.length === 0) {
     return { ok: true };
   }
   if (args[0] === "--answers") {
@@ -303,9 +372,11 @@ export async function cli(options: CliOptions): Promise<number> {
       cwd: options.cwd ?? process.cwd(),
       stdout,
       loadConfig: options.loadConfig ?? loadConfig,
-      // The Launcher hands the Plan it rendered to the Run that consumes it
-      // (ADR 0039); the flag path's `run` seam has the options contract.
+      // The Launcher hands the Plan it rendered to the Run or Delivery that
+      // consumes it (ADR 0039, ADR 0048); the flag path's seams have the
+      // options contracts.
       run: runPlan,
+      deliver: deliverPlan,
       init: options.init ?? initEntry,
     });
   }
@@ -329,6 +400,33 @@ export async function cli(options: CliOptions): Promise<number> {
       return 1;
     }
     return invoke({ cwd, answers: loaded.answers });
+  }
+  if (command === "deliver") {
+    const flags = parseDeliverFlags(options.argv.slice(1));
+    if (!flags.ok) {
+      stdout.write(`${flags.message}\n`);
+      return 1;
+    }
+    const cwd = options.cwd ?? process.cwd();
+    let config: ReadyRunConfig;
+    try {
+      config = await (options.loadConfig ?? loadConfig)(cwd);
+    } catch (error) {
+      stdout.write(`${configLoadFailure(error)}\n`);
+      return 1;
+    }
+    const invoke = flags.preview
+      ? options.previewDelivery ?? previewDeliveryEntry
+      : options.deliver ?? deliverEntry;
+    return invoke({
+      config,
+      mode: flags.mode,
+      branch: flags.branch,
+      cwd,
+      stdout,
+      draft: flags.draft || undefined,
+      labels: flags.labels.length > 0 ? flags.labels : undefined,
+    });
   }
   if (command !== "run" && command !== "doctor") {
     stdout.write(usage);

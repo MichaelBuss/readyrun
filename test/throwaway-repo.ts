@@ -87,6 +87,62 @@ export async function runBranches(cwd: string): Promise<string[]> {
   return refs.split("\n").filter(Boolean);
 }
 
+// Land one Ticket the way a Run's collect does (ADR 0028): exactly one merge
+// commit on the Run Branch's first-parent history, its message derived from
+// the Ticket. Plumbing only, so a Consumer checkout never moves.
+export async function landTicket(
+  cwd: string,
+  runBranch: string,
+  one: { id: string; title: string },
+): Promise<string> {
+  const existing = await git(cwd, [
+    "rev-parse",
+    "--verify",
+    "--quiet",
+    `refs/heads/${runBranch}`,
+  ]).catch(() => "");
+  const base = existing === "" ? await git(cwd, ["rev-parse", "HEAD"]) : existing;
+  const tree = await git(cwd, ["rev-parse", `${base}^{tree}`]);
+  const work = await exec("git", ["-C", cwd, "commit-tree", tree, "-m", `Ticket ${one.id} work`]);
+  const merge = await exec("git", [
+    "-C",
+    cwd,
+    "commit-tree",
+    tree,
+    "-p",
+    base,
+    "-p",
+    work.stdout.trim(),
+    "-m",
+    `Ticket ${one.id}: ${one.title}`,
+  ]);
+  const mergeCommit = merge.stdout.trim();
+  await exec("git", [
+    "-C",
+    cwd,
+    "update-ref",
+    `refs/heads/${runBranch}`,
+    mergeCommit,
+    existing,
+  ]);
+  return mergeCommit;
+}
+
+// A Run Branch holding the landed Tickets, as a finished Run leaves one.
+export async function createRunBranch(
+  cwd: string,
+  landed: { id: string; title: string }[],
+  runBranch = "readyrun/run-20261018-120000",
+): Promise<{ runBranch: string; tip: string }> {
+  for (const one of landed) {
+    await landTicket(cwd, runBranch, one);
+  }
+  return {
+    runBranch,
+    tip: await git(cwd, ["rev-parse", `refs/heads/${runBranch}`]),
+  };
+}
+
 // A Run has exactly one Run Branch, so a test that asks for it means that one.
 export async function runBranch(cwd: string): Promise<string> {
   const branches = await runBranches(cwd);

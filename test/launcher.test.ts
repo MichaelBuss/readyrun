@@ -16,15 +16,23 @@ import {
   launcher,
   type LauncherIO,
 } from "../src/launcher.ts";
-import { defineConfig, type Plan, type RunRuntime } from "../src/mod.ts";
+import {
+  defineConfig,
+  type DeliveryPlan,
+  type ForgePort,
+  type Plan,
+  type RunRuntime,
+} from "../src/mod.ts";
 import { memoryTracker, recordingWorker } from "../src/testing/mod.ts";
 import { createWorkerAdapter } from "../src/worker-adapter.ts";
 import { githubFromWorld } from "./github-http-fixture.ts";
 import {
   commitRepoFiles,
+  createRunBranch,
   git,
   onDisk,
   runBranches,
+  throwawayClone,
   throwawayRepo,
 } from "./throwaway-repo.ts";
 import { ticket } from "./tracker-adapter-contract.ts";
@@ -39,7 +47,16 @@ type RecordedPrompt = {
   initial?: unknown;
 };
 
-function scripted(answers: Array<string | boolean | symbol>): {
+// The Launcher's first question names what to assemble (ADR 0048). Scripts
+// answer it here, once: by default every flow assembles a Run and the
+// scripted answers feed the Run's own questions; a Delivery flow or a
+// decline names its answer instead.
+const assembleMessage = "What should ReadyRun assemble?";
+
+function scripted(
+  answers: Array<string | boolean | symbol>,
+  assemble: string | symbol = "run",
+): {
   io: LauncherIO;
   prompts: RecordedPrompt[];
 } {
@@ -69,6 +86,11 @@ function scripted(answers: Array<string | boolean | symbol>): {
         options: options.options,
         initial: options.initialValue,
       });
+      // The assemble question is answered once, here — a Run, unless this
+      // script names a Delivery or a decline.
+      if (options.message === assembleMessage) {
+        return assemble as never;
+      }
       return next() as never;
     },
     async confirm(options) {
@@ -216,7 +238,7 @@ test("capAnswer demands a whole number of at least 1", () => {
   assert.equal(capAnswer("").ok, false);
 });
 
-test("the tree question goes first, rendering the tree grouped by parent with both halves", async () => {
+test("the assemble question goes first, and the tree question precedes the cap, rendering the tree grouped by parent with both halves", async () => {
   const repo = await throwawayRepo();
   const out = capturing();
   const runs: Plan[] = [];
@@ -242,7 +264,16 @@ test("the tree question goes first, rendering the tree grouped by parent with bo
 
     assert.equal(exitCode, 0);
     assert.equal(runs[0]?.root, undefined);
-    const treePrompt = prompts[0];
+    const assemblePrompt = prompts[0];
+    assert.equal(assemblePrompt?.kind, "select");
+    assert.equal(assemblePrompt?.message, assembleMessage);
+    assert.deepEqual(
+      (assemblePrompt?.options as Array<{ value: string }>).map(
+        (option) => option.value,
+      ),
+      ["run", "delivery"],
+    );
+    const treePrompt = prompts[1];
     assert.equal(treePrompt?.kind, "multiSelect");
     const groups = treePrompt?.options as Array<{
       label: string;
@@ -265,7 +296,7 @@ test("the tree question goes first, rendering the tree grouped by parent with bo
     assert.equal(waiting?.label, "Blocked behind 52");
     assert.equal(waiting?.hint, "waits on 52 — joins when it clears");
     assert.equal(groups[1]?.options[0]?.hint, undefined);
-    const capPrompt = prompts[1];
+    const capPrompt = prompts[2];
     assert.equal(capPrompt?.initial, "3");
     assert.equal(
       prompts.some((prompt) => prompt.kind === "confirm" && prompt.message.includes("waits on")),
@@ -306,14 +337,14 @@ test("a multi-select across the tree emits the explicit --ticket list and confir
       kind: "list",
       ids: ["42", "44", "54", "52"],
     });
-    const waitingConfirm = prompts[1];
+    const waitingConfirm = prompts[2];
     assert.equal(waitingConfirm?.kind, "confirm");
     assert.equal(
       waitingConfirm?.message,
       "#54 waits on 52 — joins when it clears. Include it in this Run?",
     );
     assert.equal(waitingConfirm?.initial, true);
-    assert.equal(prompts[2]?.initial, "4");
+    assert.equal(prompts[3]?.initial, "4");
     const lines = out.chunks.join("").split("\n").filter(Boolean);
     assert.ok(lines.includes("Run with: readyrun run --max 4 --ticket 42 44 54 52"));
     assert.ok(lines.includes("Frontier: 3 Tickets in pick order"));
@@ -350,7 +381,7 @@ test("declining the waiting confirm drops the waiting Tickets from the list", as
 
     assert.equal(exitCode, 0);
     assert.deepEqual(runs[0]?.root, { kind: "list", ids: ["42"] });
-    assert.equal(prompts[2]?.initial, "3");
+    assert.equal(prompts[3]?.initial, "3");
     const lines = out.chunks.join("").split("\n").filter(Boolean);
     assert.ok(lines.includes("Run with: readyrun run --max 1 --ticket 42"));
   } finally {
@@ -389,6 +420,7 @@ test("declining every picked waiting Ticket re-asks the tree question", async ()
     assert.deepEqual(
       prompts.map((prompt) => prompt.kind),
       [
+        "select",
         "multiSelect",
         "confirm",
         "multiSelect",
@@ -433,9 +465,9 @@ test("a Tracker Adapter that refuses the tree falls back to the root flags as te
     assert.deepEqual(runs[0]?.root, { kind: "list", ids: ["54"] });
     assert.deepEqual(
       prompts.map((prompt) => prompt.kind),
-      ["text", "text", "text", "select", "text", "select", "confirm"],
+      ["select", "text", "text", "text", "select", "text", "select", "confirm"],
     );
-    assert.equal(prompts[2]?.initial, "1");
+    assert.equal(prompts[3]?.initial, "1");
     const output = out.chunks.join("");
     assert.ok(output.includes("does not answer the tree"));
     assert.ok(output.includes("cannot express blocking"));
@@ -492,14 +524,14 @@ test("the fallback names a parent with --root when one is given", async () => {
 
     assert.equal(exitCode, 0);
     assert.deepEqual(runs[0]?.root, { kind: "parent", id: "41" });
-    assert.equal(prompts[0]?.kind, "text");
+    assert.equal(prompts[1]?.kind, "text");
     assert.equal(
-      prompts[0]?.message.includes("parent"),
+      prompts[1]?.message.includes("parent"),
       true,
     );
     // The suggestion is the named parent's Frontier (42), not the rootless
     // one (42 and 60).
-    assert.equal(prompts[2]?.initial, "1");
+    assert.equal(prompts[3]?.initial, "1");
     const lines = out.chunks.join("").split("\n").filter(Boolean);
     assert.ok(lines.includes("Run with: readyrun run --max 1 --root 41"));
   } finally {
@@ -642,14 +674,14 @@ test("the launcher collects answers, renders the Plan, and hands the Run its opt
     assert.deepEqual(handedRuntime?.cwd, repo.cwd);
     assert.deepEqual(
       prompts.map((prompt) => prompt.kind),
-      ["multiSelect", "text", "select", "text", "select", "confirm"],
+      ["select", "multiSelect", "text", "select", "text", "select", "confirm"],
     );
-    assert.equal(prompts[0]?.kind, "multiSelect");
-    assert.equal(prompts[1]?.initial, "1");
-    assert.equal(prompts[1]?.message.includes("Cap"), true);
-    assert.equal(prompts[2]?.initial, "ask");
-    assert.equal(prompts[3]?.initial, "composer-2");
-    assert.equal(prompts[5]?.message.includes("Start this Run"), true);
+    assert.equal(prompts[1]?.kind, "multiSelect");
+    assert.equal(prompts[2]?.initial, "1");
+    assert.equal(prompts[2]?.message.includes("Cap"), true);
+    assert.equal(prompts[3]?.initial, "ask");
+    assert.equal(prompts[4]?.initial, "composer-2");
+    assert.equal(prompts[6]?.message.includes("Start this Run"), true);
     const plan = out.chunks.join("");
     const lines = plan.split("\n").filter(Boolean);
     assert.equal(lines[0], "Plan for this Run");
@@ -752,7 +784,7 @@ test("a Worker Adapter that declares no Effort is not asked", async () => {
     assert.equal(exitCode, 0);
     assert.deepEqual(
       prompts.map((prompt) => prompt.kind),
-      ["multiSelect", "text", "select", "text", "confirm"],
+      ["select", "multiSelect", "text", "select", "text", "confirm"],
     );
     assert.equal(runs[0]?.settings.effort, undefined);
     const lines = out.chunks.join("").split("\n").filter(Boolean);
@@ -785,7 +817,7 @@ test("a Worker Adapter that declares a vocabulary but maps no flag is not asked 
     assert.equal(exitCode, 0);
     assert.deepEqual(
       prompts.map((prompt) => prompt.kind),
-      ["multiSelect", "text", "select", "text", "confirm"],
+      ["select", "multiSelect", "text", "select", "text", "confirm"],
     );
     assert.equal(runs[0]?.settings.effort, undefined);
   } finally {
@@ -1123,7 +1155,8 @@ test("fresh off Init, a declined Run gate ends a success with no Run asked", asy
     assert.equal(exitCode, 0);
     assert.equal(inits.length, 1);
     assert.equal(runs.length, 0);
-    // Only the Init offer and the gate: no Run-assembly question ran.
+    // Only the Init offer and the gate: the decline ends the flow before
+    // the assemble question runs.
     assert.deepEqual(
       prompts.map((prompt) => prompt.kind),
       ["confirm", "confirm"],
@@ -1277,4 +1310,192 @@ test("a Launcher-to-Run session reads the Tracker once per fact: the Run adds no
   } finally {
     await repo.cleanup();
   }
+});
+
+// The Delivery half of the Launcher (ADR 0048). The forge is injected, so
+// the flow is priced against a scripted forge and a local upstream, never
+// the network.
+function fakeForge(): ForgePort & { created: unknown[] } {
+  const created: unknown[] = [];
+  return {
+    repository: "acme/widgets",
+    created,
+    async findPullRequest() {
+      return undefined;
+    },
+    async createPullRequest(input) {
+      created.push(input);
+      return {
+        number: created.length + 10,
+        url: `https://github.com/acme/widgets/pull/${created.length + 10}`,
+        head: input.head,
+        base: input.base,
+        draft: input.draft,
+        state: "open" as const,
+      };
+    },
+    async mergeMethods() {
+      return ["merge"];
+    },
+  };
+}
+
+function deliveryConfig(): ReadyRunConfig {
+  return defineConfig({
+    tracker: memoryTracker({
+      tickets: [
+        ticket({ id: "8", title: "Ship the thing" }),
+        ticket({ id: "52", title: "Left side", parent: "8", labels: [] }),
+        ticket({ id: "57", title: "Right side", parent: "8", labels: [] }),
+      ],
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+      forge: "github",
+    }),
+    worker: recordingWorker({ exitCode: 0 }),
+    model: "composer-2",
+  });
+}
+
+test("cancelling the assemble question ends a success with nothing started", async () => {
+  const repo = await throwawayRepo();
+  const runs: Plan[] = [];
+  const deliveries: unknown[] = [];
+  const { io, prompts } = scripted([], cancelled);
+  try {
+    const exitCode = await launcher({
+      cwd: repo.cwd,
+      stdout: capturing().stdout,
+      loadConfig: async () => launcherConfig(),
+      run: async (plan) => {
+        runs.push(plan);
+        return 0;
+      },
+      deliver: async () => {
+        deliveries.push(1);
+        return 0;
+      },
+      io,
+    });
+    assert.equal(exitCode, 0);
+    assert.equal(runs.length, 0);
+    assert.equal(deliveries.length, 0);
+    assert.equal(prompts[0]?.message, assembleMessage);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("the Delivery flow collects the mode and the Run Branch, renders the Plan, and hands the reconcile its Plan on confirm", async () => {
+  const upstream = await throwawayRepo();
+  const repo = await throwawayClone(upstream.cwd);
+  try {
+    const { runBranch } = await createRunBranch(repo.cwd, [
+      { id: "52", title: "Left side" },
+      { id: "57", title: "Right side" },
+    ]);
+    const out = capturing();
+    const handed: DeliveryPlan[] = [];
+    let handedRuntime: RunRuntime | undefined;
+    const forge = fakeForge();
+    const { io, prompts } = scripted(
+      ["family-pr", runBranch, true],
+      "delivery",
+    );
+    const exitCode = await launcher({
+      cwd: repo.cwd,
+      stdout: out.stdout,
+      loadConfig: async () => deliveryConfig(),
+      deliver: async (plan, runtime) => {
+        handed.push(plan);
+        handedRuntime = runtime;
+        return 0;
+      },
+      forge,
+      io,
+    });
+    assert.equal(exitCode, 0);
+    assert.equal(handed.length, 1);
+    assert.deepEqual(handed[0]?.doctorFailures, []);
+    assert.equal(handed[0]?.mode, "family-pr");
+    assert.equal(handed[0]?.branch, runBranch);
+    assert.equal(handedRuntime?.cwd, repo.cwd);
+    // The questions: assemble, mode, branch, publish confirm.
+    assert.deepEqual(
+      prompts.map((prompt) => prompt.kind),
+      ["select", "select", "select", "confirm"],
+    );
+    assert.deepEqual(
+      (prompts[1]?.options as Array<{ value: string }>).map(
+        (option) => option.value,
+      ),
+      ["family-pr", "stack", "main"],
+    );
+    assert.equal((prompts[2]?.options as Array<{ value: string }>).length, 1);
+    assert.equal(prompts[2]?.initial, runBranch);
+    // The Plan rendered read-only before the confirm.
+    const lines = out.chunks.join("").split("\n").filter(Boolean);
+    assert.equal(lines[0], "Plan for this Delivery");
+    assert.ok(lines.includes("Doctor: pass"));
+    assert.ok(
+      lines.some((line) =>
+        line.startsWith("Publication: readyrun/deliver/8 at ") &&
+        line.endsWith("→ main")
+      ),
+    );
+  } finally {
+    await upstream.cleanup();
+    await repo.cleanup();
+  }
+});
+
+test("a declined publish starts no Delivery", async () => {
+  const upstream = await throwawayRepo();
+  const repo = await throwawayClone(upstream.cwd);
+  try {
+    const { runBranch } = await createRunBranch(repo.cwd, [
+      { id: "52", title: "Left side" },
+    ]);
+    const deliveries: DeliveryPlan[] = [];
+    const { io } = scripted(["family-pr", runBranch, false], "delivery");
+    const exitCode = await launcher({
+      cwd: repo.cwd,
+      stdout: capturing().stdout,
+      loadConfig: async () => deliveryConfig(),
+      deliver: async (plan) => {
+        deliveries.push(plan);
+        return 0;
+      },
+      forge: fakeForge(),
+      io,
+    });
+    assert.equal(exitCode, 1);
+    assert.equal(deliveries.length, 0);
+  } finally {
+    await upstream.cleanup();
+    await repo.cleanup();
+  }
+});
+
+test("with no Run Branch to deliver, the Delivery flow says so and stops", async () => {
+  const repo = await throwawayRepo();
+  const deliveries: DeliveryPlan[] = [];
+  const { io, prompts } = scripted(["family-pr"], "delivery");
+  const exitCode = await launcher({
+    cwd: repo.cwd,
+    stdout: capturing().stdout,
+    loadConfig: async () => deliveryConfig(),
+    deliver: async (plan) => {
+      deliveries.push(plan);
+      return 0;
+    },
+    forge: fakeForge(),
+    io,
+  });
+  assert.equal(exitCode, 1);
+  assert.equal(deliveries.length, 0);
+  assert.deepEqual(
+    prompts.map((prompt) => prompt.kind),
+    ["select", "select"],
+  );
 });

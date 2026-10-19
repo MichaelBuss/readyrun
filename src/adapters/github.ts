@@ -272,6 +272,9 @@ export function github(
       selectorLabels: options.labels,
       repository: options.repo,
       canExpressBlocking: blocking,
+      // The fact deliver reads to resolve its forge port (ADR 0048); the
+      // Adapter itself stays forgeless by the single-writer rule.
+      forge: "github",
     };
   }
 
@@ -352,6 +355,23 @@ export function github(
       frontier: (root) => read(root).then((answer) => [...answer.frontier]),
       waiting: (root) => read(root).then((answer) => [...answer.waiting]),
       tree: read,
+      async tickets(ids) {
+        // One paged read of the open candidates, so a family of Tickets is
+        // one network read, then each named id answered with its Tracker
+        // facts (ADR 0048). The candidates read answers open Issues only, so
+        // a named id absent from it is probed: a closed Ticket is a lie, and
+        // so is a nonexistent one — refused, never answered absent.
+        const nodes = await paginate<IssueNode>((cursor) =>
+          readCandidatesPage(cursor)
+        );
+        const byNumber = new Map(nodes.map((node) => [String(node.number), node]));
+        for (const id of ids) {
+          if (!byNumber.has(id)) {
+            await refuseClosedOrMissing(id);
+          }
+        }
+        return ids.map((id) => toTicket(byNumber.get(id)!, []));
+      },
       async leaveFrontier(ticket, landing) {
         for (const label of options.labels) {
           await rest(

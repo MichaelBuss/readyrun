@@ -6,7 +6,13 @@ import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { cli, loadConfig } from "../src/cli.ts";
-import { defineConfig, type DoctorOptions, type InitOptions, type RunOptions } from "../src/mod.ts";
+import {
+  defineConfig,
+  type DeliverInput,
+  type DoctorOptions,
+  type InitOptions,
+  type RunOptions,
+} from "../src/mod.ts";
 import { memoryTracker, recordingWorker } from "../src/testing/mod.ts";
 
 const silent = { write(_chunk?: string) { return true; } };
@@ -61,8 +67,10 @@ Commands:
   init [--answers <file>]
   run [--preview] --max <n> [--base <commit-ish>] [--allow-stale-base] [--ticket <id-or-url> ...] [--root <parent>] [--model <id>] [--permissions ask|unattended] [--effort low|medium|high|xhigh|max]
   doctor [--ticket <id-or-url> ...] [--root <parent>] [--allow-stale-base]
+  deliver --mode <name> --branch <run-branch> [--preview] [--draft] [--label <name> ...]
 
 A Run cannot start without a cap; an explicit --ticket list defaults the cap to its length. --root runs a parent's children; the parent is never worked. A base nobody named that stands stale behind origin refuses the Run until --allow-stale-base says otherwise; a base named by --base is only warned. run --preview prints the Plan — Doctor's verdict, the Frontier in pick order, the base, the Run Branch, the cap, the Tickets waiting — and the equivalent run command; nothing starts.
+deliver publishes a Run Branch's settled history (ADR 0048): --mode is a built-in (family-pr, stack, main) or a registered Delivery strategy, --branch names the Run Branch, and --draft/--label are creation options of the pull requests. deliver --preview prints the Delivery's Plan — what would be pushed, which PRs opened, on which bases — and the equivalent command; nothing is published.
 `;
 
 test("bare readyrun prints usage rather than opening the Launcher", async () => {
@@ -676,6 +684,129 @@ test("a config that fails to load names a next action without a Doctor prefix", 
       assert.match(output, /Could not load the ReadyRun config/);
       assert.match(output, /Fix the config file/);
       assert.doesNotMatch(output, /Doctor:/);
+    },
+  );
+});
+
+test("deliver parses --mode and --branch, plus the birth options and the preview", async () => {
+  const delivered: DeliverInput[] = [];
+  const previews: DeliverInput[] = [];
+  await cli({
+    argv: [
+      "deliver",
+      "--mode",
+      "family-pr",
+      "--branch",
+      "readyrun/run-20261018-120000",
+      "--draft",
+      "--label",
+      "review-me",
+    ],
+    stdout: silent,
+    loadConfig: async () => config,
+    deliver: async (options) => {
+      delivered.push(options);
+      return 0;
+    },
+    previewDelivery: async (options) => {
+      previews.push(options);
+      return 0;
+    },
+  });
+  assert.equal(delivered.length, 1);
+  assert.equal(delivered[0]?.mode, "family-pr");
+  assert.equal(delivered[0]?.branch, "readyrun/run-20261018-120000");
+  assert.equal(delivered[0]?.draft, true);
+  assert.deepEqual(delivered[0]?.labels, ["review-me"]);
+  assert.equal(previews.length, 0);
+
+  await cli({
+    argv: [
+      "deliver",
+      "--mode",
+      "main",
+      "--branch",
+      "readyrun/run-20261018-120000",
+      "--preview",
+    ],
+    stdout: silent,
+    loadConfig: async () => config,
+    deliver: async (options) => {
+      delivered.push(options);
+      return 0;
+    },
+    previewDelivery: async (options) => {
+      previews.push(options);
+      return 0;
+    },
+  });
+  assert.equal(previews.length, 1);
+  assert.equal(previews[0]?.mode, "main");
+  assert.equal(previews[0]?.draft, undefined);
+  assert.equal(previews[0]?.labels, undefined);
+});
+
+test("deliver refuses a missing mode, a missing branch, and unknown flags, each by name", async () => {
+  for (const [argv, message] of [
+    [["deliver"], /deliver requires --mode <name>/],
+    [["deliver", "--mode", "main"], /deliver requires --branch <run-branch>/],
+    [["deliver", "--mode"], /--mode requires a Delivery mode name/],
+    [["deliver", "--mode", "main", "--branch"], /--branch requires a Run Branch name/],
+    [["deliver", "--mode", "main", "--branch", "b", "--ship"], /deliver accepts --mode/],
+    [
+      [
+        "deliver",
+        "--mode",
+        "main",
+        "--branch",
+        "b",
+        "--label",
+      ],
+      /--label requires a label name/,
+    ],
+  ] as const) {
+    const chunks: string[] = [];
+    const exitCode = await cli({
+      argv: [...argv],
+      stdout: {
+        write(chunk: string) {
+          chunks.push(chunk);
+          return true;
+        },
+      },
+      loadConfig: async () => config,
+      deliver: async () => {
+        throw new Error("deliver must not be invoked on a refused surface");
+      },
+    });
+    assert.equal(exitCode, 1, argv.join(" "));
+    assert.match(chunks.join(""), message, argv.join(" "));
+  }
+});
+
+test("deliver loads the Consumer's config before the Delivery runs", async () => {
+  await withConsumerRoot(
+    async (cwd) => {
+      await writeFile(
+        join(cwd, "package.json"),
+        JSON.stringify({ type: "module" }),
+      );
+    },
+    async (cwd) => {
+      const chunks: string[] = [];
+      const exitCode = await cli({
+        argv: ["deliver", "--mode", "main", "--branch", "readyrun/run-1"],
+        cwd,
+        stdout: {
+          write(chunk: string) {
+            chunks.push(chunk);
+            return true;
+          },
+        },
+        deliver: async () => 0,
+      });
+      assert.equal(exitCode, 1);
+      assert.match(chunks.join(""), /No readyrun\.config\.ts/);
     },
   );
 });

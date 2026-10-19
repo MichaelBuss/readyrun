@@ -14,6 +14,11 @@ export type MemoryTrackerOptions = {
   ids?: string[];
   existingLabels?: string[];
   canExpressBlocking?: boolean;
+  /**
+   * The forge fact `inspect()` answers, as a forge-backed Tracker Adapter
+   * would (ADR 0048); absent is forgeless.
+   */
+  forge?: string;
 };
 
 export function memoryTracker(options: MemoryTrackerOptions): TrackerAdapter {
@@ -99,6 +104,23 @@ export function memoryTracker(options: MemoryTrackerOptions): TrackerAdapter {
       ineligible.add(ticket.id);
       return Promise.resolve();
     },
+    tickets(ids) {
+      const refused = ids.find((id) => !known.has(id));
+      if (refused !== undefined) {
+        return Promise.reject(
+          new Error(`Ticket ${refused} does not exist on the Tracker`),
+        );
+      }
+      // Left-Frontier Tickets answer here: they are on the Tracker the way a
+      // label-dropped GitHub issue is open, and delivery reads them for the
+      // facts — parent among them — the Frontier never needs again (ADR 0048).
+      return Promise.resolve(
+        ids.flatMap((id) => {
+          const found = options.tickets.find((ticket) => ticket.id === id);
+          return found === undefined ? [] : [found];
+        }),
+      );
+    },
     promptCopy(ticket) {
       return `This Ticket is ${ticket.id} on the in-memory Tracker.\nTitle: ${ticket.title}\n\n${ticket.body}\n\n${ticket.url}`;
     },
@@ -113,6 +135,7 @@ export function memoryTracker(options: MemoryTrackerOptions): TrackerAdapter {
         existingLabels,
         selectorLabels: options.labels,
         canExpressBlocking: options.canExpressBlocking ?? true,
+        ...(options.forge === undefined ? {} : { forge: options.forge }),
       });
     },
   });
