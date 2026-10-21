@@ -14,6 +14,7 @@ import {
   collectTicket,
   createTicketWorktree,
   describeEscape,
+  MergeDidNotLandError,
   shortCommit,
   worktreeIsClean,
   WorktreeNotRemovedError,
@@ -125,6 +126,7 @@ function hardStop(
   worktree: string | undefined,
   nextAction?: string,
   landing?: Landing,
+  survivingBranch?: string,
 ): 1 {
   const ticketPrefix = ticketId === undefined ? "" : `Ticket ${ticketId} `;
   const suffix = detail === undefined ? "" : `: ${detail}`;
@@ -140,6 +142,16 @@ function hardStop(
       `Ticket ${ticketId}'s work landed on ${landing.runBranch} as ${
         shortCommit(landing.mergeCommit)
       }, but the Tracker was not updated; the Ticket is still on the Frontier. Take it off the Frontier by hand before continuing.\n`,
+    );
+  }
+  if (survivingBranch !== undefined) {
+    // The one stop that lands nothing yet leaves the Worker's commits sitting
+    // in the repo (ADR 0049): the Worktree was removed before the merge and
+    // the Branch is deleted only after the ref write succeeds, so the Branch
+    // is all that holds the work — and its derived name blocks the Ticket
+    // from being picked again until it is dealt with.
+    stdout.write(
+      `Ticket ${ticketId}'s Branch ${survivingBranch} survived the failed merge and holds the Worker's commits. Recover the work from that Branch or delete it before the Ticket is picked again.\n`,
     );
   }
   if (worktree !== undefined) {
@@ -312,6 +324,7 @@ export async function runPlan(
       detail?: string,
       nextAction?: string,
       landing?: Landing,
+      survivingBranch?: string,
     ): 1 => {
       live.stop();
       return hardStop(
@@ -324,6 +337,7 @@ export async function runPlan(
         keptWorktree,
         nextAction,
         landing,
+        survivingBranch,
       );
     };
     const base = plan.base;
@@ -526,6 +540,13 @@ export async function runPlan(
         // disk: the collect removes before it merges, so a merge failure has
         // nothing left to keep and the report must not claim one.
         const kept = error instanceof WorktreeNotRemovedError;
+        // The merge is the one failure that leaves the Ticket's Branch holding
+        // the Worker's commits with nothing landed — the Branch is deleted only
+        // after the ref write succeeds — so it is the one stop the report names
+        // a surviving Branch for (ADR 0049). A failure after the write, the
+        // Branch delete, is a different window where the Landing already
+        // exists, and reports as it did before.
+        const didNotLand = error instanceof MergeDidNotLandError;
         if (!kept) {
           keptWorktree = undefined;
         }
@@ -533,7 +554,14 @@ export async function runPlan(
         const mergeFailure = gitError === undefined
           ? "ReadyRun could not merge the Ticket's Branch into the Run Branch"
           : `ReadyRun could not merge the Ticket's Branch into the Run Branch. ${gitError}`;
-        return stop("git", ticket.id, kept ? gitError : mergeFailure);
+        return stop(
+          "git",
+          ticket.id,
+          kept || didNotLand ? gitError : mergeFailure,
+          undefined,
+          undefined,
+          didNotLand ? branch : undefined,
+        );
       }
       keptWorktree = undefined;
       runBranchTip = landing.mergeCommit;

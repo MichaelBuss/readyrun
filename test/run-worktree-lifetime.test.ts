@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { chmodSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createTrackerAdapter, defineConfig, run } from "../src/mod.ts";
@@ -169,6 +170,52 @@ test("re-running a Ticket whose Worktree was kept still hard-stops with Worktree
     assert.match(chunks.join(""), /git branch -D readyrun\/52/);
     assert.equal(await onDisk(worktreeOf(repo.cwd, "52")), true);
   } finally {
+    await repo.cleanup();
+  }
+});
+
+test("a collect that cannot remove the Worktree hard-stops with the removal error and the kept-Worktree line, naming no surviving Branch", async () => {
+  const repo = await throwawayRepo();
+  const worktrees = join(repo.cwd, ".readyrun", "worktrees");
+  const chunks: string[] = [];
+  try {
+    const exitCode = await run({
+      config: defineConfig({
+        tracker: tracker(),
+        worker: createWorkerAdapter({
+          async spawn(request) {
+            await commitWorkerWork(request);
+            // Removing the Worktree deletes it from its parent, so a read-only
+            // parent fails the removal after the Worker's success checks — the
+            // one collect failure that keeps the Worktree on disk (ADR 0029).
+            chmodSync(worktrees, 0o500);
+            return { exitCode: 0 };
+          },
+        }),
+        model: "composer-2",
+      }),
+      cap: 1,
+      cwd: repo.cwd,
+      stdout: {
+        write(chunk: string) {
+          chunks.push(chunk);
+          return true;
+        },
+      },
+    });
+
+    assert.equal(exitCode, 1);
+    const output = chunks.join("");
+    assert.match(
+      output,
+      /Hard stop: Ticket 52 failed at git: ReadyRun could not remove the Worktree at .*readyrun-52/,
+    );
+    assert.match(output, /Worktree kept at .*readyrun-52/);
+    // No surviving-Branch line: the merge never ran, so nothing about it.
+    assert.doesNotMatch(output, /survived the failed merge/);
+    assert.equal(await onDisk(worktreeOf(repo.cwd, "52")), true);
+  } finally {
+    chmodSync(worktrees, 0o755);
     await repo.cleanup();
   }
 });

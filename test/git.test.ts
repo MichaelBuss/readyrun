@@ -4,7 +4,7 @@ import { access, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
-import { captureRepoSnapshot, collectTicket, createTicketWorktree, describeEscape, headCommit, originRepository, WorktreeExistsError, WorktreeNotRemovedError } from "../src/git.ts";
+import { captureRepoSnapshot, collectTicket, createTicketWorktree, describeEscape, headCommit, MergeDidNotLandError, originRepository, WorktreeExistsError, WorktreeNotRemovedError } from "../src/git.ts";
 import { commitNpmConsumer, commitRepoFiles, git, onDisk, throwawayRepo } from "./throwaway-repo.ts";
 
 const exec = promisify(execFile);
@@ -225,13 +225,15 @@ test("collectTicket leaves no Run Branch behind when it cannot merge the Ticket'
     );
     await git(repo.cwd, ["branch", "readyrun"]);
 
+    // Typed: it is the window before the ref write — nothing landed and the
+    // Branch survives — that a report may name a surviving Branch for.
     await assert.rejects(collectTicket(repo.cwd, {
       runBranch: "readyrun/run-20260902-193300",
       branch: "work/52",
       base,
       message: "Ticket 52: Fix the thing",
       worktree: worktreePath,
-    }));
+    }), MergeDidNotLandError);
 
     await assert.rejects(exec("git", [
       "-C",
