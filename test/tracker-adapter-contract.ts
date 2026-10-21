@@ -563,6 +563,53 @@ export function trackerAdapterContract(
     );
   });
 
+  // The blocking relation's other half (ADR 0050): the blockers the Tracker
+  // stopped counting travel on the answer, so the Plan can walk their merge
+  // markers against the base. No git: the same Tracker judgment that answers
+  // `blockedBy` answers this, which the in-memory Tracker proves by satisfying
+  // this contract.
+  test(`${name}: the answer carries the blockers that left the Frontier, judged by the same blocking facts and needing no git`, async () => {
+    const adapter = await create({
+      tickets: [
+        ticket({ id: "52" }),
+        ticket({ id: "53", blockedBy: ["52"] }),
+        ticket({ id: "54", blockedBy: ["52", "55"] }),
+        ticket({ id: "55" }),
+      ],
+      ready: "unblocked",
+      labels: ["ready-for-agent"],
+    });
+
+    const before = await adapter.frontier();
+    const finished = before.find((ticket) => ticket.id === "52");
+    assert.ok(finished);
+    await adapter.leaveFrontier(finished, landing());
+
+    // The graduated Ticket is on the Frontier with the blocker that left it
+    // named; the Ticket still waiting on a second blocker names the one that
+    // left; the never-blocked Ticket carries none.
+    const frontier = await adapter.frontier();
+    assert.deepEqual(
+      frontier.find((ticket) => ticket.id === "53")?.leftFrontierBlockers,
+      ["52"],
+    );
+    assert.equal(
+      frontier.find((ticket) => ticket.id === "55")?.leftFrontierBlockers,
+      undefined,
+    );
+    const waiting = await adapter.waiting();
+    assert.deepEqual(
+      waiting.find((ticket) => ticket.id === "54")?.leftFrontierBlockers,
+      ["52"],
+    );
+    // The tree's halves answer the same facts.
+    const tree = await adapter.tree();
+    assert.deepEqual(
+      tree.frontier.find((ticket) => ticket.id === "53")?.leftFrontierBlockers,
+      ["52"],
+    );
+  });
+
   test(`${name}: tickets answers named Tickets by id, including one that left the Frontier`, async () => {
     const adapter = await create({
       tickets: [
