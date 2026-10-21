@@ -278,7 +278,7 @@ test("a Tracker failure finishing a Ticket hard-stops the Run and names its Land
       config: defineConfig({
         tracker: createTrackerAdapter({
           frontier: () => inner.frontier(),
-          branchName: (item) => inner.branchName(item),
+          branchName: (ticket) => inner.branchName(ticket),
           leaveFrontier() {
             return Promise.reject(new Error("GitHub API 500"));
           },
