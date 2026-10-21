@@ -14,6 +14,7 @@ import {
   collectTicket,
   createTicketWorktree,
   describeEscape,
+  MergeDidNotLandError,
   shortCommit,
   worktreeIsClean,
   WorktreeNotRemovedError,
@@ -539,6 +540,13 @@ export async function runPlan(
         // disk: the collect removes before it merges, so a merge failure has
         // nothing left to keep and the report must not claim one.
         const kept = error instanceof WorktreeNotRemovedError;
+        // The merge is the one failure that leaves the Ticket's Branch holding
+        // the Worker's commits with nothing landed — the Branch is deleted only
+        // after the ref write succeeds — so it is the one stop the report names
+        // a surviving Branch for (ADR 0049). A failure after the write, the
+        // Branch delete, is a different window where the Landing already
+        // exists, and reports as it did before.
+        const didNotLand = error instanceof MergeDidNotLandError;
         if (!kept) {
           keptWorktree = undefined;
         }
@@ -546,19 +554,13 @@ export async function runPlan(
         const mergeFailure = gitError === undefined
           ? "ReadyRun could not merge the Ticket's Branch into the Run Branch"
           : `ReadyRun could not merge the Ticket's Branch into the Run Branch. ${gitError}`;
-        // A merge failure after that removal leaves the Ticket's Branch —
-        // deleted only once the ref write succeeds — holding the Worker's
-        // commits with nothing landed, so the report names what survives and
-        // the manual step (ADR 0049). The Branch's derived name blocks the
-        // Ticket from being picked again until it is dealt with, so the step
-        // is not cosmetic.
         return stop(
           "git",
           ticket.id,
-          kept ? gitError : mergeFailure,
+          kept || didNotLand ? gitError : mergeFailure,
           undefined,
           undefined,
-          kept ? undefined : branch,
+          didNotLand ? branch : undefined,
         );
       }
       keptWorktree = undefined;

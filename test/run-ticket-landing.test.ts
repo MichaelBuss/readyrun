@@ -5,8 +5,10 @@ import { test } from "node:test";
 import { createTrackerAdapter, defineConfig, run } from "../src/mod.ts";
 import type { Landing } from "../src/mod.ts";
 import { memoryTracker, recordingWorker } from "../src/testing/mod.ts";
+import { createWorkerAdapter } from "../src/worker-adapter.ts";
 import { ticket } from "./tracker-adapter-contract.ts";
 import {
+  commitWorkerWork,
   git,
   onDisk,
   runBranch,
@@ -216,6 +218,60 @@ test("a merge failure on a later Ticket still names the standing Run Branch and 
       git(repo.cwd, ["rev-parse", "--verify", "refs/heads/work/52"]),
     );
     await git(repo.cwd, ["rev-parse", "--verify", "refs/heads/work/57"]);
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("a Branch-delete failure after the merge landed names no surviving Branch", async () => {
+  const repo = await throwawayRepo();
+  const chunks: string[] = [];
+  try {
+    const exitCode = await run({
+      config: defineConfig({
+        tracker: memoryTracker({
+          tickets: [ticket({ id: "52" })],
+          ready: "unblocked",
+          labels: ["ready-for-agent"],
+        }),
+        worker: createWorkerAdapter({
+          async spawn(request) {
+            await commitWorkerWork(request);
+            // A stale lock on the Ticket's own Branch ref fails the collect's
+            // delete — the window after the merge's ref write succeeded, where
+            // the Landing already exists. The report must not claim the merge
+            // failed or the Branch holds the work: it does not, and it landed.
+            await writeFile(
+              join(repo.cwd, ".git", "refs", "heads", "readyrun", "52.lock"),
+              "",
+            );
+            return { exitCode: 0 };
+          },
+        }),
+        model: "composer-2",
+      }),
+      cap: 1,
+      cwd: repo.cwd,
+      stdout: {
+        write(chunk: string) {
+          chunks.push(chunk);
+          return true;
+        },
+      },
+    });
+
+    assert.equal(exitCode, 1);
+    const output = chunks.join("");
+    assert.doesNotMatch(output, /survived the failed merge/);
+    // The report reads as it did before this report gained the sentence.
+    assert.match(
+      output,
+      /Hard stop: Ticket 52 failed at git: ReadyRun could not merge the Ticket's Branch into the Run Branch/,
+    );
+    // The merge did land: the Run Branch ref exists, and the failed delete
+    // leaves the Ticket's Branch behind with nothing to recover.
+    assert.equal((await runBranches(repo.cwd)).length, 1);
+    await git(repo.cwd, ["rev-parse", "--verify", "refs/heads/readyrun/52"]);
   } finally {
     await repo.cleanup();
   }
