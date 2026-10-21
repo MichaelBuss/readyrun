@@ -80,13 +80,25 @@ export function memoryTracker(options: MemoryTrackerOptions): TrackerAdapter {
   }
   const unblocked = (ticket: Ticket): boolean =>
     ticket.blockedBy.every((id) => ineligible.has(id));
+  // The blocking relation's other half: the blockers this Tracker's own
+  // transition (leaveFrontier) removed from `blockedBy`'s judgment, carried
+  // on the answer so the Plan can walk their merge markers against the base
+  // (ADR 0050). A fact of the in-memory state alone — no git — which is the
+  // contract's proof the blocking facts never needed git.
+  function withLeftFrontierBlockers(ticket: Ticket): Ticket {
+    const left = ticket.blockedBy.filter((id) => ineligible.has(id));
+    return left.length === 0 ? ticket : { ...ticket, leftFrontierBlockers: left };
+  }
+  function answer(tickets: Ticket[]): Ticket[] {
+    return tickets.map(withLeftFrontierBlockers);
+  }
   return createTrackerAdapter({
     async frontier(root) {
-      return pickOrder(candidates(root).filter(unblocked));
+      return pickOrder(answer(candidates(root).filter(unblocked)));
     },
     async waiting(root) {
       refuseWhenBlockingUnexpressable();
-      return pickOrder(candidates(root).filter((ticket) => !unblocked(ticket)));
+      return pickOrder(answer(candidates(root).filter((ticket) => !unblocked(ticket))));
     },
     async tree(root) {
       refuseWhenBlockingUnexpressable();
@@ -96,8 +108,8 @@ export function memoryTracker(options: MemoryTrackerOptions): TrackerAdapter {
         parent: effective?.kind === "parent"
           ? options.tickets.find((ticket) => ticket.id === effective.id)
           : undefined,
-        frontier: pickOrder(all.filter(unblocked)),
-        waiting: pickOrder(all.filter((ticket) => !unblocked(ticket))),
+        frontier: pickOrder(answer(all.filter(unblocked))),
+        waiting: pickOrder(answer(all.filter((ticket) => !unblocked(ticket)))),
       };
     },
     leaveFrontier(ticket) {
@@ -115,10 +127,10 @@ export function memoryTracker(options: MemoryTrackerOptions): TrackerAdapter {
       // label-dropped GitHub issue is open, and delivery reads them for the
       // facts — parent among them — the Frontier never needs again (ADR 0048).
       return Promise.resolve(
-        ids.flatMap((id) => {
+        answer(ids.flatMap((id) => {
           const found = options.tickets.find((ticket) => ticket.id === id);
           return found === undefined ? [] : [found];
-        }),
+        })),
       );
     },
     promptCopy(ticket) {

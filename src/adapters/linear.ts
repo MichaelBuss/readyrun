@@ -471,27 +471,38 @@ function matchesSelector(
   return true;
 }
 
-function blockedBy(node: IssueNode): string[] {
-  return (node.inverseRelations?.nodes ?? []).flatMap((relation) => {
+// The blocking relation's two halves, judged by the same test: a blocker
+// only still blocks while it has not left the Frontier (In Review is where a
+// landed Ticket sits). The blockers that left are kept on the Ticket so the
+// Plan can walk their merge markers against the base (ADR 0050).
+function blockingFacts(node: IssueNode): {
+  blockedBy: string[];
+  leftFrontierBlockers: string[];
+} {
+  const blockedBy: string[] = [];
+  const leftFrontierBlockers: string[] = [];
+  for (const relation of node.inverseRelations?.nodes ?? []) {
     if (relation === null || relation.type !== "blocks") {
-      return [];
+      continue;
     }
     const blocker = relation.issue;
-    if (hasLeftFrontier(blocker.state)) {
-      return [];
-    }
-    return [blocker.identifier];
-  });
+    (hasLeftFrontier(blocker.state) ? leftFrontierBlockers : blockedBy).push(
+      blocker.identifier,
+    );
+  }
+  return { blockedBy, leftFrontierBlockers };
 }
 
 function toTicket(node: IssueNode): Ticket {
+  const { blockedBy, leftFrontierBlockers } = blockingFacts(node);
   return {
     id: node.identifier,
     title: node.title,
     body: node.description ?? "",
     url: node.url,
     labels: names(node.labels.nodes),
-    blockedBy: blockedBy(node),
+    blockedBy,
+    ...(leftFrontierBlockers.length > 0 ? { leftFrontierBlockers } : {}),
     parent: node.parent === null ? undefined : node.parent.identifier,
     suggestedBranch: node.branchName === null || node.branchName.length === 0
       ? undefined

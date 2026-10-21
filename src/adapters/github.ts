@@ -396,16 +396,23 @@ export function github(
 
 function toTicket(node: IssueNode, selectorLabels: readonly string[]): Ticket {
   const labels = names(node.labels.nodes);
-  const blockedBy = (node.blockedBy?.nodes ?? []).flatMap((blocker) => {
+  // The blocking relation's two halves, judged by the same test: an open
+  // blocker only still blocks while it matches the selector (success drops
+  // labels and does not close). The blockers that no longer block are the
+  // ones that left the Frontier — kept on the Ticket so the Plan can walk
+  // their merge markers against the base (ADR 0050).
+  const blockedBy: string[] = [];
+  const leftFrontierBlockers: string[] = [];
+  for (const blocker of node.blockedBy?.nodes ?? []) {
     if (blocker === null) {
-      return [];
+      continue;
     }
-    // Success drops labels and does not close, so an open blocker only still
-    // blocks while it matches the selector.
     const stillBlocking = blocker.state === "OPEN" &&
       selectorLabels.every((label) => names(blocker.labels.nodes).includes(label));
-    return stillBlocking ? [String(blocker.number)] : [];
-  });
+    (stillBlocking ? blockedBy : leftFrontierBlockers).push(
+      String(blocker.number),
+    );
+  }
   return {
     id: String(node.number),
     title: node.title,
@@ -413,6 +420,7 @@ function toTicket(node: IssueNode, selectorLabels: readonly string[]): Ticket {
     url: node.url,
     labels,
     blockedBy,
+    ...(leftFrontierBlockers.length > 0 ? { leftFrontierBlockers } : {}),
     parent: node.parent === null ? undefined : String(node.parent.number),
   };
 }

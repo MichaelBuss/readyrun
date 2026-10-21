@@ -8,6 +8,7 @@ import {
   warnUnusedModelsByLabel,
 } from "./doctor.ts";
 import { startLiveness, type Liveness, type LivenessStdout } from "./liveness.ts";
+import { writeMarkerGaps } from "./merge-marker.ts";
 import {
   branchTreeDiffersFrom,
   captureRepoSnapshot,
@@ -342,6 +343,9 @@ export async function runPlan(
     };
     const base = plan.base;
     await discloseBase(stdout, base, cwd);
+    // The Plan's marker disclosure, in the same words the preview and Doctor
+    // say them (ADR 0050): a warning about the base's markers, never a gate.
+    writeMarkerGaps(stdout, plan.markerGaps);
     stdout.write(`Run Branch: ${runBranch}\n`);
     const complete = async (reason: CleanStop): Promise<0> => {
       live.stop();

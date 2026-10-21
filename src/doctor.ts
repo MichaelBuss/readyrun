@@ -12,6 +12,7 @@ import {
 import { unignoredInstallOutput } from "./install.ts";
 import { normalizeRepository } from "./repository.ts";
 import { startLiveness, type LivenessStdout } from "./liveness.ts";
+import { markerGaps, writeMarkerGaps } from "./merge-marker.ts";
 import {
   rootViolationMessages,
   warnWaitingRootTickets,
@@ -463,6 +464,13 @@ export async function doctor(options: DoctorOptions): Promise<number> {
     const frontier = verdict.frontier ??
       await config.tracker.frontier(options.root);
     live.stop();
+    // The marker disclosure, in the same words Run start and the preview say
+    // them (ADR 0050): a warning measured against the base Doctor already
+    // resolved, never a failure — and skipped with the base, which is what
+    // the walk reads.
+    if (base !== undefined) {
+      writeMarkerGaps(stdout, await markerGaps(cwd, base.commit, frontier));
+    }
     const root = options.root;
     if (root !== undefined) {
       // Root violations rode the verdict's failures, written above; what is

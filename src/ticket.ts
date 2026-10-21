@@ -15,6 +15,15 @@ export type Ticket = {
   labels: string[];
   /** The ids of open Tickets blocking this one; empty when unblocked. */
   blockedBy: string[];
+  /**
+   * The ids of blockers that have left the Frontier — the blocking relation's
+   * other half, which `unblocked` drops to make the Ticket eligible (ADR 0016)
+   * and ADR 0050 hands to the Plan so it can check the blockers' merge markers
+   * against the base. The same Tracker judgment that answered `blockedBy`
+   * answers this, so an Adapter needs no git to carry it; absent means the
+   * Adapter answers none.
+   */
+  leftFrontierBlockers?: string[];
   /** The id of the parent Ticket, when the Tracker knows one. */
   parent?: string;
   /**
