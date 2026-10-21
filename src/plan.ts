@@ -7,6 +7,7 @@ import {
 } from "./doctor.ts";
 import { resolveRunBase, type RunBase, runBranchName } from "./git.ts";
 import type { Liveness, LivenessStdout } from "./liveness.ts";
+import { markerGaps, writeMarkerGaps, type MarkerGap } from "./merge-marker.ts";
 import type { Ticket } from "./ticket.ts";
 import type { FrontierRoot } from "./tracker-adapter.ts";
 import type { Effort, Permissions } from "./worker-adapter.ts";
@@ -125,6 +126,14 @@ export type Plan = {
   cap: number;
   capSource: CapSource;
   root?: FrontierRoot;
+  /**
+   * The Frontier Tickets whose left-the-Frontier blockers' merge markers the
+   * base does not contain (ADR 0050) — computed once with the Plan, rendered
+   * by Run start, the preview, and Doctor, and never a gate. Empty is the
+   * good case and the common one; the walk only runs when a Frontier Ticket
+   * carries left-the-Frontier blockers at all.
+   */
+  markerGaps: MarkerGap[];
   command: string;
   /** The Effort and Permissions this Run's Workers spawn under. */
   settings: { effort?: Effort; permissions: Permissions };
@@ -234,6 +243,12 @@ export async function computePlan(
       message: error instanceof Error ? error.message : String(error),
     };
   }
+  // The marker disclosure rides the Plan's one computation (ADR 0050): the
+  // Frontier's left-the-Frontier blockers against the resolved base's
+  // first-parent history. Best-effort on both ends — an Adapter that answers
+  // no left blockers and a history git cannot walk both leave it empty — and
+  // computed for a refused Plan too, which the preview renders whole.
+  const gaps = await markerGaps(cwd, base.commit, frontier);
   return {
     doctorFailures: verdict.failures,
     frontier,
@@ -243,6 +258,7 @@ export async function computePlan(
     cap,
     capSource: source,
     root,
+    markerGaps: gaps,
     command: equivalentRunCommand({
       cap,
       base: options.base,
@@ -353,6 +369,10 @@ export async function renderPlan(
     }
   }
   await discloseBase(stdout, plan.base, cwd);
+  // The marker disclosure renders wherever the Plan renders, in the same
+  // words Run start and Doctor say (ADR 0050) — after the base, which is
+  // what the gaps are measured against.
+  writeMarkerGaps(stdout, plan.markerGaps);
   stdout.write(
     `Run Branch: ${plan.runBranch} (named when the Plan is computed)\n`,
   );

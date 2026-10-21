@@ -77,6 +77,7 @@ export { run, runPlan, RunCapRequiredError } from "./run.ts";
 export type { RunOptions, RunRuntime } from "./run.ts";
 export { computePlan, preview, renderPlan } from "./plan.ts";
 export type { Plan, PlanInput, PlanWaiting } from "./plan.ts";
+export type { MarkerGap } from "./merge-marker.ts";
 export {
   BaseNotFoundError,
   DefaultBranchError,

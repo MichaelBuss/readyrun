@@ -198,6 +198,23 @@ export async function firstParentRange(
   return commits;
 }
 
+// The first-parent subjects reachable from a commit, newest first — the
+// history the merge-marker disclosure walks (ADR 0050), which is the same
+// first-parent line delivery's merge parser reads. A walk that fails throws;
+// the disclosure decides what silence means.
+export async function firstParentSubjects(
+  cwd: string,
+  commit: string,
+): Promise<string[]> {
+  const lines = await gitLines(cwd, [
+    "rev-list",
+    "--first-parent",
+    "--format=%x00%s",
+    commit,
+  ]);
+  return lines.flatMap((line) => line.startsWith("\0") ? [line.slice(1)] : []);
+}
+
 // The tip of a local branch, or none when git has no such ref. Delivery's
 // Doctor reads it for the Run Branch's existence and the fast-forward's
 // source, the same fact `branchTip` gives the collect.
