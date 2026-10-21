@@ -125,6 +125,7 @@ function hardStop(
   worktree: string | undefined,
   nextAction?: string,
   landing?: Landing,
+  survivingBranch?: string,
 ): 1 {
   const ticketPrefix = ticketId === undefined ? "" : `Ticket ${ticketId} `;
   const suffix = detail === undefined ? "" : `: ${detail}`;
@@ -140,6 +141,16 @@ function hardStop(
       `Ticket ${ticketId}'s work landed on ${landing.runBranch} as ${
         shortCommit(landing.mergeCommit)
       }, but the Tracker was not updated; the Ticket is still on the Frontier. Take it off the Frontier by hand before continuing.\n`,
+    );
+  }
+  if (survivingBranch !== undefined) {
+    // The one stop that lands nothing yet leaves the Worker's commits sitting
+    // in the repo (ADR 0049): the Worktree was removed before the merge and
+    // the Branch is deleted only after the ref write succeeds, so the Branch
+    // is all that holds the work — and its derived name blocks the Ticket
+    // from being picked again until it is dealt with.
+    stdout.write(
+      `Ticket ${ticketId}'s Branch ${survivingBranch} survived the failed merge and holds the Worker's commits. Recover the work from that Branch or delete it before the Ticket is picked again.\n`,
     );
   }
   if (worktree !== undefined) {
@@ -312,6 +323,7 @@ export async function runPlan(
       detail?: string,
       nextAction?: string,
       landing?: Landing,
+      survivingBranch?: string,
     ): 1 => {
       live.stop();
       return hardStop(
@@ -324,6 +336,7 @@ export async function runPlan(
         keptWorktree,
         nextAction,
         landing,
+        survivingBranch,
       );
     };
     const base = plan.base;
@@ -533,7 +546,20 @@ export async function runPlan(
         const mergeFailure = gitError === undefined
           ? "ReadyRun could not merge the Ticket's Branch into the Run Branch"
           : `ReadyRun could not merge the Ticket's Branch into the Run Branch. ${gitError}`;
-        return stop("git", ticket.id, kept ? gitError : mergeFailure);
+        // A merge failure after that removal leaves the Ticket's Branch —
+        // deleted only once the ref write succeeds — holding the Worker's
+        // commits with nothing landed, so the report names what survives and
+        // the manual step (ADR 0049). The Branch's derived name blocks the
+        // Ticket from being picked again until it is dealt with, so the step
+        // is not cosmetic.
+        return stop(
+          "git",
+          ticket.id,
+          kept ? gitError : mergeFailure,
+          undefined,
+          undefined,
+          kept ? undefined : branch,
+        );
       }
       keptWorktree = undefined;
       runBranchTip = landing.mergeCommit;
