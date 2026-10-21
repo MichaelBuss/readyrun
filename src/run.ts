@@ -124,6 +124,7 @@ function hardStop(
   runBranch: string,
   worktree: string | undefined,
   nextAction?: string,
+  landing?: Landing,
 ): 1 {
   const ticketPrefix = ticketId === undefined ? "" : `Ticket ${ticketId} `;
   const suffix = detail === undefined ? "" : `: ${detail}`;
@@ -131,6 +132,16 @@ function hardStop(
   separateReport(stdout);
   stdout.write(`Hard stop: ${ticketPrefix}failed at ${stage}${suffix}${action}\n`);
   stdout.write(`${landingLine(landed, runBranch)}\n`);
+  if (landing !== undefined) {
+    // The one stop that leaves the Frontier holding finished work (ADR 0049):
+    // the Tracker was never told, so the report names the Landing and the
+    // manual step instead of leaving the next Run to rediscover it.
+    stdout.write(
+      `Ticket ${ticketId}'s work landed on ${landing.runBranch} as ${
+        shortCommit(landing.mergeCommit)
+      }, but the Tracker was not updated; the Ticket is still on the Frontier. Take it off the Frontier by hand before continuing.\n`,
+    );
+  }
   if (worktree !== undefined) {
     stdout.write(`Worktree kept at ${worktree}\n`);
   }
@@ -300,6 +311,7 @@ export async function runPlan(
       ticketId?: string,
       detail?: string,
       nextAction?: string,
+      landing?: Landing,
     ): 1 => {
       live.stop();
       return hardStop(
@@ -311,6 +323,7 @@ export async function runPlan(
         runBranch,
         keptWorktree,
         nextAction,
+        landing,
       );
     };
     const base = plan.base;
@@ -528,6 +541,8 @@ export async function runPlan(
       // After the merge, because the Landing the Ticket is about to name did not
       // exist before it — and because a merge that fails must leave the Ticket
       // on the Frontier rather than off it with nothing landed (ADR 0033).
+      // A failure here is the one stop that leaves landed work on the Frontier
+      // (ADR 0049), so the report carries the Landing it failed to file.
       try {
         if (config.leaveFrontier) {
           await config.leaveFrontier(ticket, landing);
@@ -540,6 +555,7 @@ export async function runPlan(
           ticket.id,
           caughtMessage(error),
           "Check the Tracker",
+          landing,
         );
       }
     }

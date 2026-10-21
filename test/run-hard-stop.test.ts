@@ -8,7 +8,7 @@ import { createTrackerAdapter, defineConfig, run } from "../src/mod.ts";
 import { memoryTracker, recordingWorker } from "../src/testing/mod.ts";
 import { createWorkerAdapter } from "../src/worker-adapter.ts";
 import { ticket } from "./tracker-adapter-contract.ts";
-import { commitMismatchedNpmLockfile, commitWorkerWork, runBranch, throwawayRepo } from "./throwaway-repo.ts";
+import { commitMismatchedNpmLockfile, commitWorkerWork, git, runBranch, throwawayRepo } from "./throwaway-repo.ts";
 
 const exec = promisify(execFile);
 const silent = { write(_chunk?: string) { return true; } };
@@ -264,7 +264,7 @@ test("a missing or unauthenticated Worker at spawn hard-stops the Run", async ()
   }
 });
 
-test("a Tracker failure finishing a Ticket hard-stops the Run and names that Ticket", async () => {
+test("a Tracker failure finishing a Ticket hard-stops the Run and names its Landing", async () => {
   const repo = await throwawayRepo();
   const worker = recordingWorker({ exitCode: 0 });
   const inner = memoryTracker({
@@ -278,7 +278,7 @@ test("a Tracker failure finishing a Ticket hard-stops the Run and names that Tic
       config: defineConfig({
         tracker: createTrackerAdapter({
           frontier: () => inner.frontier(),
-          branchName: (ticket) => inner.branchName(ticket),
+          branchName: (item) => inner.branchName(item),
           leaveFrontier() {
             return Promise.reject(new Error("GitHub API 500"));
           },
@@ -298,11 +298,88 @@ test("a Tracker failure finishing a Ticket hard-stops the Run and names that Tic
 
     assert.equal(exitCode, 1);
     assert.deepEqual(worker.spawns.map((spawn) => spawn.ticket.id), ["52"]);
+    const output = chunks.join("");
     assert.match(
-      chunks.join(""),
+      output,
       /Hard stop: Ticket 52 failed at tracker: GitHub API 500/,
     );
-    assert.match(chunks.join(""), /Check the Tracker/);
+    assert.match(output, /Check the Tracker/);
+    // The Landing, named: the Run Branch by its full ref, the merge commit short.
+    const branch = await runBranch(repo.cwd);
+    const mergeCommit = await git(repo.cwd, ["rev-parse", `refs/heads/${branch}`]);
+    assert.match(
+      output,
+      new RegExp(
+        `^Ticket 52's work landed on ${branch} as ${mergeCommit.slice(0, 7)}, ` +
+          `but the Tracker was not updated; the Ticket is still on the Frontier. ` +
+          `Take it off the Frontier by hand before continuing\\.$`,
+        "m",
+      ),
+    );
+    // The window the report compensates: the work landed anyway, and the
+    // Ticket the next Run would pick first is the one that is already done.
+    await git(repo.cwd, ["merge-base", "--is-ancestor", mergeCommit, branch]);
+    assert.deepEqual(
+      (await inner.frontier()).map((item) => item.id),
+      ["52", "57"],
+    );
+  } finally {
+    await repo.cleanup();
+  }
+});
+
+test("a Consumer's leaveFrontier override failing after a merge produces the same Landing report", async () => {
+  const repo = await throwawayRepo();
+  const worker = recordingWorker({ exitCode: 0 });
+  const tracker = memoryTracker({
+    tickets: [ticket({ id: "52" })],
+    ready: "unblocked",
+    labels: ["ready-for-agent"],
+  });
+  const chunks: string[] = [];
+  try {
+    const exitCode = await run({
+      config: defineConfig({
+        tracker,
+        worker,
+        model: "composer-2",
+        leaveFrontier() {
+          throw new Error("Linear rate limited");
+        },
+      }),
+      cap: 1,
+      cwd: repo.cwd,
+      stdout: {
+        write(chunk: string) {
+          chunks.push(chunk);
+          return true;
+        },
+      },
+    });
+
+    assert.equal(exitCode, 1);
+    const output = chunks.join("");
+    assert.match(
+      output,
+      /Hard stop: Ticket 52 failed at tracker: Linear rate limited/,
+    );
+    const branch = await runBranch(repo.cwd);
+    const mergeCommit = await git(repo.cwd, ["rev-parse", `refs/heads/${branch}`]);
+    assert.match(
+      output,
+      new RegExp(
+        `^Ticket 52's work landed on ${branch} as ${mergeCommit.slice(0, 7)}, ` +
+          `but the Tracker was not updated; the Ticket is still on the Frontier. ` +
+          `Take it off the Frontier by hand before continuing\\.$`,
+        "m",
+      ),
+    );
+    // The same handoff failing: the override is the only leaveFrontier there
+    // is, so the Tracker was never told and the Ticket stayed put.
+    assert.deepEqual(
+      (await tracker.frontier()).map((item) => item.id),
+      ["52"],
+    );
   } finally {
     await repo.cleanup();
   }
