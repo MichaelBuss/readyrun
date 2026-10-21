@@ -92,7 +92,7 @@ export function memoryTracker(options: MemoryTrackerOptions): TrackerAdapter {
   function answer(tickets: Ticket[]): Ticket[] {
     return tickets.map(withLeftFrontierBlockers);
   }
-  const createAdapter = createTrackerAdapter({
+  return createTrackerAdapter({
     async frontier(root) {
       return pickOrder(answer(candidates(root).filter(unblocked)));
     },
@@ -151,5 +151,4 @@ export function memoryTracker(options: MemoryTrackerOptions): TrackerAdapter {
       });
     },
   });
-  return createAdapter;
 }

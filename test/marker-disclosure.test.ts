@@ -246,7 +246,7 @@ test("a history walk that cannot answer renders no warning and no failure", asyn
   }
 });
 
-test("a Frontier whose Tickets answer no left-the-Frontier blockers walks no history", async () => {
+test("a Frontier whose Tickets answer no left-the-Frontier blockers renders no marker disclosure", async () => {
   const repo = await throwawayRepo();
   const out = capturing();
   try {
