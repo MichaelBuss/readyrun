@@ -1,5 +1,15 @@
 # @readyrun/readyrun
 
+## 0.3.1
+
+### Patch Changes
+
+- [#204](https://github.com/MichaelBuss/readyrun/pull/204) [`09479a2`](https://github.com/MichaelBuss/readyrun/commit/09479a2e7f7ae348686bb9acb247cba3b997fad0) Thanks [@MichaelBuss](https://github.com/MichaelBuss)! - A merge that fails at the collect — after the Ticket's Worktree was removed, before the Run Branch ref was written — now hard-stops with a report that names the Ticket's surviving Branch: the one place the Worker's commits still sit, since nothing landed and no Worktree was kept. The report names the manual step of recovering the work from that Branch or deleting it before the Ticket can be picked again ([#104](https://github.com/MichaelBuss/readyrun/issues/104), ADR 0049). The kept-Worktree hard stop and the landing line report exactly as before.
+
+- [#205](https://github.com/MichaelBuss/readyrun/pull/205) [`1bac95b`](https://github.com/MichaelBuss/readyrun/commit/1bac95bcb0458bc9bcc0a54183204218473a5291) Thanks [@MichaelBuss](https://github.com/MichaelBuss)! - The Plan discloses, best-effort and warning-only, any Frontier Ticket the Tracker reports unblocked whose blocker's merge marker the resolved base does not contain: for each such blocker it walks the base's first-parent history in the same `Ticket <id>:` grammar the Run's merges are written with, and run start, `run --preview`, and Doctor render the same warning in marker terms — the Tracker says unblocked; the base does not contain the marker — naming the landings that leave no marker (a squash, a family Delivery pull request, a hand merge that rewrote messages, a human-implemented blocker). It never refuses a Run, never changes what is picked, and is silent when the history cannot be read. Tracker Adapter answers widen with `leftFrontierBlockers`, the blocking relation's other half, and the shared contract covers it with no git ([#70](https://github.com/MichaelBuss/readyrun/issues/70), ADR 0050).
+
+- [#202](https://github.com/MichaelBuss/readyrun/pull/202) [`960a04d`](https://github.com/MichaelBuss/readyrun/commit/960a04d0cd581737113c263cfff0317578ae1908) Thanks [@MichaelBuss](https://github.com/MichaelBuss)! - A Tracker failure at the last step of a Ticket — `leaveFrontier` throwing after the Ticket's merge succeeded — now hard-stops with a report that names the Landing: the Ticket, the Run Branch it landed on, and the merge commit it landed as, plus the manual step of taking the Ticket off the Frontier by hand before continuing. That stop is the one place where the Frontier keeps finished work ([#114](https://github.com/MichaelBuss/readyrun/issues/114), ADR 0049); the report is the compensation, and Tracker failures before any Landing exists report exactly as before.
+
 ## 0.3.0
 
 ### Minor Changes
